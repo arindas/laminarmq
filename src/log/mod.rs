@@ -79,4 +79,7 @@ pub mod base {
     }
 }
 
+#[cfg(target_os = "linux")]
+pub mod glommio_impl;
+
 pub use self::base::*;
