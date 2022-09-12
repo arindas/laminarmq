@@ -1,1 +1,3 @@
-pub mod store;
+pub mod base {}
+
+pub use self::base::*;
