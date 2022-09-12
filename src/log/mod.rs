@@ -1,10 +1,17 @@
-pub mod base {
+use async_trait::async_trait;
+
+#[async_trait(?Send)]
+pub trait Scanner {
+    type Item;
+
+    async fn next(&mut self) -> Option<Self::Item>;
+}
+
+pub mod store {
     use async_trait::async_trait;
-    use futures_lite::{FutureExt, Stream};
-    use std::{
-        cell::Ref, marker::PhantomData, ops::Deref, path::Path, pin::Pin, result::Result,
-        task::Poll,
-    };
+    use std::{cell::Ref, marker::PhantomData, ops::Deref, path::Path, result::Result};
+
+    use super::Scanner;
 
     #[async_trait(?Send)]
     pub trait Store<Record>
@@ -25,7 +32,7 @@ pub mod base {
         fn path(&self) -> Result<Ref<Path>, Self::Error>;
     }
 
-    pub struct StoreStreamer<'a, Record, S>
+    pub struct StoreScanner<'a, Record, S>
     where
         Record: Deref<Target = [u8]>,
         S: Store<Record>,
@@ -36,7 +43,7 @@ pub mod base {
         _phantom_data: PhantomData<Record>,
     }
 
-    impl<'a, Record, S> StoreStreamer<'a, Record, S>
+    impl<'a, Record, S> StoreScanner<'a, Record, S>
     where
         Record: Deref<Target = [u8]>,
         S: Store<Record>,
@@ -54,32 +61,71 @@ pub mod base {
         }
     }
 
-    impl<'a, Record, S> Stream for StoreStreamer<'a, Record, S>
+    #[async_trait(?Send)]
+    impl<'a, Record, S> Scanner for StoreScanner<'a, Record, S>
     where
         Record: Deref<Target = [u8]> + Unpin,
         S: Store<Record>,
     {
         type Item = Record;
 
-        fn poll_next(
-            self: std::pin::Pin<&mut Self>,
-            cx: &mut std::task::Context<'_>,
-        ) -> Poll<Option<Self::Item>> {
-            let self_inner = Pin::into_inner(self);
-
-            match self_inner.store.read(self_inner.position).poll(cx) {
-                Poll::Ready(Ok(record)) => {
-                    self_inner.position += record.len() as u64;
-                    Poll::Ready(Some(record))
-                }
-                Poll::Ready(Err(_)) => Poll::Ready(None),
-                Poll::Pending => Poll::Pending,
+        async fn next(&mut self) -> Option<Self::Item> {
+            if let Ok(record) = self.store.read(self.position).await {
+                self.position += (record.len() + common::RECORD_HEADER_LENGTH) as u64;
+                return Some(record);
             }
+
+            None
+        }
+    }
+
+    pub mod common {
+        use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+
+        pub const STORE_FILE_EXTENSION: &str = "store";
+        pub const RECORD_HEADER_LENGTH: usize = 8;
+
+        pub struct RecordHeader {
+            pub checksum: u32,
+            pub length: u32,
+        }
+
+        impl RecordHeader {
+            pub fn from_record_bytes(record_bytes: &[u8]) -> Self {
+                Self {
+                    checksum: crc32fast::hash(record_bytes),
+                    length: record_bytes.len() as u32,
+                }
+            }
+
+            pub fn from_bytes(record_header_bytes: &[u8]) -> std::io::Result<Self> {
+                let mut cursor = std::io::Cursor::new(record_header_bytes);
+
+                let checksum = cursor.read_u32::<LittleEndian>()?;
+                let length = cursor.read_u32::<LittleEndian>()?;
+
+                Ok(Self { checksum, length })
+            }
+
+            pub fn as_bytes(self) -> std::io::Result<[u8; RECORD_HEADER_LENGTH]> {
+                let mut bytes = [0; RECORD_HEADER_LENGTH];
+
+                let buffer: &mut [u8] = &mut bytes;
+                let mut cursor = std::io::Cursor::new(buffer);
+
+                cursor.write_u32::<LittleEndian>(self.checksum)?;
+                cursor.write_u32::<LittleEndian>(self.length)?;
+
+                Ok(bytes)
+            }
+        }
+
+        #[inline]
+        pub fn is_checksum_valid(bytes: &[u8], checksum: u32) -> bool {
+            checksum == crc32fast::hash(bytes)
         }
     }
 }
 
 #[cfg(target_os = "linux")]
 pub mod glommio_impl;
-
-pub use self::base::*;

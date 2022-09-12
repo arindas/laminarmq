@@ -11,3 +11,5 @@ crc32fast = "1"
 bincode = "1"
 async-trait = "0.1.57"
 futures-lite = "1.12.0"
+byteorder = "1.4.3"
+serde = { version = "1.0.144", features = ["derive"] }
