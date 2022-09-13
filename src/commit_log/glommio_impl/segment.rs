@@ -2,7 +2,7 @@ use std::path::Path;
 
 use glommio::io::ReadResult;
 
-use crate::log::segment::{config::SegmentConfig, Segment, SegmentError};
+use crate::commit_log::segment::{config::SegmentConfig, Segment, SegmentError};
 
 use super::store::Store;
 
@@ -30,7 +30,7 @@ mod tests {
 
     use glommio::{LocalExecutorBuilder, Placement};
 
-    use crate::log::{
+    use crate::commit_log::{
         segment::SegmentScanner, store::common::STORE_FILE_EXTENSION, Record, Scanner,
     };
 

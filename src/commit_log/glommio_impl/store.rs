@@ -8,7 +8,7 @@ use glommio::{
     GlommioError,
 };
 
-use crate::log::store::common::{RecordHeader, RECORD_HEADER_LENGTH};
+use crate::commit_log::store::common::{RecordHeader, RECORD_HEADER_LENGTH};
 
 #[derive(Debug)]
 pub enum StoreError {
@@ -84,7 +84,7 @@ impl Store {
 }
 
 #[async_trait(?Send)]
-impl crate::log::store::Store<ReadResult> for Store {
+impl crate::commit_log::store::Store<ReadResult> for Store {
     type Error = StoreError;
 
     async fn append(&mut self, record_bytes: &[u8]) -> Result<(u64, usize), Self::Error> {
@@ -172,7 +172,7 @@ mod tests {
     use glommio::{LocalExecutorBuilder, Placement};
 
     use super::{Store, StoreError};
-    use crate::log::{
+    use crate::commit_log::{
         store::{
             common::{RECORD_HEADER_LENGTH, STORE_FILE_EXTENSION},
             Store as BaseStore, StoreScanner,

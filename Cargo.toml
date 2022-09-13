@@ -13,3 +13,15 @@ async-trait = "0.1.57"
 futures-lite = "1.12.0"
 byteorder = "1.4.3"
 serde = { version = "1.0.144", features = ["derive"] }
+
+[lib]
+name = "laminarmq"
+
+[[bin]]
+name = "laminarmq-client-cli"
+path = "./src/bin/laminarmq_client_cli.rs"
+
+[[bin]]
+name = "laminarmq-server"
+path = "./src/bin/laminarmq_server.rs"
+
