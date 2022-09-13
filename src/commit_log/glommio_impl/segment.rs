@@ -77,7 +77,7 @@ mod tests {
         let local_ex = LocalExecutorBuilder::new(Placement::Fixed(1))
             .spawn(move || async move {
                 const RECORD_VALUE: &[u8] = b"Hello World!";
-                let record = Record {
+                let mut record = Record {
                     value: Vec::from(RECORD_VALUE),
                     offset: 0,
                 };
@@ -95,11 +95,11 @@ mod tests {
                 .await
                 .unwrap();
 
-                let offset_1 = segment.append(Vec::from(RECORD_VALUE)).await.unwrap();
+                let offset_1 = segment.append(&mut record).await.unwrap();
                 assert_eq!(offset_1, 0);
                 assert_eq!(segment.next_offset(), record_representation_size);
 
-                let offset_2 = segment.append(Vec::from(RECORD_VALUE)).await.unwrap();
+                let offset_2 = segment.append(&mut record).await.unwrap();
                 assert_eq!(offset_2, record_representation_size);
 
                 assert_eq!(segment.size(), expected_segment_size);
@@ -123,7 +123,7 @@ mod tests {
                 assert!(segment.is_maxed());
 
                 matches!(
-                    segment.append(Vec::from(RECORD_VALUE)).await,
+                    segment.append(&mut record).await,
                     Err(SegmentError::SegmentMaxed)
                 );
 

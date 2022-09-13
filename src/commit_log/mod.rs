@@ -99,12 +99,10 @@ pub mod store {
         type Item = Record;
 
         async fn next(&mut self) -> Option<Self::Item> {
-            if let Ok(record) = self.store.read(self.position).await {
-                self.position += (record.len() + common::RECORD_HEADER_LENGTH) as u64;
-                return Some(record);
-            }
-
-            None
+            self.store.read(self.position).await.ok().map(|record| {
+                self.position += common::header_padded_record_length(&record);
+                record
+            })
         }
     }
 
@@ -117,6 +115,10 @@ pub mod store {
         pub struct RecordHeader {
             pub checksum: u32,
             pub length: u32,
+        }
+
+        pub fn header_padded_record_length(record: &[u8]) -> u64 {
+            (record.len() + RECORD_HEADER_LENGTH) as u64
         }
 
         impl RecordHeader {
@@ -225,9 +227,9 @@ pub mod segment {
             base_offset: u64,
             store: S,
         ) -> Self {
-            let intial_store_size = store.size();
-            let next_offset = if intial_store_size > 0 {
-                base_offset + intial_store_size
+            let initial_store_size = store.size();
+            let next_offset = if initial_store_size > 0 {
+                base_offset + initial_store_size
             } else {
                 base_offset
             };
@@ -253,7 +255,7 @@ pub mod segment {
             &self.store
         }
 
-        fn store_position(&self, offset: u64) -> Option<u64> {
+        pub fn store_position(&self, offset: u64) -> Option<u64> {
             match offset.checked_sub(self.base_offset()) {
                 Some(pos) if pos >= self.config.max_store_bytes => None,
                 Some(pos) => Some(pos),
@@ -269,19 +271,18 @@ pub mod segment {
             self.store.size()
         }
 
-        pub async fn append(&mut self, record_value: Vec<u8>) -> Result<u64, SegmentError<T, S>> {
+        pub async fn append(&mut self, record: &mut Record) -> Result<u64, SegmentError<T, S>> {
             if self.is_maxed() {
                 return Err(SegmentError::SegmentMaxed);
             }
 
+            let old_record_offset = record.offset;
+
             let current_offset = self.next_offset;
-            let record = Record {
-                value: record_value,
-                offset: current_offset,
-            };
+            record.offset = current_offset;
 
             let bincoded_record =
-                bincode::serialize(&record).map_err(|_x| SegmentError::SerializationError)?;
+                bincode::serialize(record).map_err(|_x| SegmentError::SerializationError)?;
 
             let (_, bytes_written) = self
                 .store
@@ -290,6 +291,8 @@ pub mod segment {
                 .map_err(SegmentError::StoreError)?;
 
             self.next_offset += bytes_written as u64;
+
+            record.offset = old_record_offset;
 
             Ok(current_offset)
         }
@@ -311,12 +314,14 @@ pub mod segment {
             Ok(record)
         }
 
-        pub async fn close(self) -> Result<(), SegmentError<T, S>> {
-            self.store.close().await.map_err(SegmentError::StoreError)
-        }
-
+        #[inline]
         pub async fn remove(self) -> Result<(), SegmentError<T, S>> {
             self.store.remove().await.map_err(SegmentError::StoreError)
+        }
+
+        #[inline]
+        pub async fn close(self) -> Result<(), SegmentError<T, S>> {
+            self.store.close().await.map_err(SegmentError::StoreError)
         }
     }
 
@@ -333,6 +338,10 @@ pub mod segment {
         T: Deref<Target = [u8]>,
         S: Store<T>,
     {
+        pub fn new(segment: &'a Segment<T, S>) -> Result<Self, SegmentError<T, S>> {
+            Self::with_offset(segment, segment.base_offset())
+        }
+
         pub fn with_offset(
             segment: &'a Segment<T, S>,
             offset: u64,
@@ -346,10 +355,6 @@ pub mod segment {
                 ),
             })
         }
-
-        pub fn new(segment: &'a Segment<T, S>) -> Result<Self, SegmentError<T, S>> {
-            Self::with_offset(segment, segment.base_offset())
-        }
     }
 
     #[async_trait(?Send)]
@@ -361,11 +366,10 @@ pub mod segment {
         type Item = super::Record;
 
         async fn next(&mut self) -> Option<Self::Item> {
-            if let Some(record_bytes) = self.store_scanner.next().await {
-                return bincode::deserialize(&record_bytes).ok();
-            }
-
-            None
+            self.store_scanner
+                .next()
+                .await
+                .and_then(|record_bytes| bincode::deserialize(&record_bytes).ok())
         }
     }
 
@@ -387,6 +391,415 @@ pub mod segment {
     }
 }
 
+#[async_trait(?Send)]
+pub trait CommitLog {
+    type Error;
+
+    async fn append(&mut self, record: &mut Record) -> Result<u64, Self::Error>;
+
+    async fn read(&self, offset: u64) -> Result<Record, Self::Error>;
+
+    async fn remove(self) -> Result<(), Self::Error>;
+
+    async fn close(self) -> Result<(), Self::Error>;
+}
+
+pub mod segmented_log {
+    use std::{
+        error::Error,
+        fmt::Display,
+        ops::Deref,
+        path::{Path, PathBuf},
+    };
+
+    use async_trait::async_trait;
+
+    use self::config::SegmentedLogConfig;
+
+    use super::{
+        segment::{self, Segment},
+        store, Record,
+    };
+
+    #[derive(Debug)]
+    pub enum SegmentedLogError<T, S>
+    where
+        T: Deref<Target = [u8]>,
+        S: store::Store<T>,
+    {
+        SegmentError(segment::SegmentError<T, S>),
+        IoError(std::io::Error),
+        WriteSegmentLost,
+    }
+
+    impl<T, S> Display for SegmentedLogError<T, S>
+    where
+        T: Deref<Target = [u8]>,
+        S: store::Store<T>,
+    {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                Self::SegmentError(err) => write!(f, "Segment error occurred: {}", err),
+                Self::IoError(err) => write!(f, "IO error occurred: {}", err),
+                Self::WriteSegmentLost => write!(f, "Write segment is None."),
+            }
+        }
+    }
+
+    impl<T, S> Error for SegmentedLogError<T, S>
+    where
+        T: Deref<Target = [u8]> + std::fmt::Debug,
+        S: store::Store<T> + std::fmt::Debug,
+    {
+    }
+
+    #[async_trait(?Send)]
+    pub trait SegmentCreator<T, S>
+    where
+        T: Deref<Target = [u8]>,
+        S: store::Store<T>,
+    {
+        async fn with_storage_dir_offset_and_config<P: AsRef<Path>>(
+            &self,
+            storage_dir: P,
+            base_offset: u64,
+            config: segment::config::SegmentConfig,
+        ) -> Result<Segment<T, S>, segment::SegmentError<T, S>>;
+    }
+
+    pub struct SegmentedLog<T, S, SegC>
+    where
+        T: Deref<Target = [u8]>,
+        S: store::Store<T>,
+        SegC: SegmentCreator<T, S>,
+    {
+        write_segment: Option<Segment<T, S>>,
+        read_segments: Vec<Segment<T, S>>,
+
+        storage_directory: PathBuf,
+        config: SegmentedLogConfig,
+
+        segment_creator: SegC,
+    }
+
+    impl<T, S, SegC> SegmentedLog<T, S, SegC>
+    where
+        T: Deref<Target = [u8]>,
+        S: store::Store<T>,
+        SegC: SegmentCreator<T, S>,
+    {
+        async fn rotate_new_write_segment(&mut self) -> Result<(), SegmentedLogError<T, S>> {
+            let old_write_segment = self
+                .write_segment
+                .take()
+                .ok_or(SegmentedLogError::WriteSegmentLost)?;
+
+            let old_write_segment_base_offset = old_write_segment.base_offset();
+            let new_write_segment_base_offset = old_write_segment.next_offset();
+
+            old_write_segment
+                .close()
+                .await
+                .map_err(SegmentedLogError::SegmentError)?;
+
+            self.read_segments.push(
+                self.segment_creator
+                    .with_storage_dir_offset_and_config(
+                        Path::new(&self.storage_directory),
+                        old_write_segment_base_offset,
+                        self.config.segment_config,
+                    )
+                    .await
+                    .map_err(SegmentedLogError::SegmentError)?,
+            );
+
+            self.write_segment = Some(
+                self.segment_creator
+                    .with_storage_dir_offset_and_config(
+                        Path::new(&self.storage_directory),
+                        new_write_segment_base_offset,
+                        self.config.segment_config,
+                    )
+                    .await
+                    .map_err(SegmentedLogError::SegmentError)?,
+            );
+
+            Ok(())
+        }
+
+        #[inline]
+        fn is_write_segment_maxed(&self) -> Result<bool, SegmentedLogError<T, S>> {
+            self.write_segment
+                .as_ref()
+                .map(|x| x.is_maxed())
+                .ok_or(SegmentedLogError::WriteSegmentLost)
+        }
+
+        pub async fn new<P: AsRef<Path>>(
+            storage_directory_path: P,
+            config: SegmentedLogConfig,
+            segment_creator: SegC,
+        ) -> Result<Self, SegmentedLogError<T, S>> {
+            let (read_segments, write_segment) = common::read_and_write_segments(
+                &storage_directory_path,
+                &segment_creator,
+                config,
+                common::segments_in_directory(
+                    &storage_directory_path,
+                    &segment_creator,
+                    config.segment_config,
+                )
+                .await?,
+            )
+            .await?;
+
+            Ok(Self {
+                write_segment: Some(write_segment),
+                read_segments,
+                storage_directory: storage_directory_path.as_ref().to_path_buf(),
+                config,
+                segment_creator,
+            })
+        }
+    }
+
+    #[doc(hidden)]
+    macro_rules! consume_segments_from_segmented_log_with_method {
+        ($segmented_log:ident, $method:ident) => {
+            let mut segments = $segmented_log.read_segments;
+
+            segments.push(
+                $segmented_log
+                    .write_segment
+                    .take()
+                    .ok_or(SegmentedLogError::WriteSegmentLost)?,
+            );
+
+            for segment in segments {
+                segment
+                    .$method()
+                    .await
+                    .map_err(SegmentedLogError::SegmentError)?;
+            }
+        };
+    }
+
+    #[async_trait(?Send)]
+    impl<T, S, SegC> super::CommitLog for SegmentedLog<T, S, SegC>
+    where
+        T: Deref<Target = [u8]>,
+        S: store::Store<T>,
+        SegC: SegmentCreator<T, S>,
+    {
+        type Error = SegmentedLogError<T, S>;
+
+        async fn append(&mut self, record: &mut Record) -> Result<u64, Self::Error> {
+            if self.is_write_segment_maxed()? {
+                self.rotate_new_write_segment().await?;
+            }
+
+            self.write_segment
+                .as_mut()
+                .ok_or(SegmentedLogError::WriteSegmentLost)?
+                .append(record)
+                .await
+                .map_err(SegmentedLogError::SegmentError)
+        }
+
+        async fn read(&self, offset: u64) -> Result<Record, Self::Error> {
+            let read_segment = self
+                .read_segments
+                .iter()
+                .find(|x| x.store_position(offset).is_some());
+
+            if let Some(read_segment) = read_segment {
+                read_segment
+                    .read(offset)
+                    .await
+                    .map_err(SegmentedLogError::SegmentError)
+            } else {
+                self.write_segment
+                    .as_ref()
+                    .ok_or(SegmentedLogError::WriteSegmentLost)?
+                    .read(offset)
+                    .await
+                    .map_err(SegmentedLogError::SegmentError)
+            }
+        }
+
+        async fn remove(mut self) -> Result<(), Self::Error> {
+            consume_segments_from_segmented_log_with_method!(self, remove);
+
+            Ok(())
+        }
+
+        async fn close(mut self) -> Result<(), Self::Error> {
+            consume_segments_from_segmented_log_with_method!(self, close);
+
+            Ok(())
+        }
+    }
+
+    pub mod common {
+        use super::{
+            config::SegmentedLogConfig, segment::config::SegmentConfig,
+            store::common::STORE_FILE_EXTENSION, Segment, SegmentCreator, SegmentedLogError,
+        };
+        use std::{
+            fs, io,
+            ops::Deref,
+            path::{Path, PathBuf},
+        };
+
+        type Error<T, S> = SegmentedLogError<T, S>;
+
+        /// Returns the backing [`crate::log::store::Store`] file path, with the given Log storage
+        /// directory and the given segment base offset.
+        #[inline]
+        pub fn store_file_path(storage_dir_path: &str, offset: u64) -> PathBuf {
+            Path::new(&storage_dir_path).join(format!(
+                "{}.{}",
+                offset,
+                super::store::common::STORE_FILE_EXTENSION
+            ))
+        }
+
+        /// Returns an iterator of the paths of all the [`crate::log::store::Store`] backing files in the
+        /// given directory.
+        ///
+        /// ## Errors
+        /// - This functions returns an error if the given storage directory doesn't exist and couldn't
+        /// be created.
+        pub fn obtain_store_files_in_directory<P: AsRef<Path>>(
+            storage_dir_path: P,
+        ) -> io::Result<impl Iterator<Item = PathBuf>> {
+            fs::create_dir_all(&storage_dir_path).and(fs::read_dir(&storage_dir_path).map(
+                |dir_entries| {
+                    dir_entries
+                        .filter_map(|dir_entry| dir_entry.ok().map(|x| x.path()))
+                        .filter_map(|path| {
+                            (path.extension()?.to_str()? == STORE_FILE_EXTENSION).then(|| path)
+                        })
+                },
+            ))
+        }
+
+        /// Returns the given store paths sorted by the base offset of the respective segments that they
+        /// belong to.
+        ///
+        /// ## Returns
+        /// A vector of (path, offset) tuples, sorted by the offsets.
+        pub fn store_paths_sorted_by_offset(
+            store_paths: impl Iterator<Item = PathBuf>,
+        ) -> Vec<(PathBuf, u64)> {
+            let mut store_paths = store_paths
+                .filter_map(|segment_file_path| {
+                    let base_offset: u64 = segment_file_path.file_stem()?.to_str()?.parse().ok()?;
+
+                    Some((segment_file_path, base_offset))
+                })
+                .collect::<Vec<(PathBuf, u64)>>();
+
+            store_paths.sort_by(|a, b| a.1.cmp(&b.1));
+            store_paths
+        }
+
+        pub async fn segments_in_directory<T, S, SegC, P: AsRef<Path>>(
+            storage_dir_path: P,
+            segment_creator: &SegC,
+            segment_config: SegmentConfig,
+        ) -> Result<Vec<Segment<T, S>>, Error<T, S>>
+        where
+            T: Deref<Target = [u8]>,
+            S: super::store::Store<T>,
+            SegC: SegmentCreator<T, S>,
+        {
+            let segment_args = store_paths_sorted_by_offset(
+                obtain_store_files_in_directory(storage_dir_path)
+                    .map_err(SegmentedLogError::IoError)?,
+            );
+
+            let mut segments = Vec::with_capacity(segment_args.len());
+
+            for segment_arg in segment_args {
+                segments.push(
+                    segment_creator
+                        .with_storage_dir_offset_and_config(
+                            &segment_arg.0,
+                            segment_arg.1,
+                            segment_config,
+                        )
+                        .await
+                        .map_err(SegmentedLogError::SegmentError)?,
+                );
+            }
+
+            Ok(segments)
+        }
+
+        pub async fn read_and_write_segments<T, S, SegC, P: AsRef<Path>>(
+            storage_dir_path: P,
+            segment_creator: &SegC,
+            log_config: SegmentedLogConfig,
+            mut segments: Vec<Segment<T, S>>,
+        ) -> Result<(Vec<Segment<T, S>>, Segment<T, S>), Error<T, S>>
+        where
+            T: Deref<Target = [u8]>,
+            S: super::store::Store<T>,
+            SegC: SegmentCreator<T, S>,
+        {
+            Ok(match segments.last() {
+                Some(last_segment) if last_segment.is_maxed() => {
+                    let segment_base_offset = last_segment.next_offset();
+                    (
+                        segments,
+                        segment_creator
+                            .with_storage_dir_offset_and_config(
+                                storage_dir_path,
+                                segment_base_offset,
+                                log_config.segment_config,
+                            )
+                            .await
+                            .map_err(SegmentedLogError::SegmentError)?,
+                    )
+                }
+                Some(_) => {
+                    let last_segment = segments.pop();
+                    (
+                        segments,
+                        last_segment.ok_or(SegmentedLogError::WriteSegmentLost)?,
+                    )
+                }
+                None => (
+                    Vec::new(),
+                    segment_creator
+                        .with_storage_dir_offset_and_config(
+                            storage_dir_path,
+                            log_config.initial_offset,
+                            log_config.segment_config,
+                        )
+                        .await
+                        .map_err(SegmentedLogError::SegmentError)?,
+                ),
+            })
+        }
+    }
+
+    pub mod config {
+        use serde::{Deserialize, Serialize};
+
+        use super::segment::config::SegmentConfig;
+
+        /// Log specific configuration.
+        #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+        pub struct SegmentedLogConfig {
+            /// Offset from which the first segment of the log starts.
+            pub initial_offset: u64,
+            /// Config for every segment in this log.
+            pub segment_config: SegmentConfig,
+        }
+    }
+}
 
 #[cfg(target_os = "linux")]
 pub mod glommio_impl;

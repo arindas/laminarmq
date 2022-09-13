@@ -100,7 +100,7 @@ impl crate::commit_log::store::Store<ReadResult> for Store {
             .await
             .map_err(|x| StoreError::StorageError(GlommioError::from(x)))?;
         self.writer
-            .write_all(&record_bytes)
+            .write_all(record_bytes)
             .await
             .map_err(|x| StoreError::StorageError(GlommioError::from(x)))?;
 
