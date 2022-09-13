@@ -1,23 +1,20 @@
-use std::{cell::Ref, error::Error, fmt::Display, path::Path, rc::Rc, result::Result};
+use std::{cell::Ref, error::Error, fmt::Display, path::Path, result::Result};
 
 use async_trait::async_trait;
 use futures_lite::AsyncWriteExt;
 
 use glommio::{
-    io::{
-        CloseResult, DmaFile, DmaStreamReader, DmaStreamReaderBuilder, DmaStreamWriter,
-        DmaStreamWriterBuilder, OpenOptions, ReadResult,
-    },
+    io::{DmaFile, DmaStreamWriter, DmaStreamWriterBuilder, OpenOptions, ReadResult},
     GlommioError,
 };
 
-use crate::log::store::common::{is_checksum_valid, RecordHeader, RECORD_HEADER_LENGTH};
+use crate::log::store::common::{RecordHeader, RECORD_HEADER_LENGTH};
 
 #[derive(Debug)]
 pub enum StoreError {
     SerializationError(std::io::Error),
     StorageError(GlommioError<()>),
-    ChecksumError,
+    InvalidRecordHeader,
     NoBackingFileError,
 }
 
@@ -30,8 +27,8 @@ impl Display for StoreError {
             StoreError::StorageError(err) => {
                 write!(f, "Error during Storage IO: {}", err)
             }
-            StoreError::ChecksumError => {
-                write!(f, "Checksum validation failed.")
+            StoreError::InvalidRecordHeader => {
+                write!(f, "Checksum or record length mismatch.")
             }
             StoreError::NoBackingFileError => {
                 write!(f, "Store not backed by a file.")
@@ -42,8 +39,9 @@ impl Display for StoreError {
 
 impl Error for StoreError {}
 
+#[derive(Debug)]
 pub struct Store {
-    reader: Rc<DmaFile>,
+    reader: DmaFile,
     writer: DmaStreamWriter,
     size: u64,
 }
@@ -74,27 +72,19 @@ impl Store {
             .map_err(StoreError::StorageError)?;
 
         Ok(Self {
-            reader: Rc::new(
-                DmaFile::open(path.as_ref())
-                    .await
-                    .map_err(StoreError::StorageError)?,
-            ),
+            reader: DmaFile::open(path.as_ref())
+                .await
+                .map_err(StoreError::StorageError)?,
             writer: DmaStreamWriterBuilder::new(writer_dma_file)
                 .with_buffer_size(buffer_size)
                 .build(),
             size: initial_size,
         })
     }
-
-    /// Returns the stream reader of this [`Store`].
-    pub fn stream_reader(&self) -> DmaStreamReader {
-        DmaStreamReaderBuilder::from_rc(self.reader.clone()).build()
-    }
 }
 
 #[async_trait(?Send)]
 impl crate::log::store::Store<ReadResult> for Store {
-    type CloseResult = CloseResult;
     type Error = StoreError;
 
     async fn append(&mut self, record_bytes: &[u8]) -> Result<(u64, usize), Self::Error> {
@@ -138,22 +128,19 @@ impl crate::log::store::Store<ReadResult> for Store {
             .await
             .map_err(StoreError::StorageError)?;
 
-        if !is_checksum_valid(&record_bytes, record_header.checksum) {
-            return Err(StoreError::ChecksumError);
+        if !record_header.valid_for_record_bytes(&record_bytes) {
+            return Err(StoreError::InvalidRecordHeader);
         }
 
         Ok(record_bytes)
     }
 
-    async fn close(mut self) -> Result<Self::CloseResult, Self::Error> {
+    async fn close(mut self) -> Result<(), Self::Error> {
         self.writer
             .close()
             .await
             .map_err(|x| StoreError::StorageError(GlommioError::from(x)))?;
-        self.reader
-            .close_rc()
-            .await
-            .map_err(StoreError::StorageError)
+        self.reader.close().await.map_err(StoreError::StorageError)
     }
 
     #[inline]
@@ -166,16 +153,23 @@ impl crate::log::store::Store<ReadResult> for Store {
     fn path(&self) -> Result<Ref<Path>, Self::Error> {
         self.reader.path().ok_or(StoreError::NoBackingFileError)
     }
+
+    async fn remove(self) -> Result<(), Self::Error> {
+        let store_file_path = self.path()?.to_path_buf();
+
+        self.close().await?;
+
+        glommio::io::remove(store_file_path)
+            .await
+            .map_err(StoreError::StorageError)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use std::{ops::Deref, path::PathBuf};
 
-    use glommio::{
-        io::{remove, CloseResult},
-        LocalExecutorBuilder, Placement,
-    };
+    use glommio::{LocalExecutorBuilder, Placement};
 
     use super::{Store, StoreError};
     use crate::log::{
@@ -204,8 +198,7 @@ mod tests {
 
                 assert_eq!(store.path().unwrap().deref(), test_file_path.clone());
 
-                matches!(store.close().await.unwrap(), CloseResult::Closed);
-                remove(test_file_path).await.unwrap();
+                store.remove().await.unwrap();
             })
             .unwrap();
         local_ex.join().unwrap();
@@ -307,7 +300,7 @@ mod tests {
                 assert_eq!(store.size() as usize, EXPECTED_STORAGE_SIZE);
 
                 // close store to sync data
-                matches!(store.close().await.unwrap(), CloseResult::Closed);
+                store.close().await.unwrap();
 
                 // reopen store and check stored records to test durability
                 let store =
@@ -329,9 +322,7 @@ mod tests {
                     i += 1;
                 }
                 assert_eq!(i, RECORDS.len() + 1);
-                matches!(store.close().await.unwrap(), CloseResult::Closed);
-
-                remove(test_file_path).await.unwrap();
+                store.remove().await.unwrap();
             })
             .unwrap();
         local_ex.join().unwrap();
