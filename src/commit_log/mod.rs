@@ -317,6 +317,22 @@ pub mod segment {
             Ok(record)
         }
 
+        pub fn advance_to_offset(
+            &mut self,
+            new_next_offset: u64,
+        ) -> Result<(), SegmentError<T, S>> {
+            if new_next_offset <= self.next_offset() {
+                return Ok(());
+            }
+            if self.store_position(new_next_offset).is_none() {
+                return Err(SegmentError::OffsetOutOfBounds);
+            }
+
+            self.next_offset = new_next_offset;
+
+            Ok(())
+        }
+
         #[inline]
         pub async fn remove(self) -> Result<(), SegmentError<T, S>> {
             self.store.remove().await.map_err(SegmentError::StoreError)
@@ -418,6 +434,8 @@ pub trait CommitLog {
     async fn remove(self) -> Result<(), Self::Error>;
 
     async fn close(self) -> Result<(), Self::Error>;
+
+    async fn advance_to_offset(&mut self, new_highest_offset: u64) -> Result<(), Self::Error>;
 }
 
 pub struct LogScanner<'a, Log: CommitLog> {
@@ -711,6 +729,37 @@ pub mod segmented_log {
         SegC: SegmentCreator<T, S>,
     {
         type Error = SegmentedLogError<T, S>;
+
+        async fn advance_to_offset(&mut self, new_highest_offset: u64) -> Result<(), Self::Error> {
+            if new_highest_offset <= self.highest_offset() {
+                return Ok(());
+            }
+
+            macro_rules! write_segment_ref {
+                ($segmented_log:ident, $method:ident) => {
+                    $segmented_log
+                        .write_segment
+                        .$method()
+                        .ok_or(SegmentedLogError::WriteSegmentLost)
+                };
+            }
+
+            while let None = write_segment_ref!(self, as_ref)?.store_position(new_highest_offset) {
+                if write_segment_ref!(self, as_ref)?.size() == 0 {
+                    return Err(SegmentedLogError::SegmentError(
+                        SegmentError::OffsetOutOfBounds,
+                    ));
+                }
+
+                self.rotate_new_write_segment().await?;
+            }
+
+            write_segment_ref!(self, as_mut)?
+                .advance_to_offset(new_highest_offset)
+                .map_err(SegmentedLogError::SegmentError)?;
+
+            Ok(())
+        }
 
         async fn append(&mut self, record: &mut Record) -> Result<u64, Self::Error> {
             while self.is_write_segment_maxed()? {
