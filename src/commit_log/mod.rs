@@ -713,7 +713,7 @@ pub mod segmented_log {
         type Error = SegmentedLogError<T, S>;
 
         async fn append(&mut self, record: &mut Record) -> Result<u64, Self::Error> {
-            if self.is_write_segment_maxed()? {
+            while self.is_write_segment_maxed()? {
                 self.rotate_new_write_segment().await?;
             }
 
