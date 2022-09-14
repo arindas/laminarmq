@@ -467,7 +467,7 @@ pub mod segmented_log {
         T: Deref<Target = [u8]>,
         S: store::Store<T>,
     {
-        async fn with_storage_dir_offset_and_config<P: AsRef<Path>>(
+        async fn new_segment_with_storage_dir_offset_and_config<P: AsRef<Path>>(
             &self,
             storage_dir: P,
             base_offset: u64,
@@ -512,7 +512,7 @@ pub mod segmented_log {
 
             self.read_segments.push(
                 self.segment_creator
-                    .with_storage_dir_offset_and_config(
+                    .new_segment_with_storage_dir_offset_and_config(
                         Path::new(&self.storage_directory),
                         old_write_segment_base_offset,
                         self.config.segment_config,
@@ -523,7 +523,7 @@ pub mod segmented_log {
 
             self.write_segment = Some(
                 self.segment_creator
-                    .with_storage_dir_offset_and_config(
+                    .new_segment_with_storage_dir_offset_and_config(
                         Path::new(&self.storage_directory),
                         new_write_segment_base_offset,
                         self.config.segment_config,
@@ -607,7 +607,7 @@ pub mod segmented_log {
                 let new_segment_base_offset = write_segment_ref.next_offset();
                 let old_write_segment = self.write_segment.replace(
                     self.segment_creator
-                        .with_storage_dir_offset_and_config(
+                        .new_segment_with_storage_dir_offset_and_config(
                             &self.storage_directory,
                             new_segment_base_offset,
                             self.config.segment_config,
@@ -788,7 +788,7 @@ pub mod segmented_log {
             for segment_arg in segment_args {
                 segments.push(
                     segment_creator
-                        .with_storage_dir_offset_and_config(
+                        .new_segment_with_storage_dir_offset_and_config(
                             &segment_arg.0,
                             segment_arg.1,
                             segment_config,
@@ -818,7 +818,7 @@ pub mod segmented_log {
                     (
                         segments,
                         segment_creator
-                            .with_storage_dir_offset_and_config(
+                            .new_segment_with_storage_dir_offset_and_config(
                                 storage_dir_path,
                                 segment_base_offset,
                                 log_config.segment_config,
@@ -837,7 +837,7 @@ pub mod segmented_log {
                 None => (
                     Vec::new(),
                     segment_creator
-                        .with_storage_dir_offset_and_config(
+                        .new_segment_with_storage_dir_offset_and_config(
                             storage_dir_path,
                             log_config.initial_offset,
                             log_config.segment_config,
