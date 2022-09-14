@@ -35,6 +35,7 @@ mod tests {
     use std::{
         fs,
         path::{Path, PathBuf},
+        time::Duration,
     };
 
     use glommio::{LocalExecutorBuilder, Placement};
@@ -43,14 +44,14 @@ mod tests {
     use super::GlommioLogError as LogError;
     use super::SegmentCreator;
     use crate::commit_log::{
-        segment::config::SegmentConfig,
+        segment::{config::SegmentConfig, SegmentError},
         segmented_log::{common::store_file_path, config::SegmentedLogConfig as LogConfig},
         CommitLog, LogScanner, Record, Scanner,
     };
 
     #[test]
     fn test_log_new_close_and_remove() {
-        let local_ex = LocalExecutorBuilder::new(Placement::Fixed(1))
+        let local_ex = LocalExecutorBuilder::new(Placement::Unbound)
             .spawn(move || async move {
                 const LOG_CONFIG: LogConfig = LogConfig {
                     initial_offset: 0,
@@ -93,7 +94,7 @@ mod tests {
             fs::remove_dir_all(STORAGE_DIR_PATH).unwrap();
         }
 
-        let local_ex = LocalExecutorBuilder::new(Placement::Fixed(1))
+        let local_ex = LocalExecutorBuilder::new(Placement::Unbound)
             .spawn(move || async move {
                 const RECORD_VALUE: &[u8] = b"Hello world!";
                 let mut record = Record {
@@ -156,6 +157,73 @@ mod tests {
 
                 log.remove().await.unwrap();
                 assert!(!PathBuf::from(&storage_dir_path,).exists());
+            })
+            .unwrap();
+        local_ex.join().unwrap();
+    }
+
+    #[test]
+    fn test_log_remove_expired_segments() {
+        const STORAGE_DIR_PATH: &str = "/tmp/laminarmq_log_test_log_remove_expired_segments";
+        if Path::new(STORAGE_DIR_PATH).exists() {
+            fs::remove_dir_all(STORAGE_DIR_PATH).unwrap();
+        }
+
+        let local_ex = LocalExecutorBuilder::new(Placement::Unbound)
+            .spawn(move || async move {
+                const RECORD_VALUE: &[u8] = b"Hello world!";
+                let mut record = Record {
+                    value: RECORD_VALUE.to_vec(),
+                    offset: 0,
+                };
+                let record_size = record.bincoded_repr_size().unwrap();
+
+                let log_config = LogConfig {
+                    initial_offset: 0,
+                    segment_config: SegmentConfig {
+                        store_buffer_size: 512,
+                        max_store_bytes: record_size,
+                    },
+                };
+
+                let storage_dir_path = STORAGE_DIR_PATH.to_string();
+
+                let mut log = Log::new(storage_dir_path.clone(), log_config, SegmentCreator)
+                    .await
+                    .unwrap();
+
+                const NUM_RECORDS: u32 = 10;
+
+                let mut base_offset_of_last_expired_segment = 0;
+
+                for _ in 0..NUM_RECORDS / 2 {
+                    // this write will trigger log rotation
+                    base_offset_of_last_expired_segment = log.append(&mut record).await.unwrap();
+                }
+
+                let expiry_duration = Duration::from_millis(100);
+
+                glommio::timer::sleep(expiry_duration).await;
+
+                let first_non_expired_segment_base_offset = log.append(&mut record).await.unwrap();
+
+                for _ in NUM_RECORDS / 2 + 1..NUM_RECORDS {
+                    log.append(&mut record).await.unwrap();
+                }
+
+                log.remove_expired_segments(expiry_duration).await.unwrap();
+
+                matches!(
+                    log.read(base_offset_of_last_expired_segment).await,
+                    Err(LogError::SegmentError(SegmentError::OffsetOutOfBounds))
+                );
+
+                log.read(first_non_expired_segment_base_offset)
+                    .await
+                    .unwrap();
+
+                log.remove().await.unwrap();
+                assert!(!PathBuf::from(&storage_dir_path).exists());
             })
             .unwrap();
         local_ex.join().unwrap();
