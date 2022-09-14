@@ -160,7 +160,7 @@ pub mod store {
 }
 
 pub mod segment {
-    use std::{fmt::Display, marker::PhantomData, ops::Deref};
+    use std::{fmt::Display, marker::PhantomData, ops::Deref, time::Instant};
 
     use async_trait::async_trait;
 
@@ -215,6 +215,8 @@ pub mod segment {
         next_offset: u64,
         config: config::SegmentConfig,
 
+        creation_time: Instant,
+
         _phantom_data: PhantomData<T>,
     }
 
@@ -239,6 +241,7 @@ pub mod segment {
                 base_offset,
                 next_offset,
                 config,
+                creation_time: Instant::now(),
                 _phantom_data: PhantomData,
             }
         }
@@ -322,6 +325,10 @@ pub mod segment {
         #[inline]
         pub async fn close(self) -> Result<(), SegmentError<T, S>> {
             self.store.close().await.map_err(SegmentError::StoreError)
+        }
+
+        pub fn creation_time(&self) -> Instant {
+            self.creation_time
         }
     }
 
@@ -410,6 +417,7 @@ pub mod segmented_log {
         fmt::Display,
         ops::Deref,
         path::{Path, PathBuf},
+        time::Duration,
     };
 
     use async_trait::async_trait;
@@ -560,6 +568,62 @@ pub mod segmented_log {
                 config,
                 segment_creator,
             })
+        }
+
+        pub async fn remove_expired_segments(
+            &mut self,
+            expiry_duration: Duration,
+        ) -> Result<(), SegmentedLogError<T, S>> {
+            let first_non_expired_segment_position = self
+                .read_segments
+                .iter()
+                .position(|x| x.creation_time().elapsed() < expiry_duration);
+
+            let non_expired_read_segments = if let Some(first_non_expired_segment_position) =
+                first_non_expired_segment_position
+            {
+                self.read_segments
+                    .split_off(first_non_expired_segment_position)
+            } else {
+                Vec::new()
+            };
+
+            let expired_read_segments =
+                std::mem::replace(&mut self.read_segments, non_expired_read_segments);
+
+            for segment in expired_read_segments {
+                segment
+                    .remove()
+                    .await
+                    .map_err(SegmentedLogError::SegmentError)?;
+            }
+
+            let write_segment_ref = self
+                .write_segment
+                .as_ref()
+                .ok_or(SegmentedLogError::WriteSegmentLost)?;
+
+            if write_segment_ref.creation_time().elapsed() > expiry_duration {
+                let new_segment_base_offset = write_segment_ref.next_offset();
+                let old_write_segment = self.write_segment.replace(
+                    self.segment_creator
+                        .with_storage_dir_offset_and_config(
+                            &self.storage_directory,
+                            new_segment_base_offset,
+                            self.config.segment_config,
+                        )
+                        .await
+                        .map_err(SegmentedLogError::SegmentError)?,
+                );
+
+                old_write_segment
+                    .ok_or(SegmentedLogError::WriteSegmentLost)?
+                    .remove()
+                    .await
+                    .map_err(SegmentedLogError::SegmentError)?;
+            }
+
+            Ok(())
         }
     }
 
