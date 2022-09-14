@@ -26,7 +26,7 @@ impl Segment<ReadResult, Store> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::{fs, path::PathBuf};
 
     use glommio::{LocalExecutorBuilder, Placement};
 
@@ -39,7 +39,7 @@ mod tests {
     #[inline]
     fn test_file_path_string(test_name: &str) -> String {
         format!(
-            "/tmp/laminarmq_test_log_segment_{}{}",
+            "/tmp/laminarmq_test_log_segment_{}.{}",
             test_name, STORE_FILE_EXTENSION
         )
     }
@@ -47,6 +47,10 @@ mod tests {
     #[test]
     fn test_segment_new_and_remove() {
         let test_file_path = PathBuf::from(test_file_path_string("test_segment_new_and_remove"));
+
+        if test_file_path.exists() {
+            fs::remove_file(&test_file_path).unwrap();
+        }
 
         let local_ex = LocalExecutorBuilder::new(Placement::Fixed(1))
             .spawn(move || async move {
@@ -73,6 +77,10 @@ mod tests {
     fn test_segment_reads_reflect_appends() {
         let test_file_path =
             PathBuf::from(test_file_path_string("test_segment_reads_reflect_appends"));
+
+        if test_file_path.exists() {
+            fs::remove_file(&test_file_path).unwrap();
+        }
 
         let local_ex = LocalExecutorBuilder::new(Placement::Fixed(1))
             .spawn(move || async move {
@@ -122,10 +130,10 @@ mod tests {
                 assert_eq!(segment.size(), expected_segment_size);
                 assert!(segment.is_maxed());
 
-                matches!(
+                assert!(matches!(
                     segment.append(&mut record).await,
                     Err(SegmentError::SegmentMaxed)
-                );
+                ));
 
                 let record_1 = segment.read(offset_1).await.unwrap();
                 assert_eq!(record_1.offset, offset_1);
@@ -135,10 +143,16 @@ mod tests {
                 assert_eq!(record_2.offset, offset_2);
                 assert_eq!(record_2.value, RECORD_VALUE);
 
-                matches!(
+                // read at invalid loacation
+                assert!(matches!(
                     segment.read(offset_2 + 1).await,
+                    Err(SegmentError::StoreError(_))
+                ));
+
+                assert!(matches!(
+                    segment.read(segment.next_offset()).await,
                     Err(SegmentError::OffsetOutOfBounds)
-                );
+                ));
 
                 let records = vec![record_1, record_2];
 

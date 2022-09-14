@@ -32,21 +32,17 @@ pub type GlommioLogError = SegmentedLogError<ReadResult, Store>;
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        fs,
-        path::{Path, PathBuf},
-        time::Duration,
-    };
-
-    use glommio::{LocalExecutorBuilder, Placement};
-
-    use super::GlommioLog as Log;
-    use super::GlommioLogError as LogError;
-    use super::SegmentCreator;
+    use super::{GlommioLog as Log, GlommioLogError as LogError, SegmentCreator};
     use crate::commit_log::{
         segment::{config::SegmentConfig, SegmentError},
         segmented_log::{common::store_file_path, config::SegmentedLogConfig as LogConfig},
         CommitLog, LogScanner, Record, Scanner,
+    };
+    use glommio::{LocalExecutorBuilder, Placement};
+    use std::{
+        fs,
+        path::{Path, PathBuf},
+        time::Duration,
     };
 
     #[test]
@@ -155,6 +151,11 @@ mod tests {
                 }
                 assert_eq!(i, NUM_RECORDS);
 
+                assert!(matches!(
+                    log.read(log.highest_offset()).await,
+                    Err(LogError::SegmentError(SegmentError::OffsetOutOfBounds))
+                ));
+
                 log.remove().await.unwrap();
                 assert!(!PathBuf::from(&storage_dir_path,).exists());
             })
@@ -194,33 +195,30 @@ mod tests {
 
                 const NUM_RECORDS: u32 = 10;
 
-                let mut base_offset_of_last_expired_segment = 0;
+                let mut base_offset_of_first_non_expired_segment = 0;
 
                 for _ in 0..NUM_RECORDS / 2 {
                     // this write will trigger log rotation
-                    base_offset_of_last_expired_segment = log.append(&mut record).await.unwrap();
+                    base_offset_of_first_non_expired_segment =
+                        log.append(&mut record).await.unwrap();
                 }
 
                 let expiry_duration = Duration::from_millis(100);
 
                 glommio::timer::sleep(expiry_duration).await;
 
-                let first_non_expired_segment_base_offset = log.append(&mut record).await.unwrap();
-
-                for _ in NUM_RECORDS / 2 + 1..NUM_RECORDS {
+                for _ in NUM_RECORDS / 2..NUM_RECORDS {
                     log.append(&mut record).await.unwrap();
                 }
 
                 log.remove_expired_segments(expiry_duration).await.unwrap();
 
-                matches!(
-                    log.read(base_offset_of_last_expired_segment).await,
-                    Err(LogError::SegmentError(SegmentError::OffsetOutOfBounds))
+                assert_eq!(
+                    log.lowest_offset(),
+                    base_offset_of_first_non_expired_segment
                 );
 
-                log.read(first_non_expired_segment_base_offset)
-                    .await
-                    .unwrap();
+                log.read(log.lowest_offset()).await.unwrap();
 
                 log.remove().await.unwrap();
                 assert!(!PathBuf::from(&storage_dir_path).exists());

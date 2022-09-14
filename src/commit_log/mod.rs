@@ -402,9 +402,14 @@ pub mod segment {
 pub trait CommitLog {
     type Error;
 
-    fn initial_offset(&self) -> u64;
+    fn highest_offset(&self) -> u64;
 
-    fn has_offset(&self, offset: u64) -> bool;
+    fn lowest_offset(&self) -> u64;
+
+    #[inline]
+    fn has_offset(&self, offset: u64) -> bool {
+        offset >= self.lowest_offset() && offset < self.highest_offset()
+    }
 
     async fn append(&mut self, record: &mut Record) -> Result<u64, Self::Error>;
 
@@ -430,7 +435,7 @@ impl<'a, Log: CommitLog> LogScanner<'a, Log> {
     }
 
     pub fn new(log: &'a Log) -> Option<Self> {
-        Self::with_offset(log, log.initial_offset())
+        Self::with_offset(log, log.lowest_offset())
     }
 }
 
@@ -461,7 +466,7 @@ pub mod segmented_log {
     use self::config::SegmentedLogConfig;
 
     use super::{
-        segment::{self, Segment},
+        segment::{self, Segment, SegmentError},
         store, Record,
     };
 
@@ -707,17 +712,6 @@ pub mod segmented_log {
     {
         type Error = SegmentedLogError<T, S>;
 
-        fn initial_offset(&self) -> u64 {
-            self.config.initial_offset
-        }
-
-        fn has_offset(&self, offset: u64) -> bool {
-            self.read_segments
-                .iter()
-                .chain(self.write_segment.iter())
-                .any(|x| x.store_position(offset).is_some())
-        }
-
         async fn append(&mut self, record: &mut Record) -> Result<u64, Self::Error> {
             if self.is_write_segment_maxed()? {
                 self.rotate_new_write_segment().await?;
@@ -732,6 +726,12 @@ pub mod segmented_log {
         }
 
         async fn read(&self, offset: u64) -> Result<Record, Self::Error> {
+            if !self.has_offset(offset) {
+                return Err(SegmentedLogError::SegmentError(
+                    SegmentError::OffsetOutOfBounds,
+                ));
+            }
+
             let read_segment = self
                 .read_segments
                 .iter()
@@ -750,6 +750,21 @@ pub mod segmented_log {
                     .await
                     .map_err(SegmentedLogError::SegmentError)
             }
+        }
+
+        fn highest_offset(&self) -> u64 {
+            self.write_segment
+                .as_ref()
+                .map(|x| x.next_offset())
+                .unwrap_or(self.config.initial_offset)
+        }
+
+        fn lowest_offset(&self) -> u64 {
+            self.read_segments
+                .first()
+                .map(|x| x.base_offset())
+                .or(self.write_segment.as_ref().map(|x| x.base_offset()))
+                .unwrap_or(self.config.initial_offset)
         }
 
         async fn remove(mut self) -> Result<(), Self::Error> {

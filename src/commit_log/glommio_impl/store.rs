@@ -183,7 +183,7 @@ mod tests {
     #[inline]
     fn test_file_path_string(test_name: &str) -> String {
         format!(
-            "/tmp/laminarmq_test_log_store_{}{}",
+            "/tmp/laminarmq_test_log_store_{}.{}",
             test_name, STORE_FILE_EXTENSION
         )
     }
@@ -251,10 +251,16 @@ mod tests {
                         .unwrap();
 
                 // read on empty store should result in storage error
-                matches!(store.read(0).await, Err(StoreError::StorageError(_)));
+                assert!(matches!(
+                    store.read(0).await,
+                    Err(StoreError::SerializationError(_))
+                ));
 
                 // read on arbitrary high position should end in storage error
-                matches!(store.read(68419).await, Err(StoreError::StorageError(_)));
+                assert!(matches!(
+                    store.read(68419).await,
+                    Err(StoreError::SerializationError(_))
+                ));
 
                 // append a record
                 let first_record_bytes = FIRST_RECORD;
@@ -266,7 +272,10 @@ mod tests {
                 assert_eq!(num_bytes_written, expected_num_bytes_written);
 
                 // not enough bytes written to trigger flush
-                matches!(store.read(0).await, Err(StoreError::StorageError(_)));
+                assert!(matches!(
+                    store.read(0).await,
+                    Err(StoreError::SerializationError(_))
+                ));
 
                 let mut record_positions_and_sizes = Vec::with_capacity(RECORDS.len());
 
