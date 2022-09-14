@@ -402,6 +402,10 @@ pub mod segment {
 pub trait CommitLog {
     type Error;
 
+    fn initial_offset(&self) -> u64;
+
+    fn has_offset(&self, offset: u64) -> bool;
+
     async fn append(&mut self, record: &mut Record) -> Result<u64, Self::Error>;
 
     async fn read(&self, offset: u64) -> Result<Record, Self::Error>;
@@ -411,10 +415,42 @@ pub trait CommitLog {
     async fn close(self) -> Result<(), Self::Error>;
 }
 
+pub struct LogScanner<'a, Log: CommitLog> {
+    log: &'a Log,
+    offset: u64,
+}
+
+impl<'a, Log: CommitLog> LogScanner<'a, Log> {
+    pub fn with_offset(log: &'a Log, offset: u64) -> Option<Self> {
+        if !log.has_offset(offset) {
+            None
+        } else {
+            Some(LogScanner { log, offset })
+        }
+    }
+
+    pub fn new(log: &'a Log) -> Option<Self> {
+        Self::with_offset(log, log.initial_offset())
+    }
+}
+
+#[async_trait(?Send)]
+impl<'a, Log: CommitLog> Scanner for LogScanner<'a, Log> {
+    type Item = Record;
+
+    async fn next(&mut self) -> Option<Self::Item> {
+        self.log.read(self.offset).await.ok().and_then(|record| {
+            self.offset = record.next_offset()?;
+            Some(record)
+        })
+    }
+}
+
 pub mod segmented_log {
     use std::{
         error::Error,
         fmt::Display,
+        fs,
         ops::Deref,
         path::{Path, PathBuf},
         time::Duration,
@@ -467,12 +503,26 @@ pub mod segmented_log {
         T: Deref<Target = [u8]>,
         S: store::Store<T>,
     {
+        async fn new_segment_with_store_file_path_offset_and_config<P: AsRef<Path>>(
+            &self,
+            store_file_path: P,
+            base_offset: u64,
+            config: segment::config::SegmentConfig,
+        ) -> Result<Segment<T, S>, segment::SegmentError<T, S>>;
+
         async fn new_segment_with_storage_dir_offset_and_config<P: AsRef<Path>>(
             &self,
             storage_dir: P,
             base_offset: u64,
             config: segment::config::SegmentConfig,
-        ) -> Result<Segment<T, S>, segment::SegmentError<T, S>>;
+        ) -> Result<Segment<T, S>, segment::SegmentError<T, S>> {
+            self.new_segment_with_store_file_path_offset_and_config(
+                common::store_file_path(storage_dir, base_offset),
+                base_offset,
+                config,
+            )
+            .await
+        }
     }
 
     pub struct SegmentedLog<T, S, SegC>
@@ -536,7 +586,7 @@ pub mod segmented_log {
         }
 
         #[inline]
-        fn is_write_segment_maxed(&self) -> Result<bool, SegmentedLogError<T, S>> {
+        pub fn is_write_segment_maxed(&self) -> Result<bool, SegmentedLogError<T, S>> {
             self.write_segment
                 .as_ref()
                 .map(|x| x.is_maxed())
@@ -657,6 +707,17 @@ pub mod segmented_log {
     {
         type Error = SegmentedLogError<T, S>;
 
+        fn initial_offset(&self) -> u64 {
+            self.config.initial_offset
+        }
+
+        fn has_offset(&self, offset: u64) -> bool {
+            self.read_segments
+                .iter()
+                .chain(self.write_segment.iter())
+                .any(|x| x.store_position(offset).is_some())
+        }
+
         async fn append(&mut self, record: &mut Record) -> Result<u64, Self::Error> {
             if self.is_write_segment_maxed()? {
                 self.rotate_new_write_segment().await?;
@@ -693,13 +754,12 @@ pub mod segmented_log {
 
         async fn remove(mut self) -> Result<(), Self::Error> {
             consume_segments_from_segmented_log_with_method!(self, remove);
-
+            fs::remove_dir_all(self.storage_directory).map_err(SegmentedLogError::IoError)?;
             Ok(())
         }
 
         async fn close(mut self) -> Result<(), Self::Error> {
             consume_segments_from_segmented_log_with_method!(self, close);
-
             Ok(())
         }
     }
@@ -720,8 +780,8 @@ pub mod segmented_log {
         /// Returns the backing [`crate::log::store::Store`] file path, with the given Log storage
         /// directory and the given segment base offset.
         #[inline]
-        pub fn store_file_path(storage_dir_path: &str, offset: u64) -> PathBuf {
-            Path::new(&storage_dir_path).join(format!(
+        pub fn store_file_path<P: AsRef<Path>>(storage_dir_path: P, offset: u64) -> PathBuf {
+            storage_dir_path.as_ref().join(format!(
                 "{}.{}",
                 offset,
                 super::store::common::STORE_FILE_EXTENSION
@@ -788,7 +848,7 @@ pub mod segmented_log {
             for segment_arg in segment_args {
                 segments.push(
                     segment_creator
-                        .new_segment_with_storage_dir_offset_and_config(
+                        .new_segment_with_store_file_path_offset_and_config(
                             &segment_arg.0,
                             segment_arg.1,
                             segment_config,
