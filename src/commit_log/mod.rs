@@ -21,8 +21,9 @@ impl Record {
     }
 
     /// Returns the possible next offset for this record, based on storage schema.
-    /// This method serializes this record for calculating the size which might return an error.
-    /// Hence we use an Option<_> to represent the error case with a None.
+    /// This method consults the serializer, without serializing the record for calculating the
+    /// size which might return an error. Hence we use an Option<_> to represent the error case
+    /// with a None.
     pub fn next_offset(&self) -> Option<u64> {
         self.bincoded_repr_size().map(|x| x + self.offset)
     }
@@ -441,19 +442,24 @@ pub trait CommitLog {
 pub struct LogScanner<'a, Log: CommitLog> {
     log: &'a Log,
     offset: u64,
+    scan_seek_bytes: u64,
 }
 
 impl<'a, Log: CommitLog> LogScanner<'a, Log> {
-    pub fn with_offset(log: &'a Log, offset: u64) -> Option<Self> {
+    pub fn with_offset(log: &'a Log, offset: u64, scan_seek_bytes: u64) -> Option<Self> {
         if !log.has_offset(offset) {
             None
         } else {
-            Some(LogScanner { log, offset })
+            Some(LogScanner {
+                log,
+                offset,
+                scan_seek_bytes,
+            })
         }
     }
 
     pub fn new(log: &'a Log) -> Option<Self> {
-        Self::with_offset(log, log.lowest_offset())
+        Self::with_offset(log, log.lowest_offset(), 8)
     }
 }
 
@@ -462,10 +468,16 @@ impl<'a, Log: CommitLog> Scanner for LogScanner<'a, Log> {
     type Item = Record;
 
     async fn next(&mut self) -> Option<Self::Item> {
-        self.log.read(self.offset).await.ok().and_then(|record| {
-            self.offset = record.next_offset()?;
-            Some(record)
-        })
+        while self.offset < self.log.highest_offset() {
+            if let Ok(record) = self.log.read(self.offset).await {
+                self.offset = record.next_offset()?;
+                return Some(record);
+            } else {
+                self.offset += self.scan_seek_bytes;
+            }
+        }
+
+        None
     }
 }
 
