@@ -655,6 +655,33 @@ pub mod segmented_log {
             })
         }
 
+        pub async fn reopen_write_segment(&mut self) -> Result<(), SegmentedLogError<T, S>> {
+            let write_segment = self
+                .write_segment
+                .take()
+                .ok_or(SegmentedLogError::WriteSegmentLost)?;
+
+            let write_segment_base_offset = write_segment.base_offset();
+
+            write_segment
+                .close()
+                .await
+                .map_err(SegmentedLogError::SegmentError)?;
+
+            self.write_segment = Some(
+                self.segment_creator
+                    .new_segment_with_storage_dir_offset_and_config(
+                        &self.storage_directory,
+                        write_segment_base_offset,
+                        self.config.segment_config,
+                    )
+                    .await
+                    .map_err(SegmentedLogError::SegmentError)?,
+            );
+
+            Ok(())
+        }
+
         pub async fn remove_expired_segments(
             &mut self,
             expiry_duration: Duration,
@@ -756,7 +783,13 @@ pub mod segmented_log {
                 };
             }
 
+            let mut first_offset_accomodation_attempt = true;
+
             while let None = write_segment_ref!(self, as_ref)?.store_position(new_highest_offset) {
+                if first_offset_accomodation_attempt {
+                    self.reopen_write_segment().await?;
+                }
+
                 if write_segment_ref!(self, as_ref)?.size() == 0 {
                     return Err(SegmentedLogError::SegmentError(
                         SegmentError::OffsetOutOfBounds,
@@ -764,6 +797,7 @@ pub mod segmented_log {
                 }
 
                 self.rotate_new_write_segment().await?;
+                first_offset_accomodation_attempt = false;
             }
 
             write_segment_ref!(self, as_mut)?
