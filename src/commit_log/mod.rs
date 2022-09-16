@@ -760,6 +760,16 @@ pub mod segmented_log {
         };
     }
 
+    #[doc(hidden)]
+    macro_rules! write_segment_ref {
+        ($segmented_log:ident, $ref_method:ident) => {
+            $segmented_log
+                .write_segment
+                .$ref_method()
+                .ok_or(SegmentedLogError::WriteSegmentLost)
+        };
+    }
+
     #[async_trait(?Send)]
     impl<T, S, SegC> super::CommitLog for SegmentedLog<T, S, SegC>
     where
@@ -770,26 +780,13 @@ pub mod segmented_log {
         type Error = SegmentedLogError<T, S>;
 
         async fn advance_to_offset(&mut self, new_highest_offset: u64) -> Result<(), Self::Error> {
+            self.reopen_write_segment().await?;
+
             if new_highest_offset <= self.highest_offset() {
                 return Ok(());
             }
 
-            macro_rules! write_segment_ref {
-                ($segmented_log:ident, $method:ident) => {
-                    $segmented_log
-                        .write_segment
-                        .$method()
-                        .ok_or(SegmentedLogError::WriteSegmentLost)
-                };
-            }
-
-            let mut first_offset_accomodation_attempt = true;
-
             while let None = write_segment_ref!(self, as_ref)?.store_position(new_highest_offset) {
-                if first_offset_accomodation_attempt {
-                    self.reopen_write_segment().await?;
-                }
-
                 if write_segment_ref!(self, as_ref)?.size() == 0 {
                     return Err(SegmentedLogError::SegmentError(
                         SegmentError::OffsetOutOfBounds,
@@ -797,7 +794,6 @@ pub mod segmented_log {
                 }
 
                 self.rotate_new_write_segment().await?;
-                first_offset_accomodation_attempt = false;
             }
 
             write_segment_ref!(self, as_mut)?

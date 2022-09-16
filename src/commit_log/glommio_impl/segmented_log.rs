@@ -226,4 +226,77 @@ mod tests {
             .unwrap();
         local_ex.join().unwrap();
     }
+
+    #[test]
+    fn test_log_advance_offset() {
+        const STORAGE_DIR_PATH: &str = "/tmp/laminarmq_log_test_log_advance_offset";
+        if Path::new(STORAGE_DIR_PATH).exists() {
+            fs::remove_dir_all(STORAGE_DIR_PATH).unwrap();
+        }
+
+        let local_ex = LocalExecutorBuilder::new(Placement::Unbound)
+            .spawn(move || async move {
+                const RECORD_VALUE: &[u8] = b"Hello world!";
+                let mut record = Record {
+                    value: RECORD_VALUE.to_vec(),
+                    offset: 0,
+                };
+                let record_size = record.bincoded_repr_size().unwrap();
+
+                let log_config = LogConfig {
+                    initial_offset: 0,
+                    segment_config: SegmentConfig {
+                        store_buffer_size: 512,
+                        max_store_bytes: record_size,
+                    },
+                };
+
+                let storage_dir_path = STORAGE_DIR_PATH.to_string();
+
+                let mut log_0 = Log::new(storage_dir_path.clone(), log_config, SegmentCreator)
+                    .await
+                    .unwrap();
+
+                let mut log_1 = Log::new(storage_dir_path.clone(), log_config, SegmentCreator)
+                    .await
+                    .unwrap();
+
+                log_0.append(&mut record).await.unwrap(); // record written but not guranteed to be
+                                                          // synced
+
+                assert!(matches!(
+                    log_1.advance_to_offset(log_0.highest_offset()).await,
+                    Err(LogError::SegmentError(SegmentError::OffsetOutOfBounds))
+                ));
+
+                log_0.append(&mut record).await.unwrap(); // first segment rotation
+                let highest_offset_2 = log_0.highest_offset();
+
+                assert!(matches!(
+                    log_1.advance_to_offset(highest_offset_2).await,
+                    Err(LogError::SegmentError(SegmentError::OffsetOutOfBounds))
+                ));
+
+                log_0.append(&mut record).await.unwrap(); // second log rotation; 2nd segment
+                                                          // synced
+
+                log_1.advance_to_offset(highest_offset_2).await.unwrap();
+
+                let final_highest_offset = log_0.highest_offset();
+
+                log_0.close().await.unwrap(); // all segments guranteed to be synced
+
+                log_1.advance_to_offset(final_highest_offset).await.unwrap();
+
+                log_1.close().await.unwrap();
+
+                let log = Log::new(storage_dir_path.clone(), log_config, SegmentCreator)
+                    .await
+                    .unwrap();
+                log.remove().await.unwrap();
+                assert!(!PathBuf::from(&storage_dir_path,).exists());
+            })
+            .unwrap();
+        local_ex.join().unwrap();
+    }
 }
