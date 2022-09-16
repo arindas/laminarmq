@@ -424,9 +424,11 @@ pub trait CommitLog {
     fn lowest_offset(&self) -> u64;
 
     #[inline]
-    fn has_offset(&self, offset: u64) -> bool {
+    fn offset_within_bounds(&self, offset: u64) -> bool {
         offset >= self.lowest_offset() && offset < self.highest_offset()
     }
+
+    async fn advance_to_offset(&mut self, new_highest_offset: u64) -> Result<(), Self::Error>;
 
     async fn append(&mut self, record: &mut Record) -> Result<u64, Self::Error>;
 
@@ -435,8 +437,6 @@ pub trait CommitLog {
     async fn remove(self) -> Result<(), Self::Error>;
 
     async fn close(self) -> Result<(), Self::Error>;
-
-    async fn advance_to_offset(&mut self, new_highest_offset: u64) -> Result<(), Self::Error>;
 }
 
 pub struct LogScanner<'a, Log: CommitLog> {
@@ -447,7 +447,7 @@ pub struct LogScanner<'a, Log: CommitLog> {
 
 impl<'a, Log: CommitLog> LogScanner<'a, Log> {
     pub fn with_offset(log: &'a Log, offset: u64, scan_seek_bytes: u64) -> Option<Self> {
-        if !log.has_offset(offset) {
+        if !log.offset_within_bounds(offset) {
             None
         } else {
             Some(LogScanner {
@@ -817,7 +817,7 @@ pub mod segmented_log {
         }
 
         async fn read(&self, offset: u64) -> Result<Record, Self::Error> {
-            if !self.has_offset(offset) {
+            if !self.offset_within_bounds(offset) {
                 return Err(SegmentedLogError::SegmentError(
                     SegmentError::OffsetOutOfBounds,
                 ));
@@ -883,7 +883,7 @@ pub mod segmented_log {
 
         type Error<T, S> = SegmentedLogError<T, S>;
 
-        /// Returns the backing [`crate::log::store::Store`] file path, with the given Log storage
+        /// Returns the backing [`crate::commit_log::store::Store`] file path, with the given Log storage
         /// directory and the given segment base offset.
         #[inline]
         pub fn store_file_path<P: AsRef<Path>>(storage_dir_path: P, offset: u64) -> PathBuf {
@@ -894,8 +894,8 @@ pub mod segmented_log {
             ))
         }
 
-        /// Returns an iterator of the paths of all the [`crate::log::store::Store`] backing files in the
-        /// given directory.
+        /// Returns an iterator of the paths of all the [`crate::commit_log::store::Store`] backing files
+        /// in the given directory.
         ///
         /// ## Errors
         /// - This functions returns an error if the given storage directory doesn't exist and couldn't
