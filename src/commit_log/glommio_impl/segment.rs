@@ -31,7 +31,9 @@ mod tests {
     use glommio::{LocalExecutorBuilder, Placement};
 
     use crate::commit_log::{
-        segment::SegmentScanner, store::common::STORE_FILE_EXTENSION, Record, Scanner,
+        segment::SegmentScanner,
+        store::common::{bincoded_serialized_record_size, STORE_FILE_EXTENSION},
+        Record, Scanner,
     };
 
     use super::{Segment, SegmentConfig, SegmentError};
@@ -89,7 +91,7 @@ mod tests {
                     value: Vec::from(RECORD_VALUE),
                     offset: 0,
                 };
-                let record_representation_size: u64 = record.bincoded_repr_size().unwrap();
+                let record_representation_size = bincoded_serialized_record_size(&record).unwrap();
                 let expected_segment_size: u64 = 2 * record_representation_size;
 
                 let mut segment = Segment::new(
@@ -103,9 +105,24 @@ mod tests {
                 .await
                 .unwrap();
 
+                assert!(matches!(
+                    segment.read(segment.next_offset()).await,
+                    Err(SegmentError::OffsetOutOfBounds)
+                ));
+
                 let offset_1 = segment.append(&mut record).await.unwrap();
                 assert_eq!(offset_1, 0);
                 assert_eq!(segment.next_offset(), record_representation_size);
+
+                assert!(matches!(
+                    segment.read(segment.next_offset()).await,
+                    Err(SegmentError::OffsetOutOfBounds)
+                ));
+
+                assert!(matches!(
+                    segment.advance_to_offset(segment.next_offset()),
+                    Ok(_)
+                ));
 
                 let offset_2 = segment.append(&mut record).await.unwrap();
                 assert_eq!(offset_2, record_representation_size);
@@ -152,6 +169,11 @@ mod tests {
                 assert!(matches!(
                     segment.read(segment.next_offset()).await,
                     Err(SegmentError::OffsetOutOfBounds)
+                ));
+
+                assert!(matches!(
+                    segment.advance_to_offset(segment.next_offset() + 1),
+                    Err(SegmentError::OffsetBeyondCapacity)
                 ));
 
                 let records = vec![record_1, record_2];

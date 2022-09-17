@@ -34,8 +34,9 @@ pub type GlommioLogError = SegmentedLogError<ReadResult, Store>;
 mod tests {
     use super::{GlommioLog as Log, GlommioLogError as LogError, SegmentCreator};
     use crate::commit_log::{
-        segment::{config::SegmentConfig, SegmentError},
+        segment::config::SegmentConfig,
         segmented_log::{common::store_file_path, config::SegmentedLogConfig as LogConfig},
+        store::common::bincoded_serialized_record_size,
         CommitLog, LogScanner, Record, Scanner,
     };
     use glommio::{LocalExecutorBuilder, Placement};
@@ -97,7 +98,7 @@ mod tests {
                     value: RECORD_VALUE.to_vec(),
                     offset: 0,
                 };
-                let record_size = record.bincoded_repr_size().unwrap();
+                let record_size = bincoded_serialized_record_size(&record).unwrap();
 
                 let log_config = LogConfig {
                     initial_offset: 0,
@@ -153,7 +154,7 @@ mod tests {
 
                 assert!(matches!(
                     log.read(log.highest_offset()).await,
-                    Err(LogError::SegmentError(SegmentError::OffsetOutOfBounds))
+                    Err(LogError::OffsetOutOfBounds)
                 ));
 
                 log.remove().await.unwrap();
@@ -177,7 +178,7 @@ mod tests {
                     value: RECORD_VALUE.to_vec(),
                     offset: 0,
                 };
-                let record_size = record.bincoded_repr_size().unwrap();
+                let record_size = bincoded_serialized_record_size(&record).unwrap();
 
                 let log_config = LogConfig {
                     initial_offset: 0,
@@ -241,7 +242,7 @@ mod tests {
                     value: RECORD_VALUE.to_vec(),
                     offset: 0,
                 };
-                let record_size = record.bincoded_repr_size().unwrap();
+                let record_size = bincoded_serialized_record_size(&record).unwrap();
 
                 let log_config = LogConfig {
                     initial_offset: 0,
@@ -266,7 +267,7 @@ mod tests {
 
                 assert!(matches!(
                     log_1.advance_to_offset(log_0.highest_offset()).await,
-                    Err(LogError::SegmentError(SegmentError::OffsetOutOfBounds))
+                    Err(LogError::OffsetNotValidToAdvanceTo)
                 ));
 
                 log_0.append(&mut record).await.unwrap(); // first segment rotation
@@ -274,7 +275,7 @@ mod tests {
 
                 assert!(matches!(
                     log_1.advance_to_offset(highest_offset_2).await,
-                    Err(LogError::SegmentError(SegmentError::OffsetOutOfBounds))
+                    Err(LogError::OffsetNotValidToAdvanceTo)
                 ));
 
                 log_0.append(&mut record).await.unwrap(); // second log rotation; 2nd segment

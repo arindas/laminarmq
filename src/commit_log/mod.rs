@@ -1,67 +1,96 @@
+//! Module providing a "commit log" abstraction.
+//!
+//! This kind of data structure is primarily useful for storing a series of "events". This module
+//! provides the abstractions necessary for manipulating this data structure on the disk
+//! asynchronously. This abstractions provided are generic over different async runtimes and
+//! storage media. Users of this module might require to choose between specific implementations
+//! pertaining to certain abstractions presented here, according to their requirements.
+//!
+//! In the context of `laminarmq` this module is intended to provide the storage for individual
+//! partitions in a topic.
+
 use async_trait::async_trait;
 
-/// Reperesents a record in a log.
+/// Reperesents a record in a [`CommitLog`].
 #[derive(serde::Deserialize, serde::Serialize, Debug, PartialEq, Eq, Clone)]
 pub struct Record {
-    /// Value stored in this record entry.
+    /// Value stored in this record entry. The value itself might be serialized bytes of some other
+    /// form of record.
     pub value: Vec<u8>,
+
     /// Offset at which this record is stored in the log.
     pub offset: u64,
 }
 
-impl Record {
-    /// Returns the number of bytes required for the bincoded representation of this record.
-    /// This method serializes this record for calculating the size which might return an error.
-    /// Hence we use an Option<_> to represent the error case with a None.
-    pub fn bincoded_repr_size(&self) -> Option<u64> {
-        Some(
-            bincode::serialized_size(self).ok()? as u64
-                + self::store::common::RECORD_HEADER_LENGTH as u64,
-        )
-    }
-
-    /// Returns the possible next offset for this record, based on storage schema.
-    /// This method consults the serializer, without serializing the record for calculating the
-    /// size which might return an error. Hence we use an Option<_> to represent the error case
-    /// with a None.
-    pub fn next_offset(&self) -> Option<u64> {
-        self.bincoded_repr_size().map(|x| x + self.offset)
-    }
-}
-
+/// Abstraction for representing all types that can asynchrnously linearly scanned for items.
 #[async_trait(?Send)]
 pub trait Scanner {
+    /// The items scanned out by this scanner.
     type Item;
 
+    /// Returns the next item in this scanner asynchrnously. A `None` value indicates that no items
+    /// are left to be scanned.
     async fn next(&mut self) -> Option<Self::Item>;
 }
 
 pub mod store {
+    //! Module providing the [`Store`] abstraction.
+    //!
+    //! A store acts as the backing storage for segments in a segmented log. It is the fundamental
+    //! storage component providing access to persistence. This module only provides generic traits
+    //! representing stores. Users will require to implement the traits provided for their specific
+    //! async runtime and storage media.
+
     use async_trait::async_trait;
     use std::{cell::Ref, marker::PhantomData, ops::Deref, path::Path, result::Result};
 
     use super::Scanner;
 
+    /// Trait representing a collection of record backed by some form of persitent storage.
+    ///
+    /// This trait is generic over the kind of records that can be stored, provided that the can be
+    /// dereferenced as bytes. In the context of a segmented log, they act as the backing storage for
+    /// a "segment".
+    ///
+    /// This trait's contract assumes the following with regard to how records are laid out in
+    /// storage:
+    /// ```text
+    /// ┌─────────────────────────┬────────────────────────┬───────────────────────┐
+    /// │ crc32_checksum: [u8; 4] │ record_length: [u8; 4] │ record_bytes: [u8; _] │
+    /// └─────────────────────────┴────────────────────────┴───────────────────────┘
+    /// ```
+    /// As such if the record header is invalidated due to checksum mismatch or record length
+    /// mismatch an appropriate error is expected on the associated operation.
     #[async_trait(?Send)]
     pub trait Store<Record>
     where
         Record: Deref<Target = [u8]>,
     {
+        /// The error type used by the methods of this trait.
         type Error: std::error::Error;
 
+        /// Appends a record containing the given record bytes at the end of this store.
         async fn append(&mut self, record_bytes: &[u8]) -> Result<(u64, usize), Self::Error>;
 
+        /// Reads the record stored at the given position in the record.
         async fn read(&self, position: u64) -> Result<Record, Self::Error>;
 
+        /// Closes this record. Consumes this record instance to stop further operations on this
+        /// closed store instance.
         async fn close(self) -> Result<(), Self::Error>;
 
+        /// Removes the file associated with this store from persistent media. Consumes this
+        /// record to stop further operations on this "removed" store instance.
         async fn remove(self) -> Result<(), Self::Error>;
 
+        /// Number of bytes stored in/with this store instance.
         fn size(&self) -> u64;
 
+        /// Returns the path to the underlying file used for storage.
         fn path(&self) -> Result<Ref<Path>, Self::Error>;
     }
 
+    /// [`Scanner`](super::Scanner) implementation for a [`Store`].
     pub struct StoreScanner<'a, Record, S>
     where
         Record: Deref<Target = [u8]>,
@@ -78,6 +107,7 @@ pub mod store {
         Record: Deref<Target = [u8]>,
         S: Store<Record>,
     {
+        /// Creates a store scanner instance which reads records starting from the given position.
         pub fn with_position(store: &'a S, position: u64) -> Self {
             Self {
                 store,
@@ -86,6 +116,7 @@ pub mod store {
             }
         }
 
+        /// Creates a store scanner instance which reads records from the start.
         pub fn new(store: &'a S) -> Self {
             Self::with_position(store, 0)
         }
@@ -108,21 +139,53 @@ pub mod store {
     }
 
     pub mod common {
+        //! Module providing common utilities to be used by all implementations of
+        //! [`Store`](super::Store).
+
         use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
+        /// Extension used by backing files for [`Store`](super::Store)s.
         pub const STORE_FILE_EXTENSION: &str = "store";
+
+        /// Number of bytes required for storing the record header.
         pub const RECORD_HEADER_LENGTH: usize = 8;
 
+        /// Header for a record stored in [`Store`](super::Store).
+        /// ```text
+        /// ┌─────────────────────────┬────────────────────────┬───────────────────────┐
+        /// │ crc32_checksum: [u8; 4] │ record_length: [u8; 4] │ record_bytes: [u8; _] │
+        /// └─────────────────────────┴────────────────────────┴───────────────────────┘
+        /// │─────────────── RecordHeader ─────────────────────│
+        /// ```
         pub struct RecordHeader {
+            /// checksum computed from the bytes in the record.
             pub checksum: u32,
+
+            /// Length of the record.
             pub length: u32,
         }
 
+        /// Returns the sum of the length of the given byte slice and [`RECORD_HEADER_LENGTH`].
         pub fn header_padded_record_length(record: &[u8]) -> u64 {
             (record.len() + RECORD_HEADER_LENGTH) as u64
         }
 
+        /// Returns the number of bytes needed to store the given record with binary encoding in a
+        /// [`Store`](super::Store) implementation.
+        /// This method returns a `Some(record_size)` if the size could be estimated correcty. If
+        /// there is any error if ascertaining the serialized size, None is returned.
+        pub fn bincoded_serialized_record_size<Record: serde::Serialize>(
+            record: &Record,
+        ) -> Option<u64> {
+            bincode::serialized_size(record)
+                .ok()
+                .map(|x| x + RECORD_HEADER_LENGTH as u64)
+        }
+
         impl RecordHeader {
+            /// Creates a new [`RecordHeader`] instance from the given record bytes. This function
+            /// computes the checksum for the given byte slice and returns a [`RecordHeader`]
+            /// instance with the checksum and the length of the given byte slice.
             pub fn from_record_bytes(record_bytes: &[u8]) -> Self {
                 Self {
                     checksum: crc32fast::hash(record_bytes),
@@ -130,6 +193,9 @@ pub mod store {
                 }
             }
 
+            /// Creates a [`RecordHeader`] instance from serialized record header bytes.
+            /// This method internally users a [`std::io::Cursor`] to read the checksum and
+            /// length as integers from the given bytes with little endian encoding.
             pub fn from_bytes(record_header_bytes: &[u8]) -> std::io::Result<Self> {
                 let mut cursor = std::io::Cursor::new(record_header_bytes);
 
@@ -139,6 +205,9 @@ pub mod store {
                 Ok(Self { checksum, length })
             }
 
+            /// Serializes this given record header to an owned byte array.
+            /// This method internally use a [`std::io::Cursor`] to write the checksum and length
+            /// fields as little endian integers into the byte array.
             pub fn as_bytes(self) -> std::io::Result<[u8; RECORD_HEADER_LENGTH]> {
                 let mut bytes = [0; RECORD_HEADER_LENGTH];
 
@@ -151,6 +220,8 @@ pub mod store {
                 Ok(bytes)
             }
 
+            /// States whether this [`RecordHeader`] is valid for the given record bytes. This
+            /// method internally checks if the checksum and length is valid for the given slice.
             #[inline]
             pub fn valid_for_record_bytes(&self, record_bytes: &[u8]) -> bool {
                 self.length as usize == record_bytes.len()
@@ -161,6 +232,9 @@ pub mod store {
 }
 
 pub mod segment {
+    //! Module providing cross platform [`Segment`](Segment) abstractions for reading and writing
+    //! [`Record`](super::Record) instances from [`Store`](super::store::Store) instances.
+
     use std::{fmt::Display, marker::PhantomData, ops::Deref, time::Instant};
 
     use async_trait::async_trait;
@@ -170,14 +244,27 @@ pub mod segment {
         Record, Scanner,
     };
 
+    /// Error type used for operations on a [`Segment`].
     #[derive(Debug)]
     pub enum SegmentError<T, S: Store<T>>
     where
         T: Deref<Target = [u8]>,
     {
+        /// Error caused during an operation on the [`Segment`]'s underlying
+        /// [`Store`](super::store::Store).
         StoreError(S::Error),
+
+        /// The current segment has no more space for writing records.
         SegmentMaxed,
+
+        /// Error when ser/deser-ializing a record.
         SerializationError,
+
+        /// Offset used for reading or writing to a segment is beyond that store's allowed capacity
+        /// by the [`config::SegmentConfig::max_store_bytes] limit.
+        OffsetBeyondCapacity,
+
+        /// Offset is out of bounds of the written region in this segment.
         OffsetOutOfBounds,
     }
 
@@ -190,11 +277,14 @@ pub mod segment {
                 SegmentError::SerializationError => {
                     write!(f, "Error occured during ser/deser-ializing a record.")
                 }
-                SegmentError::OffsetOutOfBounds => {
-                    write!(f, "Given offset is out of bounds.")
+                SegmentError::OffsetBeyondCapacity => {
+                    write!(f, "Given offset is beyond the capacity for this segment.")
                 }
                 SegmentError::SegmentMaxed => {
                     write!(f, "Segment maxed out segment store size")
+                }
+                SegmentError::OffsetOutOfBounds => {
+                    write!(f, "Given offset is out of bounds of the written region.")
                 }
             }
         }
@@ -207,6 +297,47 @@ pub mod segment {
     {
     }
 
+    /// Cross platform storage abstraction used for reading and writing [`Record`](super::Record) instances
+    /// from [`Store`](super::store::Store) implementations. It also acts the unit of storage in a
+    /// [`SegmentedLog`](super::segmented_log::SegmentedLog).
+    ///
+    /// [`Segment`] uses binary encoding with [`bincode`] for serializing [`Record`](super::Record)s.
+    ///
+    /// Each segment can store a fixed size of bytes. A segment has a `base_offset` which is the
+    /// offset of the first message in the segment. Note that the `base_offset` is not necessarily
+    /// zero and can be arbitrarily high number. The `next_offset` for a segment is offset at which
+    /// the next record will be written. (offset of last record + size of last record.)
+    ///
+    /// ```text
+    /// [segment]
+    /// ┌────────────────────────────────────────────────────────────────┐
+    /// │                                                                │
+    /// │  record offset = position in store + segment base_offset       │
+    /// │                                                                │
+    /// │  [store]                                                       │
+    /// │  ┌──────────┐                                                  │
+    /// │  │ record#x │ position: 0                                      │
+    /// │  ├──────────┤                                                  │
+    /// │  │ record#y │ position: size(record#x)                         │
+    /// │  ├──────────┤                                                  │
+    /// │  │ record#z │ position: size(record#x) + size(record#y)        │
+    /// │  ├──────────┤                                                  │
+    /// │      ....                                                      │
+    /// │                                                                │
+    /// └────────────────────────────────────────────────────────────────┘
+    /// ```
+    ///
+    /// Each segment is backed by a store which is a handle to a file on disk. Since it directly
+    /// deals with file, position starts from 0, like file position. As a consequence, we translate
+    /// store position to segment offset by simply adding the segment offset to the store position.
+    /// Writes in a store are buffered. The write buffer is synced when it fills up, to persist
+    /// data to the disk. Reads read values that have been successfully synced and persisted to the
+    /// disk. Hence, reads on a store lag behind the writes.
+    ///
+    /// All writes go to the write segment. When we max out the capacity of the write segment, we
+    /// close the write segment and reopen it as a read segment. The re-opened segment is added to
+    /// the list of read segments. A new write segment is then created with `base_offset` as the
+    /// `next_offset` of the previous write segment.
     pub struct Segment<T, S: Store<T>>
     where
         T: Deref<Target = [u8]>,
@@ -221,10 +352,22 @@ pub mod segment {
         _phantom_data: PhantomData<T>,
     }
 
+    #[doc(hidden)]
+    macro_rules! consume_store_from_segment {
+        ($segment:ident, $async_store_method:ident) => {
+            $segment
+                .store
+                .$async_store_method()
+                .await
+                .map_err(SegmentError::StoreError)
+        };
+    }
+
     impl<T, S: Store<T>> Segment<T, S>
     where
         T: Deref<Target = [u8]>,
     {
+        /// Creates a segment instance with the given config, base offset and store instance.
         pub fn with_config_base_offset_and_store(
             config: config::SegmentConfig,
             base_offset: u64,
@@ -247,18 +390,23 @@ pub mod segment {
             }
         }
 
+        /// Offset of the first record in this segment instance.
         pub fn base_offset(&self) -> u64 {
             self.base_offset
         }
 
+        /// Offset at which the next record will be written in this segment.
         pub fn next_offset(&self) -> u64 {
             self.next_offset
         }
 
+        /// Returns a reference to the backing [`Store`](super::store::Store).
         pub fn store(&self) -> &S {
             &self.store
         }
 
+        /// Returns the position on the underlying store to which the given offset would map to.
+        /// This method returns None if the given offset is beyond the capacity.
         pub fn store_position(&self, offset: u64) -> Option<u64> {
             match offset.checked_sub(self.base_offset()) {
                 Some(pos) if pos >= self.config.max_store_bytes => None,
@@ -267,14 +415,28 @@ pub mod segment {
             }
         }
 
+        /// Returns whether the size of the underlying store in number of bytes is greater than or
+        /// equal to the allowed limit in [`config::SegmentConfig::max_store_bytes`].
         pub fn is_maxed(&self) -> bool {
             self.store().size() >= self.config.max_store_bytes
         }
 
+        /// Returns the size of the underlying store.
         pub fn size(&self) -> u64 {
             self.store.size()
         }
 
+        /// Appends the given record to the end of this store.
+        ///
+        /// ## Returns
+        /// The offset at which the record was written.
+        ///
+        /// ## Errors
+        /// - [`SegmentError::SegmentMaxed`] if [`Self::is_maxed`] returns true.
+        /// - [`SegmentError::SerializationError`] if there was an error during binary encoding the
+        /// given record instance.
+        /// - [`SegmentError::StoreError`] if there was an error during writing to the underlying
+        /// [`Store`](super::store::Store) instance.
         pub async fn append(&mut self, record: &mut Record) -> Result<u64, SegmentError<T, S>> {
             if self.is_maxed() {
                 return Err(SegmentError::SegmentMaxed);
@@ -301,10 +463,32 @@ pub mod segment {
             Ok(current_offset)
         }
 
+        pub fn offset_within_bounds(&self, offset: u64) -> bool {
+            offset < self.next_offset()
+        }
+
+        /// Reads the record at the given offset.
+        ///
+        /// ## Returns
+        /// A [`Record`](super::Record) instance containing the desired record.
+        ///
+        /// ## Errors
+        /// - [`SegmentError::OffsetOutOfBounds`] if the  `offset >= next_offset` value.
+        /// - [`SegmentError::OffsetBeyondCapacity`] if the given offset is beyond this stores
+        /// capacity, and doesn't map to a valid position on the underlying
+        /// [`Store`](super::store::Store) instance.
+        /// - [`SegmentError::StoreError`] if there was an error during reading the record at the
+        /// given offset from the underlying [`Store`](super::store::Store) instance.
+        /// - [`SegmentError::SerializationError`] if there is an error during deserializing the
+        /// record from the bytes read from storage.
         pub async fn read(&self, offset: u64) -> Result<Record, SegmentError<T, S>> {
+            if !self.offset_within_bounds(offset) {
+                return Err(SegmentError::OffsetOutOfBounds);
+            }
+
             let position = self
                 .store_position(offset)
-                .ok_or(SegmentError::OffsetOutOfBounds)?;
+                .ok_or(SegmentError::OffsetBeyondCapacity)?;
 
             let record_bytes = self
                 .store
@@ -318,6 +502,12 @@ pub mod segment {
             Ok(record)
         }
 
+        /// Advances this [`Segment`] instance's `next_offset` value to the given value.
+        /// This method simply returns [`Ok`] if `new_next_offset <= next_offset`.
+        ///
+        /// ## Errors
+        /// - [`SegmentError::OffsetBeyondCapacity`] if the given offset doesn't map to a valid
+        /// position on the underlying store.
         pub fn advance_to_offset(
             &mut self,
             new_next_offset: u64,
@@ -325,8 +515,9 @@ pub mod segment {
             if new_next_offset <= self.next_offset() {
                 return Ok(());
             }
+
             if self.store_position(new_next_offset).is_none() {
-                return Err(SegmentError::OffsetOutOfBounds);
+                return Err(SegmentError::OffsetBeyondCapacity);
             }
 
             self.next_offset = new_next_offset;
@@ -334,21 +525,36 @@ pub mod segment {
             Ok(())
         }
 
+        /// Removes the underlying [`Store`](super::segment::Store) instances associated.
+        /// This method consumes this [`Segment`] instance to prevent further operations on this
+        /// segment.
+        ///
+        /// ## Errors
+        /// [`SegmentError::StoreError`] if there was an error in removing the underlying store.
         #[inline]
         pub async fn remove(self) -> Result<(), SegmentError<T, S>> {
-            self.store.remove().await.map_err(SegmentError::StoreError)
+            consume_store_from_segment!(self, remove)
         }
 
+        /// Closes the underlying [`Store`](super::segment::Store) instances associated.
+        /// This method consumes this [`Segment`] instance to prevent further operations on this
+        /// segment.
+        ///
+        /// ## Errors
+        /// [`SegmentError::StoreError`] if there was an error in closing the underlying store.
         #[inline]
         pub async fn close(self) -> Result<(), SegmentError<T, S>> {
-            self.store.close().await.map_err(SegmentError::StoreError)
+            consume_store_from_segment!(self, close)
         }
 
+        /// Returns an [`std::time::Instant`] value denoting the time at which this segment was
+        /// created.
         pub fn creation_time(&self) -> Instant {
             self.creation_time
         }
     }
 
+    /// Implements [`Scanner`](super::Scanner) for [`Segment`] references.
     pub struct SegmentScanner<'a, T, S>
     where
         T: Deref<Target = [u8]>,
@@ -362,20 +568,31 @@ pub mod segment {
         T: Deref<Target = [u8]>,
         S: Store<T>,
     {
+        /// Creates a new [`SegmentScanner`] that starts reading from the given segments `base_offset`.
         pub fn new(segment: &'a Segment<T, S>) -> Result<Self, SegmentError<T, S>> {
             Self::with_offset(segment, segment.base_offset())
         }
 
+        /// Creates a new [`SegmentScanner`] that starts reading from the given offset.
+        ///
+        /// ## Errors
+        /// - [`SegmentError::OffsetOutOfBounds`] if the given `offset >= segment.next_offset()`
+        /// - [`SegmentError::OffsetBeyondCapacity`] if the given offset doesn't map to a valid
+        /// location on the [`Segment`] instances underlying store.
         pub fn with_offset(
             segment: &'a Segment<T, S>,
             offset: u64,
         ) -> Result<Self, SegmentError<T, S>> {
+            if !segment.offset_within_bounds(offset) {
+                return Err(SegmentError::OffsetOutOfBounds);
+            }
+
             Ok(Self {
                 store_scanner: StoreScanner::with_position(
                     segment.store(),
                     segment
                         .store_position(offset)
-                        .ok_or(SegmentError::OffsetOutOfBounds)?,
+                        .ok_or(SegmentError::OffsetBeyondCapacity)?,
                 ),
             })
         }
@@ -398,9 +615,10 @@ pub mod segment {
     }
 
     pub mod config {
+        //! Module providing types for configuring [`Segment`](super::Segment) instances.
         use serde::{Deserialize, Serialize};
 
-        // Configuration pertaining to segment storage and buffer sizes.
+        /// Configuration pertaining to segment storage and buffer sizes.
         #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
         pub struct SegmentConfig {
             /// Segment store's write buffer size. The write buffer is flushed to the disk when it is
@@ -415,30 +633,68 @@ pub mod segment {
     }
 }
 
+/// An ordered sequential collection of [`Record`] instances.
+///
+/// A [`Record`] in an [`CommitLog`] is addressed with an unique [`u64`] offset, which denotes it
+/// position in the collection of records. The offsets in a [`CommitLog`] are monotonically
+/// increasing. A higher offset denotes that the [`Record`] appears later in the [`CommitLog`].
+///
+/// This is useful for storing a sequence of events or operations, which may be used to restore a
+/// system to it's previous or current state.
 #[async_trait(?Send)]
 pub trait CommitLog {
+    /// Error type used by the methods of this trait.
     type Error;
 
+    /// Returns the offset where the next [`Record`] will be written in this [`CommitLog`].
     fn highest_offset(&self) -> u64;
 
+    /// Returns the offset of the first [`Record`] in this [`CommitLog`].
     fn lowest_offset(&self) -> u64;
 
+    /// Returns whether the given offset lies in `[lowest_offset, highest_offset)`
     #[inline]
     fn offset_within_bounds(&self, offset: u64) -> bool {
         offset >= self.lowest_offset() && offset < self.highest_offset()
     }
 
+    /// The logical offset of the record sequentially next i.e after the given record in this
+    /// commit log.
+    ///
+    /// ## Warning
+    /// Note that the returned offset in the Some value, might be out of bounds for this log,
+    /// since it is only a logical offset. Nor is there a record guranteed to exist at the offset
+    /// returned.
+    ///
+    /// ## Returns
+    /// - [`Some(next_record_offset)`] if the next records logical offset could be obtained
+    /// - None if the logical offset of the next record could not be obtained.
+    fn logical_offset_of_record_after(&self, record: &Record) -> Option<u64>;
+
+    /// Advances the highest offset of this instance to the given highest offset. This is useful
+    /// in the scenario where multiple [`CommitLog`] instances are opened for the same backing
+    /// files. This enables the [`CommitLog`] instances lagging behind to refresh their state to
+    /// ensure that all persisted records upto the given offset can be read from them. This also
+    /// helps [`CommitLog`] to ensure that no records are overwritten.
     async fn advance_to_offset(&mut self, new_highest_offset: u64) -> Result<(), Self::Error>;
 
+    /// Appends a new [`Record`] at the end of this [`CommitLog`].
     async fn append(&mut self, record: &mut Record) -> Result<u64, Self::Error>;
 
+    /// Reads the [`Record`] at the given offset from this [`CommitLog`].
     async fn read(&self, offset: u64) -> Result<Record, Self::Error>;
 
+    /// Removes all underlying storage files associated. Consumes this [`CommitLog`] instance to
+    /// prevent further operations on this instance.
     async fn remove(self) -> Result<(), Self::Error>;
 
+    /// Closes the files associated with this [`CommitLog`] instances and syncs them to storage
+    /// media. Consumes this [`CommitLog`] instance to  prevent further operations on this
+    /// instance.
     async fn close(self) -> Result<(), Self::Error>;
 }
 
+/// [`Scanner`] implementation for a [`CommitLog`] implementation.
 pub struct LogScanner<'a, Log: CommitLog> {
     log: &'a Log,
     offset: u64,
@@ -446,7 +702,27 @@ pub struct LogScanner<'a, Log: CommitLog> {
 }
 
 impl<'a, Log: CommitLog> LogScanner<'a, Log> {
-    pub fn with_offset(log: &'a Log, offset: u64, scan_seek_bytes: u64) -> Option<Self> {
+    /// Creates a new [`LogScanner`] from the given [`CommitLog`] implementation immutable reference.
+    ///
+    /// ## Default parameters values used
+    /// - `offset`: `log.lowest_offset()`
+    /// - `scan_seek_bytes`: `8`
+    pub fn new(log: &'a Log) -> Option<Self> {
+        Self::with_offset_and_scan_seek_bytes(log, log.lowest_offset(), 8)
+    }
+
+    /// Creates a new [`LogScanner`] scanner instance with the given parameters.
+    ///
+    /// ## Parameters
+    /// - `log`: an immutable reference to a [`CommitLog`] implementation instance.
+    /// - `offset`: offset from which to start reading from.
+    /// - `scan_seek_bytes`: number of bytes to seek at a time to search for next record, if a read
+    /// operation fails in the middle.
+    pub fn with_offset_and_scan_seek_bytes(
+        log: &'a Log,
+        offset: u64,
+        scan_seek_bytes: u64,
+    ) -> Option<Self> {
         if !log.offset_within_bounds(offset) {
             None
         } else {
@@ -457,20 +733,25 @@ impl<'a, Log: CommitLog> LogScanner<'a, Log> {
             })
         }
     }
-
-    pub fn new(log: &'a Log) -> Option<Self> {
-        Self::with_offset(log, log.lowest_offset(), 8)
-    }
 }
 
 #[async_trait(?Send)]
 impl<'a, Log: CommitLog> Scanner for LogScanner<'a, Log> {
     type Item = Record;
 
+    /// Linearly scans and reads the next record in the [`CommitLog`] instance asynchronously. If
+    /// the read operation fails, it searches for the next readable offset by seeking with the
+    /// configured `scan_seek_bytes`.
+    ///
+    /// It stops when the internal offset of this scanner reaches the commit log's highest offset.
+    ///
+    /// ## Returns
+    /// - [`Some(Record)`]: if a record is there to be read.
+    /// - None: to indicate that are there are no more records to read.
     async fn next(&mut self) -> Option<Self::Item> {
         while self.offset < self.log.highest_offset() {
             if let Ok(record) = self.log.read(self.offset).await {
-                self.offset = record.next_offset()?;
+                self.offset = self.log.logical_offset_of_record_after(&record)?;
                 return Some(record);
             } else {
                 self.offset += self.scan_seek_bytes;
@@ -482,6 +763,13 @@ impl<'a, Log: CommitLog> Scanner for LogScanner<'a, Log> {
 }
 
 pub mod segmented_log {
+    //! Module providing abstractions for supporting a immutable, segmented and persistent
+    //! [`CommitLog`](super::CommitLog) implementation.
+    //!
+    //! This module is not meant to be used directly by application developers. Application
+    //! developers would prefer one of the specializations specific to their async runtime.
+    //! See [`glommio_impl`](super::glommio_impl).
+
     use std::{
         error::Error,
         fmt::Display,
@@ -493,22 +781,34 @@ pub mod segmented_log {
 
     use async_trait::async_trait;
 
-    use self::config::SegmentedLogConfig;
-
     use super::{
-        segment::{self, Segment, SegmentError},
+        segment::{self, Segment},
         store, Record,
     };
 
+    /// Error type for our segmented log implementation. Used as the `Error` associated type for
+    /// our [`SegmentedLog`]'s [`CommitLog`](super::CommitLog) trait implementation.
     #[derive(Debug)]
     pub enum SegmentedLogError<T, S>
     where
         T: Deref<Target = [u8]>,
         S: store::Store<T>,
     {
+        /// An error caused by an operation on an underlying segment.
         SegmentError(segment::SegmentError<T, S>),
+
+        /// IO error caused during the creating and deletion of storage directories for our
+        /// [`SegmentedLog`]'s storage.
         IoError(std::io::Error),
+
+        /// The [`Option`] containing our write segment evaluates to [`None`].
         WriteSegmentLost,
+
+        /// The given offset is greater than or equal to the highest offset of the segmented log.
+        OffsetOutOfBounds,
+
+        /// The given offset has not been synced to disk and is not a valid offset to advance to.
+        OffsetNotValidToAdvanceTo,
     }
 
     impl<T, S> Display for SegmentedLogError<T, S>
@@ -521,6 +821,10 @@ pub mod segmented_log {
                 Self::SegmentError(err) => write!(f, "Segment error occurred: {}", err),
                 Self::IoError(err) => write!(f, "IO error occurred: {}", err),
                 Self::WriteSegmentLost => write!(f, "Write segment is None."),
+                Self::OffsetOutOfBounds => write!(f, "Given offset is out of bounds."),
+                Self::OffsetNotValidToAdvanceTo => {
+                    write!(f, "Given offset is not a valid offset to advance to.")
+                }
             }
         }
     }
@@ -532,12 +836,15 @@ pub mod segmented_log {
     {
     }
 
+    /// Strategy pattern trait for constructing [`Segment`] instances for [`SegmentedLog`].
     #[async_trait(?Send)]
     pub trait SegmentCreator<T, S>
     where
         T: Deref<Target = [u8]>,
         S: store::Store<T>,
     {
+        /// Constructs a new segment with it's store at the given store path, base_offset and
+        /// segment config.
         async fn new_segment_with_store_file_path_offset_and_config<P: AsRef<Path>>(
             &self,
             store_file_path: P,
@@ -545,6 +852,12 @@ pub mod segmented_log {
             config: segment::config::SegmentConfig,
         ) -> Result<Segment<T, S>, segment::SegmentError<T, S>>;
 
+        /// Constructs a new segment in the given storage directory with the given base offset and
+        /// config.
+        ///
+        /// The default provided implementation simply invokes
+        /// [`Self::new_segment_with_store_file_path_offset_and_config`] with `store_file_path`
+        /// obtained by invoking [`common::store_file_path`] on `storage_dir` and `base_offset`.
         async fn new_segment_with_storage_dir_offset_and_config<P: AsRef<Path>>(
             &self,
             storage_dir: P,
@@ -560,6 +873,71 @@ pub mod segmented_log {
         }
     }
 
+    /// A cross platform immutable, persisted and segmented log implementation using [`Segment`]
+    /// instances.
+    ///
+    /// [`SegmentedLog`] is a [`CommitLog`](super::CommitLog) implementation.
+    ///
+    /// A segmented log is a collection of read segments and a single write segment. It consists of
+    /// a [`Vec<Segment>`] for storing read segments and a single [`Option<Segment>`] for storing
+    /// the write segment. The log is immutable since, only append and read operations are
+    /// available. There are no record update and delete operations. The log is segmented, since it
+    /// is composed of segments, where each segment services records from a particular range of
+    /// offsets.
+    ///
+    /// ```text
+    /// [segmented_log]
+    /// ┌─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+    /// │                                                                                                                                                     │
+    /// │                               [log:"read"]           ├[offset#x)    ├[offset#x + size(xm_1)]  ├[offset(xm_n-1)]   ├[offset(xm_n-1) + size(xm_n-1)]  │
+    /// │                               ┌──────────┐           ┌──────────────┬──────────────┬─         ┬───────────────────┬──────────────┐                  │
+    /// │  initial_offset: offset#x     │ offset#x │->[segment]│ message#xm_1 │ message#xm_2 │ …      … │ message#xm_n-1    │ message#xm_n │                  │
+    /// │                               │          │           └──────────────┴──────────────┴─         ┴───────────────────┴──────────────┘                  │
+    /// │                               │          │                                                                                                          │
+    /// │                               ├──────────┤           ├[offset#y)    ├[offset#y + size(ym_1)]  ├[offset(ym_n-1)]   ├[offset(ym_n-1) + size(ym_n-1)]  │
+    /// │                               ├──────────┤           ┌──────────────┬──────────────┬─         ┬───────────────────┬──────────────┐                  │
+    /// │  {offset#y = (offset(xm_n) +  │ offset#y │->[segment]│ message#ym_1 │ message#ym_2 │ …      … │ message#ym_n-1    │ message#ym_n │                  │
+    /// │               size(xm_n))}    │          │           └──────────────┴──────────────┴─         ┴───────────────────┴──────────────┘                  │
+    /// │                               │          │                                                                                                          │
+    /// │                               ├──────────┤           ├[offset#x)    ├[offset#x + size(xm_1)]  ├[offset(xm_n-1)]   ├[offset(xm_n-1) + size(xm_n-1)]  │
+    /// │                               ├──────────┤           ┌──────────────┬──────────────┬─         ┬───────────────────┬──────────────┐                  │
+    /// │  {offset#z = (offset(ym_n) +  │ offset#z │->[segment]│ message#zm_1 │ message#zm_2 │ …      … │ message#zm_n-1    │ message#zm_n │                  │
+    /// │               size(ym_n))}    │          │           └──────────────┴──────────────┴─         ┴───────────────────┴──────────────┘                  │
+    /// │                               │          │                                                                                                          │
+    /// │                               ├──────────┤                                                                                                          │
+    /// │                                   ....                                                                                                              │
+    /// │                                                                                                                                                     │
+    /// │                                                                                                                                                     │
+    /// │                               [log:"write"] -> [segment](with base_offset = next_offset of last read segment)                                       │
+    /// │                                                                                                                                                     │
+    /// │  where:                                                                                                                                             │
+    /// │  =====                                                                                                                                              │
+    /// │  offset(m: Message) := offset of message m in log.                                                                                                  │
+    /// │  size(m: Message) := size of message m                                                                                                              │
+    /// │                                                                                                                                                     │
+    /// │  offset#x := some offset x                                                                                                                          │
+    /// │  message#m := some message m                                                                                                                        │
+    /// │                                                                                                                                                     │
+    /// └─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+    /// ```
+    ///
+    /// All writes go to the write segment. When we max out the capacity of the write segment, we
+    /// close the write segment and reopen it as a read segment. The re-opened segment is added to
+    /// the list of read segments. A new write segment is then created with `base_offset` as the
+    /// `next_offset` of the previous write segment.
+    ///
+    /// When reading from a particular offset, we linearly check which segment contains the given
+    /// read segment. If a segment capable of servicing a read from the given offset is found, we
+    /// read from that segment. If no such segment is found among the read segments, we default to
+    /// the write segment. The following scenarios may occur when reading from the write segment in
+    /// this case:
+    /// - The write segment has synced the messages including the message at the given offset. In
+    /// this case the record is read successfully and returned.
+    /// - The write segment hasn't synced the data at the given offset. In this case the read fails
+    /// with a segment I/O error.
+    /// - If the offset is out of bounds of even the write segment, we return an "out of bounds"
+    /// error.
+
     pub struct SegmentedLog<T, S, SegC>
     where
         T: Deref<Target = [u8]>,
@@ -570,7 +948,7 @@ pub mod segmented_log {
         read_segments: Vec<Segment<T, S>>,
 
         storage_directory: PathBuf,
-        config: SegmentedLogConfig,
+        config: config::SegmentedLogConfig,
 
         segment_creator: SegC,
     }
@@ -630,7 +1008,7 @@ pub mod segmented_log {
 
         pub async fn new<P: AsRef<Path>>(
             storage_directory_path: P,
-            config: SegmentedLogConfig,
+            config: config::SegmentedLogConfig,
             segment_creator: SegC,
         ) -> Result<Self, SegmentedLogError<T, S>> {
             let (read_segments, write_segment) = common::read_and_write_segments(
@@ -779,6 +1157,10 @@ pub mod segmented_log {
     {
         type Error = SegmentedLogError<T, S>;
 
+        fn logical_offset_of_record_after(&self, record: &Record) -> Option<u64> {
+            super::store::common::bincoded_serialized_record_size(record).map(|x| x + record.offset)
+        }
+
         async fn advance_to_offset(&mut self, new_highest_offset: u64) -> Result<(), Self::Error> {
             self.reopen_write_segment().await?;
 
@@ -786,11 +1168,12 @@ pub mod segmented_log {
                 return Ok(());
             }
 
-            while let None = write_segment_ref!(self, as_ref)?.store_position(new_highest_offset) {
+            while write_segment_ref!(self, as_ref)?
+                .store_position(new_highest_offset)
+                .is_none()
+            {
                 if write_segment_ref!(self, as_ref)?.size() == 0 {
-                    return Err(SegmentedLogError::SegmentError(
-                        SegmentError::OffsetOutOfBounds,
-                    ));
+                    return Err(SegmentedLogError::OffsetNotValidToAdvanceTo);
                 }
 
                 self.rotate_new_write_segment().await?;
@@ -818,9 +1201,7 @@ pub mod segmented_log {
 
         async fn read(&self, offset: u64) -> Result<Record, Self::Error> {
             if !self.offset_within_bounds(offset) {
-                return Err(SegmentedLogError::SegmentError(
-                    SegmentError::OffsetOutOfBounds,
-                ));
+                return Err(SegmentedLogError::OffsetOutOfBounds);
             }
 
             let read_segment = self
@@ -853,8 +1234,8 @@ pub mod segmented_log {
         fn lowest_offset(&self) -> u64 {
             self.read_segments
                 .first()
+                .or(self.write_segment.as_ref())
                 .map(|x| x.base_offset())
-                .or(self.write_segment.as_ref().map(|x| x.base_offset()))
                 .unwrap_or(self.config.initial_offset)
         }
 
@@ -871,6 +1252,8 @@ pub mod segmented_log {
     }
 
     pub mod common {
+        //! Module providing utilities used by [`SegmentedLog`](super::SegmentedLog).
+
         use super::{
             config::SegmentedLogConfig, segment::config::SegmentConfig,
             store::common::STORE_FILE_EXTENSION, Segment, SegmentCreator, SegmentedLogError,
@@ -883,8 +1266,8 @@ pub mod segmented_log {
 
         type Error<T, S> = SegmentedLogError<T, S>;
 
-        /// Returns the backing [`crate::commit_log::store::Store`] file path, with the given Log storage
-        /// directory and the given segment base offset.
+        /// Returns the backing [`Store`](crate::commit_log::store::Store) file path, with the
+        /// given Log storage directory and the given segment base offset.
         #[inline]
         pub fn store_file_path<P: AsRef<Path>>(storage_dir_path: P, offset: u64) -> PathBuf {
             storage_dir_path.as_ref().join(format!(
@@ -894,12 +1277,12 @@ pub mod segmented_log {
             ))
         }
 
-        /// Returns an iterator of the paths of all the [`crate::commit_log::store::Store`] backing files
-        /// in the given directory.
+        /// Returns an iterator of the paths of all the [`crate::commit_log::store::Store`] backing
+        /// files in the given directory.
         ///
         /// ## Errors
-        /// - This functions returns an error if the given storage directory doesn't exist and couldn't
-        /// be created.
+        /// - This functions returns an error if the given storage directory doesn't exist and
+        /// couldn't be created.
         pub fn obtain_store_files_in_directory<P: AsRef<Path>>(
             storage_dir_path: P,
         ) -> io::Result<impl Iterator<Item = PathBuf>> {
@@ -914,8 +1297,8 @@ pub mod segmented_log {
             ))
         }
 
-        /// Returns the given store paths sorted by the base offset of the respective segments that they
-        /// belong to.
+        /// Returns the given store paths sorted by the base offset of the respective segments that
+        /// they belong to.
         ///
         /// ## Returns
         /// A vector of (path, offset) tuples, sorted by the offsets.
@@ -934,6 +1317,12 @@ pub mod segmented_log {
             store_paths
         }
 
+        /// Returns a [`Vec<Segment>`] of all the segments stored in this directory.
+        ///
+        /// ## Errors
+        /// - [`SegmentedLogError::IoError`]: if there was an error in locating segment files in
+        /// the given directory.
+        /// - [`SegmentedLogError::SegmentError`]: if there was an error in opening a segment.
         pub async fn segments_in_directory<T, S, SegC, P: AsRef<Path>>(
             storage_dir_path: P,
             segment_creator: &SegC,
@@ -967,6 +1356,23 @@ pub mod segmented_log {
             Ok(segments)
         }
 
+        /// Seperates the read segments and write segments in the given [`Vec<Segment>`].
+        ///
+        /// There are the following cases that can happen here:
+        /// - If the given vector of segments is empty, we return an empty vector of read segments
+        /// and a new write segment.
+        /// - If the last segment is the given list of segment is maxed out, we return the given
+        /// vector of segments as is as the vector of read segments, along with a new write
+        /// segment.
+        /// - Otherwise we pop out the last segment from the given vector of segments. The shorter
+        /// vetor of segments is returned as the vector of read segmens along with the popped out
+        /// segment as the write segment.
+        ///
+        /// ## Errors
+        /// - [`SegmentedLogError::SegmentError`]: if there was an error in creating a new segment.
+        /// (When creating the write segment)
+        /// - [SegmentedLogError::WriteSegmentLost]: if the popped last segments from the given
+        /// list of segments is `None` when `segments.last()` returned a [`Some(_)`].
         pub async fn read_and_write_segments<T, S, SegC, P: AsRef<Path>>(
             storage_dir_path: P,
             segment_creator: &SegC,
@@ -1016,6 +1422,7 @@ pub mod segmented_log {
     }
 
     pub mod config {
+        //! Module providing types for configuring a [`SegmentedLog`](super::SegmentedLog).
         use serde::{Deserialize, Serialize};
 
         use super::segment::config::SegmentConfig;
@@ -1033,3 +1440,18 @@ pub mod segmented_log {
 
 #[cfg(target_os = "linux")]
 pub mod glommio_impl;
+
+pub mod prelude {
+    //! Prelude module for [`commit_log`](super) with common exports for convenience.
+
+    pub use super::glommio_impl::prelude::*;
+
+    pub use super::segmented_log::{
+        config::SegmentedLogConfig, SegmentCreator, SegmentedLog, SegmentedLogError,
+    };
+    pub use super::{
+        segment::{config::SegmentConfig, Segment, SegmentError},
+        store::Store,
+        CommitLog, Record,
+    };
+}
