@@ -1114,8 +1114,11 @@ pub mod segmented_log {
         /// Removes segments older than the given `expiry_duration`.
         ///
         /// ## Mechanism for removal
-        /// If the write segment is expired, we rotate the write segment with a new read segment
-        /// before doing anything.
+        /// If the write segment is expired, we move it to the end of the vector of read segments,
+        /// and in it's place create a new write segment with `base_offset` as the old write
+        /// segment's `next_offset`. Note that this is done without reopening the write segment so
+        /// as to avoid updating the creation time of the write segment. Also we don't care about
+        /// sync-ing its contents since it's due for removal anyway.
         ///
         /// All the read segments are appended at the end of the vector of read segments. Hence
         /// by definition the read segment vector is sorted in descending order of age. First we
@@ -1125,7 +1128,7 @@ pub mod segmented_log {
         /// remove them on by one.
         ///
         /// If there is any error in removing a segment, we stop and move back the remaining
-        /// expired read segments to vector of read segments, preserving chronology so that we can
+        /// expired read segments to vector of read segments, preserving chronology, so that we can
         /// try again later.
         ///
         /// ## Errors
@@ -1137,7 +1140,20 @@ pub mod segmented_log {
             expiry_duration: Duration,
         ) -> Result<(), SegmentedLogError<T, S>> {
             if write_segment_ref!(self, as_ref)?.creation_time().elapsed() >= expiry_duration {
-                self.rotate_new_write_segment().await?;
+                let new_segment_base_offset = write_segment_ref!(self, as_ref)?.next_offset();
+                let old_write_segment = self.write_segment.replace(
+                    self.segment_creator
+                        .new_segment_with_storage_dir_offset_and_config(
+                            &self.storage_directory,
+                            new_segment_base_offset,
+                            self.config.segment_config,
+                        )
+                        .await
+                        .map_err(SegmentedLogError::SegmentError)?,
+                );
+
+                self.read_segments
+                    .push(old_write_segment.ok_or(SegmentedLogError::WriteSegmentLost)?);
             }
 
             let first_non_expired_segment_position = self

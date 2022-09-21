@@ -227,6 +227,16 @@ mod tests {
 
                 log.read(log.lowest_offset()).await.unwrap();
 
+                let log_highest_offset = log.highest_offset();
+
+                // remove all segments
+                log.remove_expired_segments(Duration::from_millis(0))
+                    .await
+                    .unwrap();
+
+                assert_eq!(log.lowest_offset(), log_highest_offset);
+                assert_eq!(log.lowest_offset(), log.highest_offset());
+
                 log.remove().await.unwrap();
                 assert!(!PathBuf::from(&storage_dir_path).exists());
             })
