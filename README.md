@@ -9,7 +9,7 @@
   <a href="https://codecov.io/gh/arindas/laminarmq" > 
   <img src="https://codecov.io/gh/arindas/laminarmq/branch/main/graph/badge.svg?token=6VLETF5REC"/> 
   </a>
-  <a href="(https://crates.io/crates/laminarmq">
+  <a href="https://crates.io/crates/laminarmq">
   <img src="https://img.shields.io/crates/v/laminarmq" />
   </a>
   <a href="https://github.com/arindas/generational-lru/actions/workflows/rustdoc.yml">
