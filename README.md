@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-A scalable message queue powered by a segmented, partitioned, replicated and immutable log.
+A scalable, distributed message queue powered by a segmented, partitioned, replicated and immutable log.
 <br><i>This is currently a work in progress.</i>
 </p>
 

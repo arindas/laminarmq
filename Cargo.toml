@@ -1,5 +1,11 @@
 [package]
 name = "laminarmq"
+description = "A scalable, distributed message queue powered by a segmented, partitioned, replicated and immutable log."
+repository = "https://github.com/arindas/laminarmq"
+license = "MIT"
+categories = ["web-programming"]
+keywords = ["message-queue", "distributed-systems", "segmented-log", "io-uring"]
+exclude = [".github/"]
 version = "0.0.1"
 edition = "2021"
 
