@@ -20,8 +20,8 @@ A scalable message queue powered by a segmented, partitioned, replicated and imm
 </p>
 
 ## Planned Architecture
-This section presents a brief overview on the different aspects of our message queue. This only an outline of
-the architecture we have planned for `laminarmq` and it is subject to change as this project evolves.
+This section presents a brief overview on the different aspects of our message queue. This is only an outline of
+the architecture that we have planned for `laminarmq` and it is subject to change as this project evolves.
 
 ### Storage Hierarchy
 Data is persisted in `laminarmq` with the following hierarchy:
