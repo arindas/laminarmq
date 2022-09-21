@@ -1,4 +1,8 @@
 //! [`SegmentedLog`](super::segmented_log::SegmentedLog) specialization for the [`glommio`] runtime.
+//!
+//! ### Note:
+//! All the modules nested in this module have their own tests. Where in confusion regarding the
+//! API of particular component read how it is tested in order to understand them better.
 
 pub mod segment;
 pub mod segmented_log;

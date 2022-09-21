@@ -1,3 +1,5 @@
+//! Module providing sepcialization for the segmented log abstraction for the [`glommio`] runtime.
+
 use super::store::Store;
 use crate::commit_log::{
     segment::{config::SegmentConfig, Segment, SegmentError},
@@ -6,6 +8,8 @@ use crate::commit_log::{
 use glommio::io::ReadResult;
 use std::path::Path;
 
+/// [`crate::commit_log::segmented_log::SegmentCreator`] implementation for the [`glommio`]
+/// runtime using [`Store`] and [`Segment`] for [`glommio`].
 pub struct SegmentCreator;
 
 #[async_trait::async_trait(?Send)]
@@ -26,8 +30,10 @@ impl crate::commit_log::segmented_log::SegmentCreator<ReadResult, Store> for Seg
     }
 }
 
+/// [`SegmentedLog`] specialization for the [`glommio`] runtime.
 pub type GlommioLog = SegmentedLog<ReadResult, Store, SegmentCreator>;
 
+/// Error type used by [`GlommioLog`].
 pub type GlommioLogError = SegmentedLogError<ReadResult, Store>;
 
 #[cfg(test)]

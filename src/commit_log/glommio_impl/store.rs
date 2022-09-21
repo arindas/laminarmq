@@ -1,3 +1,6 @@
+//! Module providing [`Store`](crate::commit_log::store::Store) implementation for the [`glommio`]
+//! runtime.
+
 use std::{cell::Ref, error::Error, fmt::Display, path::Path, result::Result};
 
 use async_trait::async_trait;
@@ -10,6 +13,7 @@ use glommio::{
 
 use crate::commit_log::store::common::{RecordHeader, RECORD_HEADER_LENGTH};
 
+/// Error type used by [`Store`].
 #[derive(Debug)]
 pub enum StoreError {
     SerializationError(std::io::Error),
@@ -39,6 +43,16 @@ impl Display for StoreError {
 
 impl Error for StoreError {}
 
+/// [`crate::commit_log::store::Store`] implementation for the [`glommio`] runtime.
+///
+/// This implementation uses directly mapped files to leverage `io_uring` powered operations. A
+/// [`Store`] consists of a [`DmaFile`] reader and [`DmaStreamWriter`], both of which point to the
+/// same underlying file on the disk.
+///
+/// We have chosen a simple [`DmaFile`] for the reader since the read amplification caused due to
+/// random unbuffered reads is manageable. However, write amplifications are generally more costly.
+/// Since we always append to the end of the file, [`DmaStreamWriter`] is a better solution which
+/// enables use to have the best tradeoff of responsiveness v/s buffering.
 #[derive(Debug)]
 pub struct Store {
     reader: DmaFile,
@@ -46,6 +60,8 @@ pub struct Store {
     size: u64,
 }
 
+/// Default buffer size used by the [`DmaStreamWriter`] in [`Store`] when created with
+/// [`Store::new`].
 pub const DEFAULT_STORE_WRITER_BUFFER_SIZE: usize = 128 << 10;
 
 impl Store {
@@ -54,6 +70,11 @@ impl Store {
         Self::with_path_and_buffer_size(path, DEFAULT_STORE_WRITER_BUFFER_SIZE).await
     }
 
+    /// Creates a new [`Store`] instance.
+    ///
+    /// The writer is opened with "write", "append" and "create" flags, while the reader is opened
+    /// with only the "read" flag. The given `buffer_size` is used to configure the buffer size of
+    /// the [`DmaStreamWriter`].
     pub async fn with_path_and_buffer_size<P: AsRef<Path>>(
         path: P,
         buffer_size: usize,
@@ -87,6 +108,16 @@ impl Store {
 impl crate::commit_log::store::Store<ReadResult> for Store {
     type Error = StoreError;
 
+    /// Appends the given record bytes at the end of this store.
+    ///
+    /// ## Returns
+    /// A tuple with `(position_where_the_record_was_written, number_of_bytes_written)`
+    ///
+    /// ## Errors
+    /// - [`StoreError::SerializationError`]: if there was an error during serializing the record
+    /// header for the given record bytes to bytes
+    /// - [`StoreError::StorageError`]: if there was an error during writing to the underlying
+    /// [`DmaStreamWriter`] instance.
     async fn append(&mut self, record_bytes: &[u8]) -> Result<(u64, usize), Self::Error> {
         let record_header = RecordHeader::from_record_bytes(record_bytes);
         let record_header_bytes = record_header
@@ -110,6 +141,19 @@ impl crate::commit_log::store::Store<ReadResult> for Store {
         Ok((current_position, bytes_written))
     }
 
+    /// Reads the record at the given position.
+    ///
+    /// ## Returns
+    /// A [`ReadResult`] containing the bytes of the desired record.
+    ///
+    /// ## Errors
+    /// - [`StoreError::SerializationError`]: if there was an error during deserializing the
+    /// recordy header from the first [`RECORD_HEADER_LENGTH`] bytes at the given `position`.
+    /// - [`StoreError::StorageError`]: if there was an error in reading from the underlying
+    /// [`DmaFile`].
+    /// - [`StoreError::InvalidRecordHeader`]: if the record header is invalid for the bytes in the
+    /// [`ReadResult`] instance read from the underlying [`DmaFile`]. (Checksum mismatch or invalid
+    /// record length).
     async fn read(&self, position: u64) -> Result<ReadResult, Self::Error> {
         let record_header_bytes = self
             .reader
@@ -135,6 +179,10 @@ impl crate::commit_log::store::Store<ReadResult> for Store {
         Ok(record_bytes)
     }
 
+    /// Closes this [`Store`] instance.
+    ///
+    /// ## Errors
+    /// - [`StoreError::StorageError`] if there is an error in closing the reader or writer.
     async fn close(mut self) -> Result<(), Self::Error> {
         self.writer
             .close()
@@ -149,11 +197,21 @@ impl crate::commit_log::store::Store<ReadResult> for Store {
     }
 
     /// Returns the path to the underlying file.
-    /// If no path could be found, we return [`StoreError::NoBackingFileError`].
+    ///
+    /// ## Errors
+    /// - [`StoreError::NoBackingFileError`]: if the reader's backing file's path couldn't be found
     fn path(&self) -> Result<Ref<Path>, Self::Error> {
         self.reader.path().ok_or(StoreError::NoBackingFileError)
     }
 
+    /// Removes the files associated with this [`Store`] instance.
+    ///
+    /// First this method closes this instance. Then this method invokes [`glommio::io::remove`] on
+    /// the underlying file's path.
+    ///
+    /// ## Errors
+    /// - [StoreError::StorageError]: if there is an error during closing this instance or removing
+    /// the files associated with this instance.
     async fn remove(self) -> Result<(), Self::Error> {
         let store_file_path = self.path()?.to_path_buf();
 

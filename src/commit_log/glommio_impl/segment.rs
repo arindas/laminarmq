@@ -1,3 +1,6 @@
+//! Module providing specialization for [`Segment`](`crate::commit_log::segment::Segment`) for the
+//! [`glommio`] runtime.
+
 use std::path::Path;
 
 use glommio::io::ReadResult;
@@ -9,6 +12,11 @@ use super::store::Store;
 type Error = SegmentError<ReadResult, Store>;
 
 impl Segment<ReadResult, Store> {
+    /// Creates a new [`Segment`] specialized for the [`glommio`] runtime with a [`Store`] at the
+    /// given path with the given base offset and config.
+    ///
+    /// ## Errors
+    /// - [`SegmentError::StoreError`]: if there is an error in creating the store.
     pub async fn new<P: AsRef<Path>>(
         path: P,
         base_offset: u64,
