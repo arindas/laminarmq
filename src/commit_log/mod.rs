@@ -953,12 +953,35 @@ pub mod segmented_log {
         segment_creator: SegC,
     }
 
+    #[doc(hidden)]
+    macro_rules! write_segment_ref {
+        ($segmented_log:ident, $ref_method:ident) => {
+            $segmented_log
+                .write_segment
+                .$ref_method()
+                .ok_or(SegmentedLogError::WriteSegmentLost)
+        };
+    }
+
     impl<T, S, SegC> SegmentedLog<T, S, SegC>
     where
         T: Deref<Target = [u8]>,
         S: store::Store<T>,
         SegC: SegmentCreator<T, S>,
     {
+        /// "Moves" the current write segment to the vector of read segments and in its place, a new
+        /// write segment is created.
+        ///
+        /// This moving process involves closing the current write segments, creating a new read
+        /// segment with this write segments base offset and adding it to the end of the read
+        /// segments' vector. Once this process is completed, a new write segments is created with
+        /// the old write segments base offset.
+        ///
+        /// ## Errors
+        /// - [`SegmentedLogError::WriteSegmentLost`]: if the write segment [`Option`] evaluates to
+        /// [`None`] before this operation.
+        /// - [`SegmentedLogError::SegmentError`]: If there is an error during operning a new
+        /// segment.
         async fn rotate_new_write_segment(&mut self) -> Result<(), SegmentedLogError<T, S>> {
             let old_write_segment = self
                 .write_segment
@@ -998,6 +1021,12 @@ pub mod segmented_log {
             Ok(())
         }
 
+        /// Returns whether the current write segment is maxed out or not. We invoke
+        /// [`Segment::is_maxed`] on the current write segment and return it.
+        ///
+        /// ## Errors
+        /// - [`SegmentedLogError::WriteSegmentLost`]: if the current write segment
+        /// [`Option`] evaluates to [`None`].
         #[inline]
         pub fn is_write_segment_maxed(&self) -> Result<bool, SegmentedLogError<T, S>> {
             self.write_segment
@@ -1006,6 +1035,20 @@ pub mod segmented_log {
                 .ok_or(SegmentedLogError::WriteSegmentLost)
         }
 
+        /// Creates a new [`SegmentedLog`] instance with files stored in the given storage
+        /// directory.
+        ///
+        /// If there are no segments present in the given directory, a new write segment is created
+        /// with [`config::SegmentedLogConfig::initial_offset`] as the base offset. The given
+        /// segment creator is used for creating segments during the various operation of the
+        /// segmented log, such as rotating in new write segments, reopening the write segment etc.
+        ///
+        /// ## Returns
+        /// - A newly created [`SegmentedLog`] instance.
+        ///
+        /// ## Errors
+        /// - As discussed in [`common::read_and_write_segments`] and
+        /// [`common::segments_in_directory`]
         pub async fn new<P: AsRef<Path>>(
             storage_directory_path: P,
             config: config::SegmentedLogConfig,
@@ -1033,6 +1076,14 @@ pub mod segmented_log {
             })
         }
 
+        /// Reopens i.e. closes and opens the current write segment. This might be useful in
+        /// syncing changes to persistent media.
+        ///
+        /// ## Errors
+        /// - [`SegmentedLogError::WriteSegmentLost`]: if the write segment [`Option`] evaluates
+        /// to [`None`].
+        /// - [`SegmentedLogError::SegmentError`]: if there is and error during opening or closing
+        /// the write segment.
         pub async fn reopen_write_segment(&mut self) -> Result<(), SegmentedLogError<T, S>> {
             let write_segment = self
                 .write_segment
@@ -1060,10 +1111,35 @@ pub mod segmented_log {
             Ok(())
         }
 
+        /// Removes segments older than the given `expiry_duration`.
+        ///
+        /// ## Mechanism for removal
+        /// If the write segment is expired, we rotate the write segment with a new read segment
+        /// before doing anything.
+        ///
+        /// All the read segments are appended at the end of the vector of read segments. Hence
+        /// by definition the read segment vector is sorted in descending order of age. First we
+        /// look for the first non expired segment in the read segments vector. Once we find it, it
+        /// means that, all the segments before it are expired. Hence we split off the vector at
+        /// that point. This enables us to seperate the expired read segments. Next we attempt to
+        /// remove them on by one.
+        ///
+        /// If there is any error in removing a segment, we stop and move back the remaining
+        /// expired read segments to vector of read segments, preserving chronology so that we can
+        /// try again later.
+        ///
+        /// ## Errors
+        /// - [`SegmentedLogError::SegmentError`]: if there is an error during closing a segment.
+        /// - [`SegmentedLogError::WriteSegmentLost`]: if the current write segment [`Option`]
+        /// evaluates to [`None`].
         pub async fn remove_expired_segments(
             &mut self,
             expiry_duration: Duration,
         ) -> Result<(), SegmentedLogError<T, S>> {
+            if write_segment_ref!(self, as_ref)?.creation_time().elapsed() >= expiry_duration {
+                self.rotate_new_write_segment().await?;
+            }
+
             let first_non_expired_segment_position = self
                 .read_segments
                 .iter()
@@ -1078,42 +1154,26 @@ pub mod segmented_log {
                 Vec::new()
             };
 
-            let expired_read_segments =
+            let mut expired_read_segments =
                 std::mem::replace(&mut self.read_segments, non_expired_read_segments);
 
-            for segment in expired_read_segments {
-                segment
-                    .remove()
-                    .await
-                    .map_err(SegmentedLogError::SegmentError)?;
+            let mut remove_result = Ok(());
+
+            while !expired_read_segments.is_empty() {
+                let expired_segment = expired_read_segments.remove(0);
+
+                remove_result = expired_segment.remove().await;
+                if remove_result.is_err() {
+                    break;
+                }
             }
 
-            let write_segment_ref = self
-                .write_segment
-                .as_ref()
-                .ok_or(SegmentedLogError::WriteSegmentLost)?;
-
-            if write_segment_ref.creation_time().elapsed() > expiry_duration {
-                let new_segment_base_offset = write_segment_ref.next_offset();
-                let old_write_segment = self.write_segment.replace(
-                    self.segment_creator
-                        .new_segment_with_storage_dir_offset_and_config(
-                            &self.storage_directory,
-                            new_segment_base_offset,
-                            self.config.segment_config,
-                        )
-                        .await
-                        .map_err(SegmentedLogError::SegmentError)?,
-                );
-
-                old_write_segment
-                    .ok_or(SegmentedLogError::WriteSegmentLost)?
-                    .remove()
-                    .await
-                    .map_err(SegmentedLogError::SegmentError)?;
+            if remove_result.is_err() && !expired_read_segments.is_empty() {
+                expired_read_segments.append(&mut self.read_segments);
+                self.read_segments = expired_read_segments;
             }
 
-            Ok(())
+            remove_result.map_err(SegmentedLogError::SegmentError)
         }
     }
 
@@ -1135,16 +1195,6 @@ pub mod segmented_log {
                     .await
                     .map_err(SegmentedLogError::SegmentError)?;
             }
-        };
-    }
-
-    #[doc(hidden)]
-    macro_rules! write_segment_ref {
-        ($segmented_log:ident, $ref_method:ident) => {
-            $segmented_log
-                .write_segment
-                .$ref_method()
-                .ok_or(SegmentedLogError::WriteSegmentLost)
         };
     }
 
