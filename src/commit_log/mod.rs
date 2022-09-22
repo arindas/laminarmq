@@ -1,17 +1,19 @@
 //! Module providing a "commit log" abstraction.
 //!
 //! This kind of data structure is primarily useful for storing a series of "events". This module
-//! provides the abstractions necessary for manipulating this data structure on the disk
-//! asynchronously. This abstractions provided are generic over different async runtimes and
-//! storage media. Users of this module might require to choose between specific implementations
-//! pertaining to certain abstractions presented here, according to their requirements.
+//! provides the abstractions necessary for manipulating this data structure asynchronously on
+//! persistent storage media. The abstractions provided by this module are generic over different
+//! async runtimes and storage media. Hence user's will need to choose their specializations and
+//! implementations of these generic abstractions as necessary.
+//!
+//! Also see: [`glommio_impl`].
 //!
 //! In the context of `laminarmq` this module is intended to provide the storage for individual
 //! partitions in a topic.
 
 use async_trait::async_trait;
 
-/// Reperesents a record in a [`CommitLog`].
+/// Represents a record in a [`CommitLog`].
 #[derive(serde::Deserialize, serde::Serialize, Debug, PartialEq, Eq, Clone)]
 pub struct Record {
     /// Value stored in this record entry. The value itself might be serialized bytes of some other
@@ -22,13 +24,13 @@ pub struct Record {
     pub offset: u64,
 }
 
-/// Abstraction for representing all types that can asynchrnously linearly scanned for items.
+/// Abstraction for representing all types that can asynchronously linearly scanned for items.
 #[async_trait(?Send)]
 pub trait Scanner {
     /// The items scanned out by this scanner.
     type Item;
 
-    /// Returns the next item in this scanner asynchrnously. A `None` value indicates that no items
+    /// Returns the next item in this scanner asynchronously. A `None` value indicates that no items
     /// are left to be scanned.
     async fn next(&mut self) -> Option<Self::Item>;
 }
@@ -46,7 +48,7 @@ pub mod store {
 
     use super::Scanner;
 
-    /// Trait representing a collection of record backed by some form of persitent storage.
+    /// Trait representing a collection of record backed by some form of persistent storage.
     ///
     /// This trait is generic over the kind of records that can be stored, provided that the can be
     /// dereferenced as bytes. In the context of a segmented log, they act as the backing storage for
@@ -172,7 +174,7 @@ pub mod store {
 
         /// Returns the number of bytes needed to store the given record with binary encoding in a
         /// [`Store`](super::Store) implementation.
-        /// This method returns a `Some(record_size)` if the size could be estimated correcty. If
+        /// This method returns a `Some(record_size)` if the size could be estimated correctly. If
         /// there is any error if ascertaining the serialized size, None is returned.
         pub fn bincoded_serialized_record_size<Record: serde::Serialize>(
             record: &Record,
@@ -663,7 +665,7 @@ pub trait CommitLog {
     ///
     /// ## Warning
     /// Note that the returned offset in the Some value, might be out of bounds for this log,
-    /// since it is only a logical offset. Nor is there a record guranteed to exist at the offset
+    /// since it is only a logical offset. Nor is there a record guaranteed to exist at the offset
     /// returned.
     ///
     /// ## Returns
@@ -1124,7 +1126,7 @@ pub mod segmented_log {
         /// by definition the read segment vector is sorted in descending order of age. First we
         /// look for the first non expired segment in the read segments vector. Once we find it, it
         /// means that, all the segments before it are expired. Hence we split off the vector at
-        /// that point. This enables us to seperate the expired read segments. Next we attempt to
+        /// that point. This enables us to separate the expired read segments. Next we attempt to
         /// remove them on by one.
         ///
         /// If there is any error in removing a segment, we stop and move back the remaining
@@ -1243,11 +1245,11 @@ pub mod segmented_log {
         /// - while The given `new_highest_offset` is beyond the capacity of the current write
         /// segment.
         ///     - if the size of the current write segment is zero
-        ///         - this implies that the records upto the given offset have not been persited on
+        ///         - this implies that the records upto the given offset have not been persisted on
         ///         the disk and the given new_highest_offset cannot be trusted. So we error out
         ///         with [`SegmentedLogError::OffsetNotValidToAdvanceTo`]
-        ///     - we try to accomodate the offset by rotating the write segment
-        /// - once the offset is accomodated, we attempt to advance the `next_offset` of the write
+        ///     - we try to accommodate the offset by rotating the write segment
+        /// - once the offset is accommodated, we attempt to advance the `next_offset` of the write
         /// segment to the given `new_highest_offset`. If there is an error, we error out with
         /// [`SegmentedLogError::SegmentError`].
         ///
@@ -1460,7 +1462,7 @@ pub mod segmented_log {
         /// vector of segments as is as the vector of read segments, along with a new write
         /// segment.
         /// - Otherwise we pop out the last segment from the given vector of segments. The shorter
-        /// vetor of segments is returned as the vector of read segmens along with the popped out
+        /// vector of segments is returned as the vector of read segments along with the popped out
         /// segment as the write segment.
         ///
         /// ## Errors

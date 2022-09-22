@@ -1,4 +1,5 @@
-//! Module providing sepcialization for the segmented log abstraction for the [`glommio`] runtime.
+//! Module providing the specialization for
+//! [`SegmentedLog`](crate::commit_log::segmented_log::SegmentedLog) for the [`glommio`] runtime.
 
 use super::store::Store;
 use crate::commit_log::{

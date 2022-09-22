@@ -22,6 +22,14 @@ A scalable, distributed message queue powered by a segmented, partitioned, repli
 <br><i>This is currently a work in progress.</i>
 </p>
 
+## Usage
+`laminarmq` provides a library crate and two binaries for managing `laminarmq` deployments.
+In order to use `laminarmq` as a library, add the following to your `Cargo.toml`:
+```toml
+[dependencies]
+laminarmq = "0.0.1"
+```
+
 ## Planned Architecture
 This section presents a brief overview on the different aspects of our message queue. This is only an outline of
 the architecture that we have planned for `laminarmq` and it is subject to change as this project evolves.
@@ -54,16 +62,25 @@ A particular "node" contains some or all "partition"(s) of a "topic". Hence a "t
 replicated within the nodes. The data is partitioned with the dividing of the data among the "partition"(s),
 and replicated by replicating these "partition"(s) among the other "node"(s).
 
-Each partition is part of a Raft cluster; e.g each replica of `(topic#001 -> partition#001)` is part of a Raft
-cluster, while each replica of `(topic#002 -> partition#002)` are part of a different Raft cluster. A particular
+Each partition is part of a Raft group; e.g each replica of `(topic#001 -> partition#001)` is part of a Raft
+group, while each replica of `(topic#002 -> partition#002)` are part of a different Raft group. A particular
 "node" might host some Raft leader "partition"(s) as well as Raft follower "partition"(s). For instance in the
 above example data persistence hierarchy, the `[L]` denote leaders, and the `[F]` denote followers.
 
 If a node goes down:
-- Any data not already replicated on other nodes from the partitions stored on it becomes unavailable.
-- If the only partition leader goes down, the partition goes down. If there are other leader and followers still 
-alive for that partition, there are leader elections among the partition replicas and they continue to service
-reads and writes. When a new node joins they are again rebalanced and replicated as necessary.
+- For every leader partition in that node:
+  - if there are no other follower replicas in other nodes in it's Raft group, that partition goes down.
+  - if there are other follower replicas in other nodes, there are leader elections among them and after a
+  leader is elected, reads and writes for that partition proceed normally
+- For every follower partition in that node:
+  - the remaining replicas in the same raft group continue to function in accordance with Raft's mechanisms.
+
+[CockroachDB](https://www.cockroachlabs.com/) and [Tikv](https://tikv.org) call this manner of using different
+Raft groups for different data buckets on the same node as MultiRaft.
+
+Read more here:
+- https://tikv.org/deep-dive/scalability/multi-raft/
+- https://www.cockroachlabs.com/blog/scaling-raft/
 
 ### Service Discovery
 Now we maintain a "member-list" abstraction of all "node"(s) which states which nodes are online in real time.
@@ -86,7 +103,12 @@ stored in these segments are lost. A good value for "segment_age" could be `7 da
 - [ ] Replication and consensus of replicated records with [Raft](https://raft.github.io/raft.pdf).
 
 ## Testing
-After cloning the repository, simply run `cargo test` at the repository root.
+After cloning the repository, simply run cargo's test subcommand at the repository root:
+```shell
+git clone git@github.com:arindas/laminarmq.git
+cd laminarmq/
+cargo test
+```
 
 ## License
 `laminarmq` is licensed under the MIT License. See [License](./LICENSE) for more details.
