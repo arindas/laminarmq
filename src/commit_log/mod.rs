@@ -172,11 +172,6 @@ pub mod store {
             pub length: u32,
         }
 
-        /// Returns the sum of the length of the given byte slice and [`RECORD_HEADER_LENGTH`].
-        pub fn header_padded_record_length(record: &[u8]) -> u64 {
-            (record.len() + RECORD_HEADER_LENGTH) as u64
-        }
-
         /// Returns the number of bytes needed to store the given record with binary encoding in a
         /// [`Store`](super::Store) implementation.
         /// This method returns a `Some(record_size)` if the size could be estimated correctly. If
@@ -666,26 +661,6 @@ pub trait CommitLog {
     fn offset_within_bounds(&self, offset: u64) -> bool {
         offset >= self.lowest_offset() && offset < self.highest_offset()
     }
-
-    /// The logical offset of the record sequentially next i.e after the given record in this
-    /// commit log.
-    ///
-    /// ## Warning
-    /// Note that the returned offset in the Some value, might be out of bounds for this log,
-    /// since it is only a logical offset. Nor is there a record guaranteed to exist at the offset
-    /// returned.
-    ///
-    /// ## Returns
-    /// - [`Some(next_record_offset)`] if the next records logical offset could be obtained
-    /// - None if the logical offset of the next record could not be obtained.
-    fn logical_offset_of_record_after(&self, record: &Record) -> Option<u64>;
-
-    /// Advances the highest offset of this instance to the given highest offset. This is useful
-    /// in the scenario where multiple [`CommitLog`] instances are opened for the same backing
-    /// files. This enables the [`CommitLog`] instances lagging behind to refresh their state to
-    /// ensure that all persisted records upto the given offset can be read from them. This also
-    /// helps [`CommitLog`] to ensure that no records are overwritten.
-    async fn advance_to_offset(&mut self, new_highest_offset: u64) -> Result<(), Self::Error>;
 
     /// Appends a new [`Record`] at the end of this [`CommitLog`].
     async fn append(&mut self, record: &mut Record) -> Result<u64, Self::Error>;
@@ -1201,6 +1176,64 @@ pub mod segmented_log {
 
             remove_result.map_err(SegmentedLogError::SegmentError)
         }
+
+        /// Advances this segmented log to the given new highest offset.
+        ///
+        /// This is useful in the scenario where multiple [`SegmentedLog`] instances are opened for
+        /// the same backing files. This enables the [`SegmentedLog`] instances lagging behind to
+        /// refresh their state to ensure that all persisted records upto the given offset can be
+        /// read from them. This also helps [`SegmentedLog`] to ensure that no records are
+        /// overwritten in situations like these.
+        ///
+        /// ## Mechanism for advancement
+        /// Before doing anything we reopen the write segment of this [`SegmentedLog`] to refresh
+        /// stale `highest_offset` if necessary.
+        ///
+        /// If the given `new_highest_offset <= self.highest_offset()` we do nothing and simply
+        /// return Ok(()). Otherwise we have the following situation:
+        /// - while The given `new_highest_offset` is beyond the capacity of the current write
+        /// segment.
+        ///     - if the size of the current write segment is zero
+        ///         - this implies that the records upto the given offset have not been persisted on
+        ///         the disk and the given new_highest_offset cannot be trusted. So we error out
+        ///         with [`SegmentedLogError::OffsetNotValidToAdvanceTo`]
+        ///     - we try to accommodate the offset by rotating the write segment
+        /// - once the offset is accommodated, we attempt to advance the `next_offset` of the write
+        /// segment to the given `new_highest_offset`. If there is an error, we error out with
+        /// [`SegmentedLogError::SegmentError`].
+        ///
+        /// ## Returns
+        /// - [`SegmentedLogError::OffsetNotValidToAdvanceTo`]: if the given offset is not a valid
+        /// offset to advance to.
+        /// - [`SegmentedLogError::SegmentError`]: if there is an error during advancing the offset
+        /// ofthe write segment.
+        pub async fn advance_to_offset(
+            &mut self,
+            new_highest_offset: u64,
+        ) -> Result<(), SegmentedLogError<T, S>> {
+            self.reopen_write_segment().await?;
+
+            if new_highest_offset <= write_segment_ref!(self, as_ref)?.next_offset() {
+                return Ok(());
+            }
+
+            while write_segment_ref!(self, as_ref)?
+                .store_position(new_highest_offset)
+                .is_none()
+            {
+                if write_segment_ref!(self, as_ref)?.size() == 0 {
+                    return Err(SegmentedLogError::OffsetNotValidToAdvanceTo);
+                }
+
+                self.rotate_new_write_segment().await?;
+            }
+
+            write_segment_ref!(self, as_mut)?
+                .advance_to_offset(new_highest_offset)
+                .map_err(SegmentedLogError::SegmentError)?;
+
+            Ok(())
+        }
     }
 
     #[doc(hidden)]
@@ -1232,64 +1265,6 @@ pub mod segmented_log {
         SegC: SegmentCreator<T, S>,
     {
         type Error = SegmentedLogError<T, S>;
-
-        /// Obtains the logical offset of the record after the given record by adding the size of
-        /// the record representation to its offset.
-        ///
-        /// This implementation's method invokes
-        /// [`bincoded_serialized_record_size](super::store::common::bincoded_serialized_record_size)
-        /// on the given record and adds it to the given records offset.
-        fn logical_offset_of_record_after(&self, record: &Record) -> Option<u64> {
-            super::store::common::bincoded_serialized_record_size(record).map(|x| x + record.offset)
-        }
-
-        /// Advances this segmented log to the given new highest offset.
-        ///
-        /// Before doing anything we reopen the write segment of this [`SegmentedLog`] to refresh
-        /// stale `highest_offset` if necessary.
-        ///
-        /// If the given `new_highest_offset <= self.highest_offset()` we do nothing and simply
-        /// return Ok(()). Otherwise we have the following situation:
-        /// - while The given `new_highest_offset` is beyond the capacity of the current write
-        /// segment.
-        ///     - if the size of the current write segment is zero
-        ///         - this implies that the records upto the given offset have not been persisted on
-        ///         the disk and the given new_highest_offset cannot be trusted. So we error out
-        ///         with [`SegmentedLogError::OffsetNotValidToAdvanceTo`]
-        ///     - we try to accommodate the offset by rotating the write segment
-        /// - once the offset is accommodated, we attempt to advance the `next_offset` of the write
-        /// segment to the given `new_highest_offset`. If there is an error, we error out with
-        /// [`SegmentedLogError::SegmentError`].
-        ///
-        /// ## Returns
-        /// - [`SegmentedLogError::OffsetNotValidToAdvanceTo`]: if the given offset is not a valid
-        /// offset to advance to.
-        /// - [`SegmentedLogError::SegmentError`]: if there is an error during advancing the offset
-        /// ofthe write segment.
-        async fn advance_to_offset(&mut self, new_highest_offset: u64) -> Result<(), Self::Error> {
-            self.reopen_write_segment().await?;
-
-            if new_highest_offset <= self.highest_offset() {
-                return Ok(());
-            }
-
-            while write_segment_ref!(self, as_ref)?
-                .store_position(new_highest_offset)
-                .is_none()
-            {
-                if write_segment_ref!(self, as_ref)?.size() == 0 {
-                    return Err(SegmentedLogError::OffsetNotValidToAdvanceTo);
-                }
-
-                self.rotate_new_write_segment().await?;
-            }
-
-            write_segment_ref!(self, as_mut)?
-                .advance_to_offset(new_highest_offset)
-                .map_err(SegmentedLogError::SegmentError)?;
-
-            Ok(())
-        }
 
         async fn append(&mut self, record: &mut Record) -> Result<u64, Self::Error> {
             while self.is_write_segment_maxed()? {
