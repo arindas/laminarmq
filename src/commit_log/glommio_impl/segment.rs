@@ -160,13 +160,15 @@ mod tests {
                     Err(SegmentError::SegmentMaxed)
                 ));
 
-                let record_1 = segment.read(offset_1).await.unwrap();
+                let (record_1, record_1_next_record_offset) = segment.read(offset_1).await.unwrap();
                 assert_eq!(record_1.offset, offset_1);
                 assert_eq!(record_1.value, RECORD_VALUE);
+                assert_eq!(record_1_next_record_offset, offset_2);
 
-                let record_2 = segment.read(offset_2).await.unwrap();
+                let (record_2, record_2_next_record_offset) = segment.read(offset_2).await.unwrap();
                 assert_eq!(record_2.offset, offset_2);
                 assert_eq!(record_2.value, RECORD_VALUE);
+                assert_eq!(record_2_next_record_offset, segment.next_offset());
 
                 // read at invalid loacation
                 assert!(matches!(

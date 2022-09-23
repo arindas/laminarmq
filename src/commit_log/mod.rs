@@ -74,10 +74,9 @@ pub mod store {
         /// Appends a record containing the given record bytes at the end of this store.
         async fn append(&mut self, record_bytes: &[u8]) -> Result<(u64, usize), Self::Error>;
 
-        /// Reads the record stored at the given position in the record.
-        async fn read(&self, position: u64) -> Result<Record, Self::Error>;
-
-        async fn read_(&self, position: u64) -> Result<(Record, u64), Self::Error>;
+        /// Reads the record stored at the given position in the [`Store`] along with the position
+        /// of the next record.
+        async fn read(&self, position: u64) -> Result<(Record, u64), Self::Error>;
 
         /// Closes this record. Consumes this record instance to stop further operations on this
         /// closed store instance.
@@ -136,7 +135,7 @@ pub mod store {
 
         async fn next(&mut self) -> Option<Self::Item> {
             self.store
-                .read_(self.position)
+                .read(self.position)
                 .await
                 .ok()
                 .map(|(record, next_position)| {
@@ -478,7 +477,9 @@ pub mod segment {
         /// Reads the record at the given offset.
         ///
         /// ## Returns
-        /// A [`Record`](super::Record) instance containing the desired record.
+        /// A tuple containing:
+        /// - [`Record`](super::Record) instance containing the desired record.
+        /// - [`u64`] value containing the offset of the next record.
         ///
         /// ## Errors
         /// - [`SegmentError::OffsetOutOfBounds`] if the  `offset >= next_offset` value.
@@ -489,28 +490,7 @@ pub mod segment {
         /// given offset from the underlying [`Store`](super::store::Store) instance.
         /// - [`SegmentError::SerializationError`] if there is an error during deserializing the
         /// record from the bytes read from storage.
-        pub async fn read(&self, offset: u64) -> Result<Record, SegmentError<T, S>> {
-            if !self.offset_within_bounds(offset) {
-                return Err(SegmentError::OffsetOutOfBounds);
-            }
-
-            let position = self
-                .store_position(offset)
-                .ok_or(SegmentError::OffsetBeyondCapacity)?;
-
-            let record_bytes = self
-                .store
-                .read(position)
-                .await
-                .map_err(SegmentError::StoreError)?;
-
-            let record: Record = bincode::deserialize(&record_bytes)
-                .map_err(|_x| SegmentError::SerializationError)?;
-
-            Ok(record)
-        }
-
-        pub async fn read_(&self, offset: u64) -> Result<(Record, u64), SegmentError<T, S>> {
+        pub async fn read(&self, offset: u64) -> Result<(Record, u64), SegmentError<T, S>> {
             if !self.offset_within_bounds(offset) {
                 return Err(SegmentError::OffsetOutOfBounds);
             }
@@ -521,7 +501,7 @@ pub mod segment {
 
             let (record_bytes, next_record_position) = self
                 .store
-                .read_(position)
+                .read(position)
                 .await
                 .map_err(SegmentError::StoreError)?;
 
@@ -710,8 +690,9 @@ pub trait CommitLog {
     /// Appends a new [`Record`] at the end of this [`CommitLog`].
     async fn append(&mut self, record: &mut Record) -> Result<u64, Self::Error>;
 
-    /// Reads the [`Record`] at the given offset from this [`CommitLog`].
-    async fn read(&self, offset: u64) -> Result<Record, Self::Error>;
+    /// Reads the [`Record`] at the given offset, along with the offset of the next record from
+    /// this [`CommitLog`].
+    async fn read(&self, offset: u64) -> Result<(Record, u64), Self::Error>;
 
     /// Removes all underlying storage files associated. Consumes this [`CommitLog`] instance to
     /// prevent further operations on this instance.
@@ -779,8 +760,8 @@ impl<'a, Log: CommitLog> Scanner for LogScanner<'a, Log> {
     /// - None: to indicate that are there are no more records to read.
     async fn next(&mut self) -> Option<Self::Item> {
         while self.offset < self.log.highest_offset() {
-            if let Ok(record) = self.log.read(self.offset).await {
-                self.offset = self.log.logical_offset_of_record_after(&record)?;
+            if let Ok((record, next_record_offset)) = self.log.read(self.offset).await {
+                self.offset = next_record_offset;
                 return Some(record);
             } else {
                 self.offset += self.scan_seek_bytes;
@@ -1323,7 +1304,7 @@ pub mod segmented_log {
                 .map_err(SegmentedLogError::SegmentError)
         }
 
-        async fn read(&self, offset: u64) -> Result<Record, Self::Error> {
+        async fn read(&self, offset: u64) -> Result<(Record, u64), Self::Error> {
             if !self.offset_within_bounds(offset) {
                 return Err(SegmentedLogError::OffsetOutOfBounds);
             }

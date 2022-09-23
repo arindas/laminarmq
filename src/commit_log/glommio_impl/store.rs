@@ -144,7 +144,9 @@ impl crate::commit_log::store::Store<ReadResult> for Store {
     /// Reads the record at the given position.
     ///
     /// ## Returns
-    /// A [`ReadResult`] containing the bytes of the desired record.
+    /// A tuple containing;
+    /// - [`ReadResult`] containing the bytes of the desired record.
+    /// - An [`u64`] containing the position of the next record.
     ///
     /// ## Errors
     /// - [`StoreError::SerializationError`]: if there was an error during deserializing the
@@ -154,32 +156,7 @@ impl crate::commit_log::store::Store<ReadResult> for Store {
     /// - [`StoreError::InvalidRecordHeader`]: if the record header is invalid for the bytes in the
     /// [`ReadResult`] instance read from the underlying [`DmaFile`]. (Checksum mismatch or invalid
     /// record length).
-    async fn read(&self, position: u64) -> Result<ReadResult, Self::Error> {
-        let record_header_bytes = self
-            .reader
-            .read_at(position, RECORD_HEADER_LENGTH)
-            .await
-            .map_err(StoreError::StorageError)?;
-        let record_header = RecordHeader::from_bytes(&record_header_bytes)
-            .map_err(StoreError::SerializationError)?;
-
-        let record_bytes = self
-            .reader
-            .read_at(
-                position + RECORD_HEADER_LENGTH as u64,
-                record_header.length as usize,
-            )
-            .await
-            .map_err(StoreError::StorageError)?;
-
-        if !record_header.valid_for_record_bytes(&record_bytes) {
-            return Err(StoreError::InvalidRecordHeader);
-        }
-
-        Ok(record_bytes)
-    }
-
-    async fn read_(&self, position: u64) -> Result<(ReadResult, u64), Self::Error> {
+    async fn read(&self, position: u64) -> Result<(ReadResult, u64), Self::Error> {
         let record_header_bytes = self
             .reader
             .read_at(position, RECORD_HEADER_LENGTH)
@@ -372,7 +349,8 @@ mod tests {
 
                 for (position, _written_bytes) in &record_positions_and_sizes[0..RECORDS.len() / 2]
                 {
-                    read_records.push(store.read(position.clone()).await.unwrap());
+                    let (record, _next_record_offset) = store.read(position.clone()).await.unwrap();
+                    read_records.push(record);
                 }
 
                 for i in 0..RECORDS.len() / 2 {

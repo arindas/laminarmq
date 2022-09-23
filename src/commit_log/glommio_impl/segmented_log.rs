@@ -134,7 +134,7 @@ mod tests {
                     // this write will trigger log rotation
                     let curr_offset = log.append(&mut record).await.unwrap();
 
-                    let record = log.read(prev_offset).await.unwrap();
+                    let (record, next_record_offset) = log.read(prev_offset).await.unwrap();
                     assert_eq!(
                         record,
                         Record {
@@ -142,6 +142,7 @@ mod tests {
                             offset: prev_offset
                         }
                     );
+                    assert_eq!(next_record_offset, curr_offset);
                     prev_offset = curr_offset;
                 }
 
