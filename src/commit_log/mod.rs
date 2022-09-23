@@ -77,6 +77,8 @@ pub mod store {
         /// Reads the record stored at the given position in the record.
         async fn read(&self, position: u64) -> Result<Record, Self::Error>;
 
+        async fn read_(&self, position: u64) -> Result<(Record, u64), Self::Error>;
+
         /// Closes this record. Consumes this record instance to stop further operations on this
         /// closed store instance.
         async fn close(self) -> Result<(), Self::Error>;
@@ -133,10 +135,14 @@ pub mod store {
         type Item = Record;
 
         async fn next(&mut self) -> Option<Self::Item> {
-            self.store.read(self.position).await.ok().map(|record| {
-                self.position += common::header_padded_record_length(&record);
-                record
-            })
+            self.store
+                .read_(self.position)
+                .await
+                .ok()
+                .map(|(record, next_position)| {
+                    self.position = next_position;
+                    record
+                })
         }
     }
 
@@ -502,6 +508,27 @@ pub mod segment {
                 .map_err(|_x| SegmentError::SerializationError)?;
 
             Ok(record)
+        }
+
+        pub async fn read_(&self, offset: u64) -> Result<(Record, u64), SegmentError<T, S>> {
+            if !self.offset_within_bounds(offset) {
+                return Err(SegmentError::OffsetOutOfBounds);
+            }
+
+            let position = self
+                .store_position(offset)
+                .ok_or(SegmentError::OffsetBeyondCapacity)?;
+
+            let (record_bytes, next_record_position) = self
+                .store
+                .read_(position)
+                .await
+                .map_err(SegmentError::StoreError)?;
+
+            let record: Record = bincode::deserialize(&record_bytes)
+                .map_err(|_x| SegmentError::SerializationError)?;
+
+            Ok((record, self.base_offset() + next_record_position))
         }
 
         /// Advances this [`Segment`] instance's `next_offset` value to the given value.

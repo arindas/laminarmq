@@ -179,6 +179,33 @@ impl crate::commit_log::store::Store<ReadResult> for Store {
         Ok(record_bytes)
     }
 
+    async fn read_(&self, position: u64) -> Result<(ReadResult, u64), Self::Error> {
+        let record_header_bytes = self
+            .reader
+            .read_at(position, RECORD_HEADER_LENGTH)
+            .await
+            .map_err(StoreError::StorageError)?;
+        let record_header = RecordHeader::from_bytes(&record_header_bytes)
+            .map_err(StoreError::SerializationError)?;
+
+        let record_bytes = self
+            .reader
+            .read_at(
+                position + RECORD_HEADER_LENGTH as u64,
+                record_header.length as usize,
+            )
+            .await
+            .map_err(StoreError::StorageError)?;
+
+        if !record_header.valid_for_record_bytes(&record_bytes) {
+            return Err(StoreError::InvalidRecordHeader);
+        }
+
+        let bytes_read = (record_header_bytes.len() + record_bytes.len()) as u64;
+
+        Ok((record_bytes, position + bytes_read))
+    }
+
     /// Closes this [`Store`] instance.
     ///
     /// ## Errors
