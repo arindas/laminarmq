@@ -164,6 +164,7 @@ pub mod store {
         /// └─────────────────────────┴────────────────────────┴───────────────────────┘
         /// │─────────────── RecordHeader ─────────────────────│
         /// ```
+        #[derive(Debug)]
         pub struct RecordHeader {
             /// checksum computed from the bytes in the record.
             pub checksum: u32,
@@ -204,7 +205,11 @@ pub mod store {
                 let checksum = cursor.read_u32::<LittleEndian>()?;
                 let length = cursor.read_u32::<LittleEndian>()?;
 
-                Ok(Self { checksum, length })
+                if checksum == 0 && length == 0 {
+                    Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof))
+                } else {
+                    Ok(Self { checksum, length })
+                }
             }
 
             /// Serializes this given record header to an owned byte array.
