@@ -11,6 +11,8 @@
 //! In the context of `laminarmq` this module is intended to provide the storage for individual
 //! partitions in a topic.
 
+use std::borrow::Cow;
+
 use async_trait::async_trait;
 
 /// Represents a record in a [`CommitLog`].
@@ -19,6 +21,16 @@ pub struct Record {
     /// Value stored in this record entry. The value itself might be serialized bytes of some other
     /// form of record.
     pub value: Vec<u8>,
+
+    /// Offset at which this record is stored in the log.
+    pub offset: u64,
+}
+
+#[derive(serde::Deserialize, serde::Serialize, Debug, PartialEq, Eq, Clone)]
+pub struct Record_<'a> {
+    /// Value stored in this record entry. The value itself might be serialized bytes of some other
+    /// form of record.
+    pub value: Cow<'a, [u8]>,
 
     /// Offset at which this record is stored in the log.
     pub offset: u64,
@@ -248,7 +260,7 @@ pub mod segment {
 
     use super::{
         store::{Store, StoreScanner},
-        Record, Scanner,
+        Record, Record_, Scanner,
     };
 
     /// Error type used for operations on a [`Segment`].
@@ -470,6 +482,31 @@ pub mod segment {
             Ok(current_offset)
         }
 
+        pub async fn append_(&mut self, record_bytes: &[u8]) -> Result<u64, SegmentError<T, S>> {
+            if self.is_maxed() {
+                return Err(SegmentError::SegmentMaxed);
+            }
+
+            let current_offset = self.next_offset;
+            let record = Record_ {
+                value: record_bytes.into(),
+                offset: current_offset,
+            };
+
+            let bincoded_record =
+                bincode::serialize(&record).map_err(|_x| SegmentError::SerializationError)?;
+
+            let (_, bytes_written) = self
+                .store
+                .append(&bincoded_record)
+                .await
+                .map_err(SegmentError::StoreError)?;
+
+            self.next_offset += bytes_written as u64;
+
+            Ok(current_offset)
+        }
+
         pub fn offset_within_bounds(&self, offset: u64) -> bool {
             offset < self.next_offset()
         }
@@ -506,6 +543,27 @@ pub mod segment {
                 .map_err(SegmentError::StoreError)?;
 
             let record: Record = bincode::deserialize(&record_bytes)
+                .map_err(|_x| SegmentError::SerializationError)?;
+
+            Ok((record, self.base_offset() + next_record_position))
+        }
+
+        pub async fn read_(&self, offset: u64) -> Result<(Record_, u64), SegmentError<T, S>> {
+            if !self.offset_within_bounds(offset) {
+                return Err(SegmentError::OffsetOutOfBounds);
+            }
+
+            let position = self
+                .store_position(offset)
+                .ok_or(SegmentError::OffsetBeyondCapacity)?;
+
+            let (record_bytes, next_record_position) = self
+                .store
+                .read(position)
+                .await
+                .map_err(SegmentError::StoreError)?;
+
+            let record: Record_ = bincode::deserialize(&record_bytes)
                 .map_err(|_x| SegmentError::SerializationError)?;
 
             Ok((record, self.base_offset() + next_record_position))
@@ -623,6 +681,64 @@ pub mod segment {
         }
     }
 
+    pub struct SegmentScanner_<'a, T, S>
+    where
+        T: Deref<Target = [u8]>,
+        S: Store<T>,
+    {
+        store_scanner: StoreScanner<'a, T, S>,
+    }
+
+    impl<'a, T, S> SegmentScanner_<'a, T, S>
+    where
+        T: Deref<Target = [u8]>,
+        S: Store<T>,
+    {
+        /// Creates a new [`SegmentScanner`] that starts reading from the given segments `base_offset`.
+        pub fn new(segment: &'a Segment<T, S>) -> Result<Self, SegmentError<T, S>> {
+            Self::with_offset(segment, segment.base_offset())
+        }
+
+        /// Creates a new [`SegmentScanner`] that starts reading from the given offset.
+        ///
+        /// ## Errors
+        /// - [`SegmentError::OffsetOutOfBounds`] if the given `offset >= segment.next_offset()`
+        /// - [`SegmentError::OffsetBeyondCapacity`] if the given offset doesn't map to a valid
+        /// location on the [`Segment`] instances underlying store.
+        pub fn with_offset(
+            segment: &'a Segment<T, S>,
+            offset: u64,
+        ) -> Result<Self, SegmentError<T, S>> {
+            if !segment.offset_within_bounds(offset) {
+                return Err(SegmentError::OffsetOutOfBounds);
+            }
+
+            Ok(Self {
+                store_scanner: StoreScanner::with_position(
+                    segment.store(),
+                    segment
+                        .store_position(offset)
+                        .ok_or(SegmentError::OffsetBeyondCapacity)?,
+                ),
+            })
+        }
+    }
+
+    #[async_trait(?Send)]
+    impl<'a, T, S> Scanner for SegmentScanner_<'a, T, S>
+    where
+        T: Deref<Target = [u8]> + Unpin,
+        S: Store<T>,
+    {
+        type Item = super::Record_<'a>;
+
+        async fn next(&mut self) -> Option<Self::Item> {
+            self.store_scanner
+                .next()
+                .await
+                .and_then(|record_bytes| bincode::deserialize(&record_bytes).ok())
+        }
+    }
     pub mod config {
         //! Module providing types for configuring [`Segment`](super::Segment) instances.
         use serde::{Deserialize, Serialize};
