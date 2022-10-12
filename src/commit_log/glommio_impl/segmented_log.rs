@@ -212,7 +212,7 @@ mod tests {
                         log.append(&mut record).await.unwrap();
                 }
 
-                let expiry_duration = Duration::from_millis(100);
+                let expiry_duration = Duration::from_millis(200);
 
                 glommio::timer::sleep(expiry_duration).await;
 
