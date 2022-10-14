@@ -345,16 +345,18 @@ mod tests {
                     record_positions_and_sizes.push(store.append(&record).await.unwrap());
                 }
 
-                let mut read_records = Vec::with_capacity(RECORDS.len());
+                let mut records_read_before_sync = Vec::with_capacity(RECORDS.len());
 
-                for (position, _written_bytes) in &record_positions_and_sizes[0..RECORDS.len() / 2]
-                {
-                    let (record, _next_record_offset) = store.read(position.clone()).await.unwrap();
-                    read_records.push(record);
+                for (position, _written_bytes) in &record_positions_and_sizes {
+                    if let Ok((record, _next_record_offset)) = store.read(position.clone()).await {
+                        records_read_before_sync.push(record);
+                    } else {
+                        break;
+                    }
                 }
 
-                for i in 0..RECORDS.len() / 2 {
-                    assert_eq!(read_records[i].deref(), RECORDS[i]);
+                for i in 0..records_read_before_sync.len() {
+                    assert_eq!(records_read_before_sync[i].deref(), RECORDS[i]);
                 }
 
                 let mut i = 0;
