@@ -46,7 +46,7 @@
 //!             .unwrap();
 //!
 //!         log.remove().await.unwrap();
-//!         assert!(!PathBuf::from(&storage_dir_path,).exists());
+//!         assert!(!PathBuf::from(&storage_dir_path).exists());
 //!     })
 //!     .unwrap();
 //! local_ex.join().unwrap();

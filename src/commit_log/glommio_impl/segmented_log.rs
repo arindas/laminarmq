@@ -92,8 +92,8 @@ mod tests {
     }
 
     #[test]
-    fn test_log_reads_reflect_writes() {
-        const STORAGE_DIR_PATH: &str = "/tmp/laminarmq_log_test_log_reads_reflect_writes";
+    fn test_log_reads_reflect_writes_() {
+        const STORAGE_DIR_PATH: &str = "/tmp/laminarmq_log_test_log_reads_reflect_writes_";
         if Path::new(STORAGE_DIR_PATH).exists() {
             fs::remove_dir_all(STORAGE_DIR_PATH).unwrap();
         }
@@ -101,8 +101,8 @@ mod tests {
         let local_ex = LocalExecutorBuilder::new(Placement::Unbound)
             .spawn(move || async move {
                 const RECORD_VALUE: &[u8] = b"Hello world!";
-                let mut record = Record {
-                    value: RECORD_VALUE.to_vec(),
+                let record = Record {
+                    value: RECORD_VALUE.into(),
                     offset: 0,
                 };
                 let record_size = bincoded_serialized_record_size(&record).unwrap();
@@ -121,7 +121,7 @@ mod tests {
                     .await
                     .unwrap();
 
-                let offset_0 = log.append(&mut record).await.unwrap();
+                let offset_0 = log.append(RECORD_VALUE).await.unwrap();
                 assert_eq!(offset_0, log_config.initial_offset);
                 // not enough bytes written to trigger sync
                 matches!(log.read(offset_0).await, Err(LogError::SegmentError(_)));
@@ -132,13 +132,13 @@ mod tests {
                 for _ in 1..NUM_RECORDS {
                     assert!(log.is_write_segment_maxed().unwrap());
                     // this write will trigger log rotation
-                    let curr_offset = log.append(&mut record).await.unwrap();
+                    let curr_offset = log.append(RECORD_VALUE).await.unwrap();
 
                     let (record, next_record_offset) = log.read(prev_offset).await.unwrap();
                     assert_eq!(
                         record,
                         Record {
-                            value: RECORD_VALUE.to_vec(),
+                            value: RECORD_VALUE.into(),
                             offset: prev_offset
                         }
                     );
@@ -182,8 +182,8 @@ mod tests {
         let local_ex = LocalExecutorBuilder::new(Placement::Unbound)
             .spawn(move || async move {
                 const RECORD_VALUE: &[u8] = b"Hello world!";
-                let mut record = Record {
-                    value: RECORD_VALUE.to_vec(),
+                let record = Record {
+                    value: RECORD_VALUE.into(),
                     offset: 0,
                 };
                 let record_size = bincoded_serialized_record_size(&record).unwrap();
@@ -209,7 +209,7 @@ mod tests {
                 for _ in 0..NUM_RECORDS / 2 {
                     // this write will trigger log rotation
                     base_offset_of_first_non_expired_segment =
-                        log.append(&mut record).await.unwrap();
+                        log.append(RECORD_VALUE).await.unwrap();
                 }
 
                 let expiry_duration = Duration::from_millis(200);
@@ -217,7 +217,7 @@ mod tests {
                 glommio::timer::sleep(expiry_duration).await;
 
                 for _ in NUM_RECORDS / 2..NUM_RECORDS {
-                    log.append(&mut record).await.unwrap();
+                    log.append(RECORD_VALUE).await.unwrap();
                 }
 
                 log.remove_expired_segments(expiry_duration).await.unwrap();
@@ -256,8 +256,8 @@ mod tests {
         let local_ex = LocalExecutorBuilder::new(Placement::Unbound)
             .spawn(move || async move {
                 const RECORD_VALUE: &[u8] = b"Hello world!";
-                let mut record = Record {
-                    value: RECORD_VALUE.to_vec(),
+                let record = Record {
+                    value: RECORD_VALUE.into(),
                     offset: 0,
                 };
                 let record_size = bincoded_serialized_record_size(&record).unwrap();
@@ -280,15 +280,14 @@ mod tests {
                     .await
                     .unwrap();
 
-                log_0.append(&mut record).await.unwrap(); // record written but not guranteed to be
-                                                          // synced
+                log_0.append(RECORD_VALUE).await.unwrap(); // record written but not guranteed to be synced
 
                 assert!(matches!(
                     log_1.advance_to_offset(log_0.highest_offset()).await,
                     Err(LogError::OffsetNotValidToAdvanceTo)
                 ));
 
-                log_0.append(&mut record).await.unwrap(); // first segment rotation
+                log_0.append(RECORD_VALUE).await.unwrap(); // first segment rotation
                 let highest_offset_2 = log_0.highest_offset();
 
                 assert!(matches!(
@@ -296,8 +295,7 @@ mod tests {
                     Err(LogError::OffsetNotValidToAdvanceTo)
                 ));
 
-                log_0.append(&mut record).await.unwrap(); // second log rotation; 2nd segment
-                                                          // synced
+                log_0.append(RECORD_VALUE).await.unwrap(); // second log rotation; 2nd segment synced
 
                 log_1.advance_to_offset(highest_offset_2).await.unwrap();
 

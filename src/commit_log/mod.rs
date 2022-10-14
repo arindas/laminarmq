@@ -17,17 +17,7 @@ use async_trait::async_trait;
 
 /// Represents a record in a [`CommitLog`].
 #[derive(serde::Deserialize, serde::Serialize, Debug, PartialEq, Eq, Clone)]
-pub struct Record {
-    /// Value stored in this record entry. The value itself might be serialized bytes of some other
-    /// form of record.
-    pub value: Vec<u8>,
-
-    /// Offset at which this record is stored in the log.
-    pub offset: u64,
-}
-
-#[derive(serde::Deserialize, serde::Serialize, Debug, PartialEq, Eq, Clone)]
-pub struct Record_<'a> {
+pub struct Record<'a> {
     /// Value stored in this record entry. The value itself might be serialized bytes of some other
     /// form of record.
     pub value: Cow<'a, [u8]>,
@@ -260,7 +250,7 @@ pub mod segment {
 
     use super::{
         store::{Store, StoreScanner},
-        Record, Record_, Scanner,
+        Record, Scanner,
     };
 
     /// Error type used for operations on a [`Segment`].
@@ -456,39 +446,13 @@ pub mod segment {
         /// given record instance.
         /// - [`SegmentError::StoreError`] if there was an error during writing to the underlying
         /// [`Store`](super::store::Store) instance.
-        pub async fn append(&mut self, record: &mut Record) -> Result<u64, SegmentError<T, S>> {
-            if self.is_maxed() {
-                return Err(SegmentError::SegmentMaxed);
-            }
-
-            let old_record_offset = record.offset;
-
-            let current_offset = self.next_offset;
-            record.offset = current_offset;
-
-            let bincoded_record =
-                bincode::serialize(record).map_err(|_x| SegmentError::SerializationError)?;
-
-            let (_, bytes_written) = self
-                .store
-                .append(&bincoded_record)
-                .await
-                .map_err(SegmentError::StoreError)?;
-
-            self.next_offset += bytes_written as u64;
-
-            record.offset = old_record_offset;
-
-            Ok(current_offset)
-        }
-
-        pub async fn append_(&mut self, record_bytes: &[u8]) -> Result<u64, SegmentError<T, S>> {
+        pub async fn append(&mut self, record_bytes: &[u8]) -> Result<u64, SegmentError<T, S>> {
             if self.is_maxed() {
                 return Err(SegmentError::SegmentMaxed);
             }
 
             let current_offset = self.next_offset;
-            let record = Record_ {
+            let record = Record {
                 value: record_bytes.into(),
                 offset: current_offset,
             };
@@ -543,27 +507,6 @@ pub mod segment {
                 .map_err(SegmentError::StoreError)?;
 
             let record: Record = bincode::deserialize(&record_bytes)
-                .map_err(|_x| SegmentError::SerializationError)?;
-
-            Ok((record, self.base_offset() + next_record_position))
-        }
-
-        pub async fn read_(&self, offset: u64) -> Result<(Record_, u64), SegmentError<T, S>> {
-            if !self.offset_within_bounds(offset) {
-                return Err(SegmentError::OffsetOutOfBounds);
-            }
-
-            let position = self
-                .store_position(offset)
-                .ok_or(SegmentError::OffsetBeyondCapacity)?;
-
-            let (record_bytes, next_record_position) = self
-                .store
-                .read(position)
-                .await
-                .map_err(SegmentError::StoreError)?;
-
-            let record: Record_ = bincode::deserialize(&record_bytes)
                 .map_err(|_x| SegmentError::SerializationError)?;
 
             Ok((record, self.base_offset() + next_record_position))
@@ -671,66 +614,7 @@ pub mod segment {
         T: Deref<Target = [u8]> + Unpin,
         S: Store<T>,
     {
-        type Item = super::Record;
-
-        async fn next(&mut self) -> Option<Self::Item> {
-            self.store_scanner
-                .next()
-                .await
-                .and_then(|record_bytes| bincode::deserialize(&record_bytes).ok())
-        }
-    }
-
-    pub struct SegmentScanner_<'a, T, S>
-    where
-        T: Deref<Target = [u8]>,
-        S: Store<T>,
-    {
-        store_scanner: StoreScanner<'a, T, S>,
-    }
-
-    impl<'a, T, S> SegmentScanner_<'a, T, S>
-    where
-        T: Deref<Target = [u8]>,
-        S: Store<T>,
-    {
-        /// Creates a new [`SegmentScanner`] that starts reading from the given segments `base_offset`.
-        pub fn new(segment: &'a Segment<T, S>) -> Result<Self, SegmentError<T, S>> {
-            Self::with_offset(segment, segment.base_offset())
-        }
-
-        /// Creates a new [`SegmentScanner`] that starts reading from the given offset.
-        ///
-        /// ## Errors
-        /// - [`SegmentError::OffsetOutOfBounds`] if the given `offset >= segment.next_offset()`
-        /// - [`SegmentError::OffsetBeyondCapacity`] if the given offset doesn't map to a valid
-        /// location on the [`Segment`] instances underlying store.
-        pub fn with_offset(
-            segment: &'a Segment<T, S>,
-            offset: u64,
-        ) -> Result<Self, SegmentError<T, S>> {
-            if !segment.offset_within_bounds(offset) {
-                return Err(SegmentError::OffsetOutOfBounds);
-            }
-
-            Ok(Self {
-                store_scanner: StoreScanner::with_position(
-                    segment.store(),
-                    segment
-                        .store_position(offset)
-                        .ok_or(SegmentError::OffsetBeyondCapacity)?,
-                ),
-            })
-        }
-    }
-
-    #[async_trait(?Send)]
-    impl<'a, T, S> Scanner for SegmentScanner_<'a, T, S>
-    where
-        T: Deref<Target = [u8]> + Unpin,
-        S: Store<T>,
-    {
-        type Item = super::Record_<'a>;
+        type Item = super::Record<'a>;
 
         async fn next(&mut self) -> Option<Self::Item> {
             self.store_scanner
@@ -784,7 +668,7 @@ pub trait CommitLog {
     }
 
     /// Appends a new [`Record`] at the end of this [`CommitLog`].
-    async fn append(&mut self, record: &mut Record) -> Result<u64, Self::Error>;
+    async fn append(&mut self, record_bytes: &[u8]) -> Result<u64, Self::Error>;
 
     /// Reads the [`Record`] at the given offset, along with the offset of the next record from
     /// this [`CommitLog`].
@@ -843,7 +727,7 @@ impl<'a, Log: CommitLog> LogScanner<'a, Log> {
 
 #[async_trait(?Send)]
 impl<'a, Log: CommitLog> Scanner for LogScanner<'a, Log> {
-    type Item = Record;
+    type Item = Record<'a>;
 
     /// Linearly scans and reads the next record in the [`CommitLog`] instance asynchronously. If
     /// the read operation fails, it searches for the next readable offset by seeking with the
@@ -1387,7 +1271,7 @@ pub mod segmented_log {
     {
         type Error = SegmentedLogError<T, S>;
 
-        async fn append(&mut self, record: &mut Record) -> Result<u64, Self::Error> {
+        async fn append(&mut self, record_bytes: &[u8]) -> Result<u64, Self::Error> {
             while self.is_write_segment_maxed()? {
                 self.rotate_new_write_segment().await?;
             }
@@ -1395,7 +1279,7 @@ pub mod segmented_log {
             self.write_segment
                 .as_mut()
                 .ok_or(SegmentedLogError::WriteSegmentLost)?
-                .append(record)
+                .append(record_bytes)
                 .await
                 .map_err(SegmentedLogError::SegmentError)
         }
