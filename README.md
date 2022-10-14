@@ -29,7 +29,8 @@ In order to use `laminarmq` as a library, add the following to your `Cargo.toml`
 [dependencies]
 laminarmq = "0.0.2"
 ```
-Refer to [API Documentation](https://arindas.github.io/laminarmq/laminarmq/) for more details.
+Refer to latest git [API Documentation](https://arindas.github.io/laminarmq/laminarmq/)
+or [Crate Documentation](https://docs.rs/laminarmq) for more details.
 
 ## Planned Architecture
 This section presents a brief overview on the different aspects of our message queue. This is only an outline of

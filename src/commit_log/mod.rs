@@ -11,14 +11,16 @@
 //! In the context of `laminarmq` this module is intended to provide the storage for individual
 //! partitions in a topic.
 
+use std::borrow::Cow;
+
 use async_trait::async_trait;
 
 /// Represents a record in a [`CommitLog`].
 #[derive(serde::Deserialize, serde::Serialize, Debug, PartialEq, Eq, Clone)]
-pub struct Record {
+pub struct Record<'a> {
     /// Value stored in this record entry. The value itself might be serialized bytes of some other
     /// form of record.
-    pub value: Vec<u8>,
+    pub value: Cow<'a, [u8]>,
 
     /// Offset at which this record is stored in the log.
     pub offset: u64,
@@ -444,18 +446,19 @@ pub mod segment {
         /// given record instance.
         /// - [`SegmentError::StoreError`] if there was an error during writing to the underlying
         /// [`Store`](super::store::Store) instance.
-        pub async fn append(&mut self, record: &mut Record) -> Result<u64, SegmentError<T, S>> {
+        pub async fn append(&mut self, record_bytes: &[u8]) -> Result<u64, SegmentError<T, S>> {
             if self.is_maxed() {
                 return Err(SegmentError::SegmentMaxed);
             }
 
-            let old_record_offset = record.offset;
-
             let current_offset = self.next_offset;
-            record.offset = current_offset;
+            let record = Record {
+                value: record_bytes.into(),
+                offset: current_offset,
+            };
 
             let bincoded_record =
-                bincode::serialize(record).map_err(|_x| SegmentError::SerializationError)?;
+                bincode::serialize(&record).map_err(|_x| SegmentError::SerializationError)?;
 
             let (_, bytes_written) = self
                 .store
@@ -464,8 +467,6 @@ pub mod segment {
                 .map_err(SegmentError::StoreError)?;
 
             self.next_offset += bytes_written as u64;
-
-            record.offset = old_record_offset;
 
             Ok(current_offset)
         }
@@ -613,7 +614,7 @@ pub mod segment {
         T: Deref<Target = [u8]> + Unpin,
         S: Store<T>,
     {
-        type Item = super::Record;
+        type Item = super::Record<'a>;
 
         async fn next(&mut self) -> Option<Self::Item> {
             self.store_scanner
@@ -622,7 +623,6 @@ pub mod segment {
                 .and_then(|record_bytes| bincode::deserialize(&record_bytes).ok())
         }
     }
-
     pub mod config {
         //! Module providing types for configuring [`Segment`](super::Segment) instances.
         use serde::{Deserialize, Serialize};
@@ -668,7 +668,7 @@ pub trait CommitLog {
     }
 
     /// Appends a new [`Record`] at the end of this [`CommitLog`].
-    async fn append(&mut self, record: &mut Record) -> Result<u64, Self::Error>;
+    async fn append(&mut self, record_bytes: &[u8]) -> Result<u64, Self::Error>;
 
     /// Reads the [`Record`] at the given offset, along with the offset of the next record from
     /// this [`CommitLog`].
@@ -727,7 +727,7 @@ impl<'a, Log: CommitLog> LogScanner<'a, Log> {
 
 #[async_trait(?Send)]
 impl<'a, Log: CommitLog> Scanner for LogScanner<'a, Log> {
-    type Item = Record;
+    type Item = Record<'a>;
 
     /// Linearly scans and reads the next record in the [`CommitLog`] instance asynchronously. If
     /// the read operation fails, it searches for the next readable offset by seeking with the
@@ -1271,7 +1271,7 @@ pub mod segmented_log {
     {
         type Error = SegmentedLogError<T, S>;
 
-        async fn append(&mut self, record: &mut Record) -> Result<u64, Self::Error> {
+        async fn append(&mut self, record_bytes: &[u8]) -> Result<u64, Self::Error> {
             while self.is_write_segment_maxed()? {
                 self.rotate_new_write_segment().await?;
             }
@@ -1279,7 +1279,7 @@ pub mod segmented_log {
             self.write_segment
                 .as_mut()
                 .ok_or(SegmentedLogError::WriteSegmentLost)?
-                .append(record)
+                .append(record_bytes)
                 .await
                 .map_err(SegmentedLogError::SegmentError)
         }

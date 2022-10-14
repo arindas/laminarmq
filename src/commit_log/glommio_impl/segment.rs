@@ -84,9 +84,9 @@ mod tests {
     }
 
     #[test]
-    fn test_segment_reads_reflect_appends() {
+    fn test_segment_reads_reflect_appends_() {
         let test_file_path =
-            PathBuf::from(test_file_path_string("test_segment_reads_reflect_appends"));
+            PathBuf::from(test_file_path_string("test_segment_reads_reflect_appends_"));
 
         if test_file_path.exists() {
             fs::remove_file(&test_file_path).unwrap();
@@ -95,8 +95,8 @@ mod tests {
         let local_ex = LocalExecutorBuilder::new(Placement::Fixed(1))
             .spawn(move || async move {
                 const RECORD_VALUE: &[u8] = b"Hello World!";
-                let mut record = Record {
-                    value: Vec::from(RECORD_VALUE),
+                let record = Record {
+                    value: RECORD_VALUE.into(),
                     offset: 0,
                 };
                 let record_representation_size = bincoded_serialized_record_size(&record).unwrap();
@@ -118,7 +118,7 @@ mod tests {
                     Err(SegmentError::OffsetOutOfBounds)
                 ));
 
-                let offset_1 = segment.append(&mut record).await.unwrap();
+                let offset_1 = segment.append(RECORD_VALUE).await.unwrap();
                 assert_eq!(offset_1, 0);
                 assert_eq!(segment.next_offset(), record_representation_size);
 
@@ -132,7 +132,7 @@ mod tests {
                     Ok(_)
                 ));
 
-                let offset_2 = segment.append(&mut record).await.unwrap();
+                let offset_2 = segment.append(RECORD_VALUE).await.unwrap();
                 assert_eq!(offset_2, record_representation_size);
 
                 assert_eq!(segment.size(), expected_segment_size);
@@ -156,7 +156,7 @@ mod tests {
                 assert!(segment.is_maxed());
 
                 assert!(matches!(
-                    segment.append(&mut record).await,
+                    segment.append(RECORD_VALUE).await,
                     Err(SegmentError::SegmentMaxed)
                 ));
 
@@ -181,11 +181,6 @@ mod tests {
                     Err(SegmentError::OffsetOutOfBounds)
                 ));
 
-                assert!(matches!(
-                    segment.advance_to_offset(segment.next_offset() + 1),
-                    Err(SegmentError::OffsetBeyondCapacity)
-                ));
-
                 let records = vec![record_1, record_2];
 
                 let mut segment_scanner = SegmentScanner::new(&segment).unwrap();
@@ -196,6 +191,11 @@ mod tests {
                     i += 1;
                 }
                 assert_eq!(i, records.len());
+
+                assert!(matches!(
+                    segment.advance_to_offset(segment.next_offset() + 1),
+                    Err(SegmentError::OffsetBeyondCapacity)
+                ));
 
                 segment.remove().await.unwrap();
 
