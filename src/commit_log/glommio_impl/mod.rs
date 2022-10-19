@@ -17,9 +17,9 @@
 //!             },
 //!         };
 //!
-//!         let storage_dir_path = "/tmp/laminarmq_commit_log_glommio_impl_segmented_log".to_string();
+//!         let storage_dir_path = "/tmp/laminarmq_commit_log_glommio_impl_segmented_log";
 //!
-//!         let log = GlommioSegmentedLog::new(storage_dir_path.clone(), LOG_CONFIG, GlommioSegmentCreator)
+//!         let log = glommio_segmented_log(storage_dir_path, LOG_CONFIG)
 //!             .await
 //!             .unwrap();
 //!
@@ -31,7 +31,7 @@
 //!         ))
 //!         .exists());
 //!
-//!         let log = GlommioSegmentedLog::new(storage_dir_path.clone(), LOG_CONFIG, GlommioSegmentCreator)
+//!         let log = glommio_segmented_log(storage_dir_path, LOG_CONFIG)
 //!             .await
 //!             .unwrap();
 //!
@@ -51,9 +51,6 @@ pub mod segmented_log;
 pub mod prelude {
     //! Prelude module for [`glommio_impl`](super) with common exports for convenience.
 
-    pub use super::segmented_log::{
-        store::{Store as GlommioStore, StoreError as GlommioStoreError},
-        GlommioSegmentedLog, GlommioSegmentedLogError, SegmentCreator as GlommioSegmentCreator,
-    };
+    pub use super::segmented_log::glommio_segmented_log;
     pub use glommio::io::ReadResult;
 }

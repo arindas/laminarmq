@@ -4,10 +4,13 @@
 pub mod segment;
 pub mod store;
 
-use crate::commit_log::{
-    segmented_log::segment::{config::SegmentConfig, Segment, SegmentError},
-    segmented_log::{SegmentedLog, SegmentedLogError},
+use crate::commit_log::segmented_log::{
+    config::SegmentedLogConfig,
+    segment::{config::SegmentConfig, Segment, SegmentError},
+    SegmentCreator as BaseSegmentCreator, SegmentedLog, SegmentedLogError,
 };
+
+use async_trait::async_trait;
 use glommio::io::ReadResult;
 use std::path::Path;
 use store::Store;
@@ -16,8 +19,8 @@ use store::Store;
 /// runtime using [`Store`] and [`Segment`] for [`glommio`].
 pub struct SegmentCreator;
 
-#[async_trait::async_trait(?Send)]
-impl crate::commit_log::segmented_log::SegmentCreator<ReadResult, Store> for SegmentCreator {
+#[async_trait(?Send)]
+impl BaseSegmentCreator<ReadResult, Store> for SegmentCreator {
     async fn new_segment_with_store_file_path_offset_and_config<P: AsRef<Path>>(
         &self,
         store_file_path: P,
@@ -34,19 +37,22 @@ impl crate::commit_log::segmented_log::SegmentCreator<ReadResult, Store> for Seg
     }
 }
 
-/// [`SegmentedLog`] specialization for the [`glommio`] runtime.
-pub type GlommioSegmentedLog = SegmentedLog<ReadResult, Store, SegmentCreator>;
-
-/// Error type used by [`GlommioLog`].
-pub type GlommioSegmentedLogError = SegmentedLogError<ReadResult, Store>;
+/// Creates a new [`SegmentedLog`] instance specialized for the [`glommio`] runtime.
+pub async fn glommio_segmented_log<P: AsRef<Path>>(
+    path: P,
+    config: SegmentedLogConfig,
+) -> Result<SegmentedLog<ReadResult, Store, SegmentCreator>, SegmentedLogError<ReadResult, Store>> {
+    SegmentedLog::new(path, config, SegmentCreator).await
+}
 
 #[cfg(test)]
 mod tests {
-    use super::{GlommioSegmentedLog as Log, GlommioSegmentedLogError as LogError, SegmentCreator};
+    use super::glommio_segmented_log;
     use crate::commit_log::{
         segmented_log::{
             common::store_file_path, config::SegmentedLogConfig as LogConfig,
             segment::config::SegmentConfig, store::common::bincoded_serialized_record_size,
+            SegmentedLogError as LogError,
         },
         CommitLog, LogScanner, Record, Scanner,
     };
@@ -59,6 +65,11 @@ mod tests {
 
     #[test]
     fn test_log_new_close_and_remove() {
+        const STORAGE_DIR_PATH: &str = "/tmp/laminarmq_log_test_log_new_close_and_remove";
+        if Path::new(STORAGE_DIR_PATH).exists() {
+            fs::remove_dir_all(STORAGE_DIR_PATH).unwrap();
+        }
+
         let local_ex = LocalExecutorBuilder::new(Placement::Unbound)
             .spawn(move || async move {
                 const LOG_CONFIG: LogConfig = LogConfig {
@@ -69,27 +80,24 @@ mod tests {
                     },
                 };
 
-                let storage_dir_path =
-                    "/tmp/laminarmq_log_test_log_new_close_and_remove".to_string();
-
-                let log = Log::new(storage_dir_path.clone(), LOG_CONFIG, SegmentCreator)
+                let log = glommio_segmented_log(STORAGE_DIR_PATH, LOG_CONFIG)
                     .await
                     .unwrap();
 
                 log.close().await.unwrap();
 
                 assert!(PathBuf::from(store_file_path(
-                    &storage_dir_path,
+                    STORAGE_DIR_PATH,
                     LOG_CONFIG.initial_offset
                 ))
                 .exists());
 
-                let log = Log::new(storage_dir_path.clone(), LOG_CONFIG, SegmentCreator)
+                let log = glommio_segmented_log(STORAGE_DIR_PATH, LOG_CONFIG)
                     .await
                     .unwrap();
 
                 log.remove().await.unwrap();
-                assert!(!PathBuf::from(&storage_dir_path,).exists());
+                assert!(!PathBuf::from(STORAGE_DIR_PATH).exists());
             })
             .unwrap();
         local_ex.join().unwrap();
@@ -119,9 +127,7 @@ mod tests {
                     },
                 };
 
-                let storage_dir_path = STORAGE_DIR_PATH.to_string();
-
-                let mut log = Log::new(storage_dir_path.clone(), log_config, SegmentCreator)
+                let mut log = glommio_segmented_log(STORAGE_DIR_PATH, log_config)
                     .await
                     .unwrap();
 
@@ -152,7 +158,7 @@ mod tests {
 
                 log.close().await.unwrap();
 
-                let log = Log::new(storage_dir_path.clone(), log_config, SegmentCreator)
+                let log = glommio_segmented_log(STORAGE_DIR_PATH, log_config)
                     .await
                     .unwrap();
 
@@ -170,7 +176,7 @@ mod tests {
                 ));
 
                 log.remove().await.unwrap();
-                assert!(!PathBuf::from(&storage_dir_path,).exists());
+                assert!(!PathBuf::from(STORAGE_DIR_PATH).exists());
             })
             .unwrap();
         local_ex.join().unwrap();
@@ -200,9 +206,7 @@ mod tests {
                     },
                 };
 
-                let storage_dir_path = STORAGE_DIR_PATH.to_string();
-
-                let mut log = Log::new(storage_dir_path.clone(), log_config, SegmentCreator)
+                let mut log = glommio_segmented_log(STORAGE_DIR_PATH, log_config)
                     .await
                     .unwrap();
 
@@ -244,7 +248,7 @@ mod tests {
                 assert_eq!(log.lowest_offset(), log.highest_offset());
 
                 log.remove().await.unwrap();
-                assert!(!PathBuf::from(&storage_dir_path).exists());
+                assert!(!PathBuf::from(STORAGE_DIR_PATH).exists());
             })
             .unwrap();
         local_ex.join().unwrap();
@@ -274,13 +278,11 @@ mod tests {
                     },
                 };
 
-                let storage_dir_path = STORAGE_DIR_PATH.to_string();
-
-                let mut log_0 = Log::new(storage_dir_path.clone(), log_config, SegmentCreator)
+                let mut log_0 = glommio_segmented_log(STORAGE_DIR_PATH, log_config)
                     .await
                     .unwrap();
 
-                let mut log_1 = Log::new(storage_dir_path.clone(), log_config, SegmentCreator)
+                let mut log_1 = glommio_segmented_log(STORAGE_DIR_PATH, log_config)
                     .await
                     .unwrap();
 
@@ -311,11 +313,11 @@ mod tests {
 
                 log_1.close().await.unwrap();
 
-                let log = Log::new(storage_dir_path.clone(), log_config, SegmentCreator)
+                let log = glommio_segmented_log(STORAGE_DIR_PATH, log_config)
                     .await
                     .unwrap();
                 log.remove().await.unwrap();
-                assert!(!PathBuf::from(&storage_dir_path,).exists());
+                assert!(!PathBuf::from(STORAGE_DIR_PATH).exists());
             })
             .unwrap();
         local_ex.join().unwrap();

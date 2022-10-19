@@ -8,6 +8,8 @@
 pub mod segment;
 pub mod store;
 
+use async_trait::async_trait;
+
 use std::{
     error::Error,
     fmt::Display,
@@ -18,8 +20,6 @@ use std::{
 };
 
 use super::Record;
-use async_trait::async_trait;
-
 use segment::Segment;
 
 /// Error type for our segmented log implementation. Used as the `Error` associated type for

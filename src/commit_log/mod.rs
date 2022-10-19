@@ -6,12 +6,10 @@
 //! async runtimes and storage media. Hence user's will need to choose their specializations and
 //! implementations of these generic abstractions as necessary.
 //!
-//! Also see: [`glommio_impl`].
+//! Also see: [`segmented_log`], [`glommio_impl`].
 //!
 //! In the context of `laminarmq` this module is intended to provide the storage for individual
 //! partitions in a topic.
-
-use std::borrow::Cow;
 
 use async_trait::async_trait;
 
@@ -20,7 +18,7 @@ use async_trait::async_trait;
 pub struct Record<'a> {
     /// Value stored in this record entry. The value itself might be serialized bytes of some other
     /// form of record.
-    pub value: Cow<'a, [u8]>,
+    pub value: std::borrow::Cow<'a, [u8]>,
 
     /// Offset at which this record is stored in the log.
     pub offset: u64,
