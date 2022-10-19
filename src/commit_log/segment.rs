@@ -1,0 +1,396 @@
+//! Module providing cross platform [`Segment`](Segment) abstractions for reading and writing
+//! [`Record`](super::Record) instances from [`Store`](super::store::Store) instances.
+
+use std::{fmt::Display, marker::PhantomData, ops::Deref, time::Instant};
+
+use async_trait::async_trait;
+
+use super::{
+    store::{Store, StoreScanner},
+    Record, Scanner,
+};
+
+/// Error type used for operations on a [`Segment`].
+#[derive(Debug)]
+pub enum SegmentError<T, S: Store<T>>
+where
+    T: Deref<Target = [u8]>,
+{
+    /// Error caused during an operation on the [`Segment`]'s underlying
+    /// [`Store`](super::store::Store).
+    StoreError(S::Error),
+
+    /// The current segment has no more space for writing records.
+    SegmentMaxed,
+
+    /// Error when ser/deser-ializing a record.
+    SerializationError,
+
+    /// Offset used for reading or writing to a segment is beyond that store's allowed capacity
+    /// by the [`config::SegmentConfig::max_store_bytes] limit.
+    OffsetBeyondCapacity,
+
+    /// Offset is out of bounds of the written region in this segment.
+    OffsetOutOfBounds,
+}
+
+impl<T: Deref<Target = [u8]>, S: Store<T>> Display for SegmentError<T, S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SegmentError::StoreError(err) => {
+                write!(f, "Error during Store operation: {:?}", err)
+            }
+            SegmentError::SerializationError => {
+                write!(f, "Error occured during ser/deser-ializing a record.")
+            }
+            SegmentError::OffsetBeyondCapacity => {
+                write!(f, "Given offset is beyond the capacity for this segment.")
+            }
+            SegmentError::SegmentMaxed => {
+                write!(f, "Segment maxed out segment store size")
+            }
+            SegmentError::OffsetOutOfBounds => {
+                write!(f, "Given offset is out of bounds of the written region.")
+            }
+        }
+    }
+}
+
+impl<T, S> std::error::Error for SegmentError<T, S>
+where
+    T: Deref<Target = [u8]> + std::fmt::Debug,
+    S: Store<T> + std::fmt::Debug,
+{
+}
+
+/// Cross platform storage abstraction used for reading and writing [`Record`](super::Record) instances
+/// from [`Store`](super::store::Store) implementations. It also acts the unit of storage in a
+/// [`SegmentedLog`](super::segmented_log::SegmentedLog).
+///
+/// [`Segment`] uses binary encoding with [`bincode`] for serializing [`Record`](super::Record)s.
+///
+/// Each segment can store a fixed size of bytes. A segment has a `base_offset` which is the
+/// offset of the first message in the segment. Note that the `base_offset` is not necessarily
+/// zero and can be arbitrarily high number. The `next_offset` for a segment is offset at which
+/// the next record will be written. (offset of last record + size of last record.)
+///
+/// ```text
+/// [segment]
+/// ┌────────────────────────────────────────────────────────────────┐
+/// │                                                                │
+/// │  record offset = position in store + segment base_offset       │
+/// │                                                                │
+/// │  [store]                                                       │
+/// │  ┌──────────┐                                                  │
+/// │  │ record#x │ position: 0                                      │
+/// │  ├──────────┤                                                  │
+/// │  │ record#y │ position: size(record#x)                         │
+/// │  ├──────────┤                                                  │
+/// │  │ record#z │ position: size(record#x) + size(record#y)        │
+/// │  ├──────────┤                                                  │
+/// │      ....                                                      │
+/// │                                                                │
+/// └────────────────────────────────────────────────────────────────┘
+/// ```
+///
+/// Each segment is backed by a store which is a handle to a file on disk. Since it directly
+/// deals with file, position starts from 0, like file position. As a consequence, we translate
+/// store position to segment offset by simply adding the segment offset to the store position.
+/// Writes in a store are buffered. The write buffer is synced when it fills up, to persist
+/// data to the disk. Reads read values that have been successfully synced and persisted to the
+/// disk. Hence, reads on a store lag behind the writes.
+///
+/// All writes go to the write segment. When we max out the capacity of the write segment, we
+/// close the write segment and reopen it as a read segment. The re-opened segment is added to
+/// the list of read segments. A new write segment is then created with `base_offset` as the
+/// `next_offset` of the previous write segment.
+pub struct Segment<T, S: Store<T>>
+where
+    T: Deref<Target = [u8]>,
+{
+    store: S,
+    base_offset: u64,
+    next_offset: u64,
+    config: config::SegmentConfig,
+
+    creation_time: Instant,
+
+    _phantom_data: PhantomData<T>,
+}
+
+#[doc(hidden)]
+macro_rules! consume_store_from_segment {
+    ($segment:ident, $async_store_method:ident) => {
+        $segment
+            .store
+            .$async_store_method()
+            .await
+            .map_err(SegmentError::StoreError)
+    };
+}
+
+impl<T, S: Store<T>> Segment<T, S>
+where
+    T: Deref<Target = [u8]>,
+{
+    /// Creates a segment instance with the given config, base offset and store instance.
+    pub fn with_config_base_offset_and_store(
+        config: config::SegmentConfig,
+        base_offset: u64,
+        store: S,
+    ) -> Self {
+        let initial_store_size = store.size();
+        let next_offset = if initial_store_size > 0 {
+            base_offset + initial_store_size
+        } else {
+            base_offset
+        };
+
+        Self {
+            store,
+            base_offset,
+            next_offset,
+            config,
+            creation_time: Instant::now(),
+            _phantom_data: PhantomData,
+        }
+    }
+
+    /// Offset of the first record in this segment instance.
+    pub fn base_offset(&self) -> u64 {
+        self.base_offset
+    }
+
+    /// Offset at which the next record will be written in this segment.
+    pub fn next_offset(&self) -> u64 {
+        self.next_offset
+    }
+
+    /// Returns a reference to the backing [`Store`](super::store::Store).
+    pub fn store(&self) -> &S {
+        &self.store
+    }
+
+    /// Returns the position on the underlying store to which the given offset would map to.
+    /// This method returns None if the given offset is beyond the capacity.
+    pub fn store_position(&self, offset: u64) -> Option<u64> {
+        match offset.checked_sub(self.base_offset()) {
+            Some(pos) if pos >= self.config.max_store_bytes => None,
+            Some(pos) => Some(pos),
+            None => None,
+        }
+    }
+
+    /// Returns whether the size of the underlying store in number of bytes is greater than or
+    /// equal to the allowed limit in [`config::SegmentConfig::max_store_bytes`].
+    pub fn is_maxed(&self) -> bool {
+        self.store().size() >= self.config.max_store_bytes
+    }
+
+    /// Returns the size of the underlying store.
+    pub fn size(&self) -> u64 {
+        self.store.size()
+    }
+
+    /// Appends the given record to the end of this store.
+    ///
+    /// ## Returns
+    /// The offset at which the record was written.
+    ///
+    /// ## Errors
+    /// - [`SegmentError::SegmentMaxed`] if [`Self::is_maxed`] returns true.
+    /// - [`SegmentError::SerializationError`] if there was an error during binary encoding the
+    /// given record instance.
+    /// - [`SegmentError::StoreError`] if there was an error during writing to the underlying
+    /// [`Store`](super::store::Store) instance.
+    pub async fn append(&mut self, record_bytes: &[u8]) -> Result<u64, SegmentError<T, S>> {
+        if self.is_maxed() {
+            return Err(SegmentError::SegmentMaxed);
+        }
+
+        let current_offset = self.next_offset;
+        let record = Record {
+            value: record_bytes.into(),
+            offset: current_offset,
+        };
+
+        let bincoded_record =
+            bincode::serialize(&record).map_err(|_x| SegmentError::SerializationError)?;
+
+        let (_, bytes_written) = self
+            .store
+            .append(&bincoded_record)
+            .await
+            .map_err(SegmentError::StoreError)?;
+
+        self.next_offset += bytes_written as u64;
+
+        Ok(current_offset)
+    }
+
+    pub fn offset_within_bounds(&self, offset: u64) -> bool {
+        offset < self.next_offset()
+    }
+
+    /// Reads the record at the given offset.
+    ///
+    /// ## Returns
+    /// A tuple containing:
+    /// - [`Record`](super::Record) instance containing the desired record.
+    /// - [`u64`] value containing the offset of the next record.
+    ///
+    /// ## Errors
+    /// - [`SegmentError::OffsetOutOfBounds`] if the  `offset >= next_offset` value.
+    /// - [`SegmentError::OffsetBeyondCapacity`] if the given offset is beyond this stores
+    /// capacity, and doesn't map to a valid position on the underlying
+    /// [`Store`](super::store::Store) instance.
+    /// - [`SegmentError::StoreError`] if there was an error during reading the record at the
+    /// given offset from the underlying [`Store`](super::store::Store) instance.
+    /// - [`SegmentError::SerializationError`] if there is an error during deserializing the
+    /// record from the bytes read from storage.
+    pub async fn read(&self, offset: u64) -> Result<(Record, u64), SegmentError<T, S>> {
+        if !self.offset_within_bounds(offset) {
+            return Err(SegmentError::OffsetOutOfBounds);
+        }
+
+        let position = self
+            .store_position(offset)
+            .ok_or(SegmentError::OffsetBeyondCapacity)?;
+
+        let (record_bytes, next_record_position) = self
+            .store
+            .read(position)
+            .await
+            .map_err(SegmentError::StoreError)?;
+
+        let record: Record =
+            bincode::deserialize(&record_bytes).map_err(|_x| SegmentError::SerializationError)?;
+
+        Ok((record, self.base_offset() + next_record_position))
+    }
+
+    /// Advances this [`Segment`] instance's `next_offset` value to the given value.
+    /// This method simply returns [`Ok`] if `new_next_offset <= next_offset`.
+    ///
+    /// ## Errors
+    /// - [`SegmentError::OffsetBeyondCapacity`] if the given offset doesn't map to a valid
+    /// position on the underlying store.
+    pub fn advance_to_offset(&mut self, new_next_offset: u64) -> Result<(), SegmentError<T, S>> {
+        if new_next_offset <= self.next_offset() {
+            return Ok(());
+        }
+
+        if self.store_position(new_next_offset).is_none() {
+            return Err(SegmentError::OffsetBeyondCapacity);
+        }
+
+        self.next_offset = new_next_offset;
+
+        Ok(())
+    }
+
+    /// Removes the underlying [`Store`](super::segment::Store) instances associated.
+    /// This method consumes this [`Segment`] instance to prevent further operations on this
+    /// segment.
+    ///
+    /// ## Errors
+    /// [`SegmentError::StoreError`] if there was an error in removing the underlying store.
+    #[inline]
+    pub async fn remove(self) -> Result<(), SegmentError<T, S>> {
+        consume_store_from_segment!(self, remove)
+    }
+
+    /// Closes the underlying [`Store`](super::segment::Store) instances associated.
+    /// This method consumes this [`Segment`] instance to prevent further operations on this
+    /// segment.
+    ///
+    /// ## Errors
+    /// [`SegmentError::StoreError`] if there was an error in closing the underlying store.
+    #[inline]
+    pub async fn close(self) -> Result<(), SegmentError<T, S>> {
+        consume_store_from_segment!(self, close)
+    }
+
+    /// Returns an [`std::time::Instant`] value denoting the time at which this segment was
+    /// created.
+    pub fn creation_time(&self) -> Instant {
+        self.creation_time
+    }
+}
+
+/// Implements [`Scanner`](super::Scanner) for [`Segment`] references.
+pub struct SegmentScanner<'a, T, S>
+where
+    T: Deref<Target = [u8]>,
+    S: Store<T>,
+{
+    store_scanner: StoreScanner<'a, T, S>,
+}
+
+impl<'a, T, S> SegmentScanner<'a, T, S>
+where
+    T: Deref<Target = [u8]>,
+    S: Store<T>,
+{
+    /// Creates a new [`SegmentScanner`] that starts reading from the given segments `base_offset`.
+    pub fn new(segment: &'a Segment<T, S>) -> Result<Self, SegmentError<T, S>> {
+        Self::with_offset(segment, segment.base_offset())
+    }
+
+    /// Creates a new [`SegmentScanner`] that starts reading from the given offset.
+    ///
+    /// ## Errors
+    /// - [`SegmentError::OffsetOutOfBounds`] if the given `offset >= segment.next_offset()`
+    /// - [`SegmentError::OffsetBeyondCapacity`] if the given offset doesn't map to a valid
+    /// location on the [`Segment`] instances underlying store.
+    pub fn with_offset(
+        segment: &'a Segment<T, S>,
+        offset: u64,
+    ) -> Result<Self, SegmentError<T, S>> {
+        if !segment.offset_within_bounds(offset) {
+            return Err(SegmentError::OffsetOutOfBounds);
+        }
+
+        Ok(Self {
+            store_scanner: StoreScanner::with_position(
+                segment.store(),
+                segment
+                    .store_position(offset)
+                    .ok_or(SegmentError::OffsetBeyondCapacity)?,
+            ),
+        })
+    }
+}
+
+#[async_trait(?Send)]
+impl<'a, T, S> Scanner for SegmentScanner<'a, T, S>
+where
+    T: Deref<Target = [u8]> + Unpin,
+    S: Store<T>,
+{
+    type Item = super::Record<'a>;
+
+    async fn next(&mut self) -> Option<Self::Item> {
+        self.store_scanner
+            .next()
+            .await
+            .and_then(|record_bytes| bincode::deserialize(&record_bytes).ok())
+    }
+}
+pub mod config {
+    //! Module providing types for configuring [`Segment`](super::Segment) instances.
+    use serde::{Deserialize, Serialize};
+
+    /// Configuration pertaining to segment storage and buffer sizes.
+    #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+    pub struct SegmentConfig {
+        /// Segment store's write buffer size. The write buffer is flushed to the disk when it is
+        /// filled. Reads of records in a write buffer are only possible when the write buffer is
+        /// flushed.
+        pub store_buffer_size: usize,
+
+        /// Maximum segment storage size, after which this segment is demoted from the current
+        /// write segment to a read segment.
+        pub max_store_bytes: u64,
+    }
+}
