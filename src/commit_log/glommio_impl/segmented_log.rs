@@ -1,13 +1,16 @@
 //! Module providing the specialization for
 //! [`SegmentedLog`](crate::commit_log::segmented_log::SegmentedLog) for the [`glommio`] runtime.
 
-use super::store::Store;
+pub mod segment;
+pub mod store;
+
 use crate::commit_log::{
-    segment::{config::SegmentConfig, Segment, SegmentError},
+    segmented_log::segment::{config::SegmentConfig, Segment, SegmentError},
     segmented_log::{SegmentedLog, SegmentedLogError},
 };
 use glommio::io::ReadResult;
 use std::path::Path;
+use store::Store;
 
 /// [`crate::commit_log::segmented_log::SegmentCreator`] implementation for the [`glommio`]
 /// runtime using [`Store`] and [`Segment`] for [`glommio`].
@@ -32,18 +35,19 @@ impl crate::commit_log::segmented_log::SegmentCreator<ReadResult, Store> for Seg
 }
 
 /// [`SegmentedLog`] specialization for the [`glommio`] runtime.
-pub type GlommioLog = SegmentedLog<ReadResult, Store, SegmentCreator>;
+pub type GlommioSegmentedLog = SegmentedLog<ReadResult, Store, SegmentCreator>;
 
 /// Error type used by [`GlommioLog`].
-pub type GlommioLogError = SegmentedLogError<ReadResult, Store>;
+pub type GlommioSegmentedLogError = SegmentedLogError<ReadResult, Store>;
 
 #[cfg(test)]
 mod tests {
-    use super::{GlommioLog as Log, GlommioLogError as LogError, SegmentCreator};
+    use super::{GlommioSegmentedLog as Log, GlommioSegmentedLogError as LogError, SegmentCreator};
     use crate::commit_log::{
-        segment::config::SegmentConfig,
-        segmented_log::{common::store_file_path, config::SegmentedLogConfig as LogConfig},
-        store::common::bincoded_serialized_record_size,
+        segmented_log::{
+            common::store_file_path, config::SegmentedLogConfig as LogConfig,
+            segment::config::SegmentConfig, store::common::bincoded_serialized_record_size,
+        },
         CommitLog, LogScanner, Record, Scanner,
     };
     use glommio::{LocalExecutorBuilder, Placement};
@@ -92,8 +96,8 @@ mod tests {
     }
 
     #[test]
-    fn test_log_reads_reflect_writes_() {
-        const STORAGE_DIR_PATH: &str = "/tmp/laminarmq_log_test_log_reads_reflect_writes_";
+    fn test_log_reads_reflect_writes() {
+        const STORAGE_DIR_PATH: &str = "/tmp/laminarmq_log_test_log_reads_reflect_writes";
         if Path::new(STORAGE_DIR_PATH).exists() {
             fs::remove_dir_all(STORAGE_DIR_PATH).unwrap();
         }

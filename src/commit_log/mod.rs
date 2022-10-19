@@ -37,10 +37,6 @@ pub trait Scanner {
     async fn next(&mut self) -> Option<Self::Item>;
 }
 
-pub mod store;
-
-pub mod segment;
-
 /// An ordered sequential collection of [`Record`] instances.
 ///
 /// A [`Record`] in an [`CommitLog`] is addressed with an unique [`u64`] offset, which denotes it
@@ -159,14 +155,17 @@ pub mod glommio_impl;
 pub mod prelude {
     //! Prelude module for [`commit_log`](super) with common exports for convenience.
 
+    #[cfg(target_os = "linux")]
     pub use super::glommio_impl::prelude::*;
 
-    pub use super::segmented_log::{
-        config::SegmentedLogConfig, SegmentCreator, SegmentedLog, SegmentedLogError,
-    };
     pub use super::{
-        segment::{config::SegmentConfig, Segment, SegmentError},
-        store::Store,
-        CommitLog, Record,
+        segmented_log::{
+            common::store_file_path,
+            config::SegmentedLogConfig,
+            segment::{config::SegmentConfig, Segment, SegmentError},
+            store::Store,
+            SegmentCreator, SegmentedLog, SegmentedLogError,
+        },
+        CommitLog, LogScanner, Record, Scanner,
     };
 }

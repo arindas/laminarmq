@@ -1,9 +1,12 @@
-//! Module providing abstractions for supporting a immutable, segmented and persistent
-//! [`CommitLog`](super::CommitLog) implementation.
+//! Module providing the [`SegmentedLog`] abstraction for supporting a immutable, segmented
+//! and persistent [`CommitLog`](super::CommitLog) implementation.
 //!
 //! This module is not meant to be used directly by application developers. Application
 //! developers would prefer one of the specializations specific to their async runtime.
 //! See [`glommio_impl`](super::glommio_impl).
+
+pub mod segment;
+pub mod store;
 
 use std::{
     error::Error,
@@ -14,12 +17,10 @@ use std::{
     time::Duration,
 };
 
+use super::Record;
 use async_trait::async_trait;
 
-use super::{
-    segment::{self, Segment},
-    store, Record,
-};
+use segment::Segment;
 
 /// Error type for our segmented log implementation. Used as the `Error` associated type for
 /// our [`SegmentedLog`]'s [`CommitLog`](super::CommitLog) trait implementation.

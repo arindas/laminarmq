@@ -6,8 +6,9 @@ use std::{fmt::Display, marker::PhantomData, ops::Deref, time::Instant};
 use async_trait::async_trait;
 
 use super::{
+    super::Scanner,
     store::{Store, StoreScanner},
-    Record, Scanner,
+    Record,
 };
 
 /// Error type used for operations on a [`Segment`].

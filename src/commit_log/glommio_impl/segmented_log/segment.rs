@@ -1,11 +1,11 @@
-//! Module providing specialization for [`Segment`](`crate::commit_log::segment::Segment`) for the
-//! [`glommio`] runtime.
+//! Module providing specialization for [`Segment`](`crate::commit_log::segmented_log::segment::Segment`)
+//! for the [`glommio`] runtime.
 
 use std::path::Path;
 
 use glommio::io::ReadResult;
 
-use crate::commit_log::segment::{config::SegmentConfig, Segment, SegmentError};
+use crate::commit_log::segmented_log::segment::{config::SegmentConfig, Segment, SegmentError};
 
 use super::store::Store;
 
@@ -39,12 +39,10 @@ mod tests {
     use glommio::{LocalExecutorBuilder, Placement};
 
     use crate::commit_log::{
-        segment::SegmentScanner,
-        store::common::{bincoded_serialized_record_size, STORE_FILE_EXTENSION},
+        segmented_log::segment::{config::SegmentConfig, Segment, SegmentError, SegmentScanner},
+        segmented_log::store::common::{bincoded_serialized_record_size, STORE_FILE_EXTENSION},
         Record, Scanner,
     };
-
-    use super::{Segment, SegmentConfig, SegmentError};
 
     #[inline]
     fn test_file_path_string(test_name: &str) -> String {
@@ -84,9 +82,9 @@ mod tests {
     }
 
     #[test]
-    fn test_segment_reads_reflect_appends_() {
+    fn test_segment_reads_reflect_appends() {
         let test_file_path =
-            PathBuf::from(test_file_path_string("test_segment_reads_reflect_appends_"));
+            PathBuf::from(test_file_path_string("test_segment_reads_reflect_appends"));
 
         if test_file_path.exists() {
             fs::remove_file(&test_file_path).unwrap();

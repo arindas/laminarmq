@@ -8,7 +8,7 @@
 use async_trait::async_trait;
 use std::{cell::Ref, marker::PhantomData, ops::Deref, path::Path, result::Result};
 
-use super::Scanner;
+use super::super::Scanner;
 
 /// Trait representing a collection of record backed by some form of persistent storage.
 ///

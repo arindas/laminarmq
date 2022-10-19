@@ -1,5 +1,5 @@
-//! Module providing [`Store`](crate::commit_log::store::Store) implementation for the [`glommio`]
-//! runtime.
+//! Module providing [`Store`](crate::commit_log::segmented_log::store::Store)
+//! implementation for the [`glommio`] runtime.
 
 use std::{cell::Ref, error::Error, fmt::Display, path::Path, result::Result};
 
@@ -11,7 +11,7 @@ use glommio::{
     GlommioError,
 };
 
-use crate::commit_log::store::common::{RecordHeader, RECORD_HEADER_LENGTH};
+use crate::commit_log::segmented_log::store::common::{RecordHeader, RECORD_HEADER_LENGTH};
 
 /// Error type used by [`Store`].
 #[derive(Debug)]
@@ -105,7 +105,7 @@ impl Store {
 }
 
 #[async_trait(?Send)]
-impl crate::commit_log::store::Store<ReadResult> for Store {
+impl crate::commit_log::segmented_log::store::Store<ReadResult> for Store {
     type Error = StoreError;
 
     /// Appends the given record bytes at the end of this store.
@@ -235,7 +235,7 @@ mod tests {
 
     use super::{Store, StoreError};
     use crate::commit_log::{
-        store::{
+        segmented_log::store::{
             common::{RECORD_HEADER_LENGTH, STORE_FILE_EXTENSION},
             Store as BaseStore, StoreScanner,
         },
