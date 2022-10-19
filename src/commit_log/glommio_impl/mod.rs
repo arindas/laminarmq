@@ -1,4 +1,4 @@
-//! Module providing specializations of different generic entities for the [`glommio`] runtime.
+//! Module providing specializations of different generic entities and trait impls for the [`glommio`] runtime.
 //!
 //! ### Sample usage:
 //! ```
