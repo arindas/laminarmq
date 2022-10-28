@@ -1,28 +1,43 @@
-use std::{error::Error, marker::PhantomData};
+#[async_trait::async_trait(?Send)]
+pub trait Partition<'partition> {
+    type Error: std::error::Error;
 
-use async_trait::async_trait;
-
-use super::channel::Sender;
-use crate::commit_log::Record;
-
-#[async_trait(?Send)]
-pub trait Partition<'a, S: Sender<Result<Response<'a>, Self::Error>>> {
-    type Error: Error;
-
-    async fn process(&mut self, task: Task<'a, Self::Error, S>);
+    async fn process<'req, 'resp>(
+        &mut self,
+        request: Request<'req>,
+    ) -> Result<Response<'resp>, Self::Error>
+    where
+        'partition: 'resp;
 }
 
-pub struct Task<'a, E, S>
-where
-    S: Sender<Result<Response<'a>, E>>,
-    E: Error,
-{
-    pub partition_id: PartitionId,
+#[doc(hidden)]
+mod sample_partition_impl {
+    use super::{Partition, Request, Response};
+    use crate::commit_log::Record;
 
-    pub request: Request<'a>,
-    pub response_sender: S,
+    struct MockPart<'a>(&'a [u8]);
 
-    _phantom_data: PhantomData<E>,
+    #[async_trait::async_trait(?Send)]
+    impl<'partition> Partition<'partition> for MockPart<'partition> {
+        type Error = std::fmt::Error;
+
+        async fn process<'req, 'resp>(
+            &mut self,
+            _request: Request<'req>,
+        ) -> Result<Response<'resp>, Self::Error>
+        where
+            'partition: 'resp,
+        {
+            async {}.await; // do some async stuff
+            Ok(Response::Read {
+                record: Record {
+                    value: self.0.into(),
+                    offset: 0,
+                },
+                next_record_offset: 0,
+            })
+        }
+    }
 }
 
 pub struct PartitionId {
@@ -40,7 +55,7 @@ pub enum Response<'a> {
         write_offset: u64,
     },
     Read {
-        record: Record<'a>,
+        record: crate::commit_log::Record<'a>,
         next_record_offset: u64,
     },
 }

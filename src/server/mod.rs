@@ -1,4 +1,5 @@
 pub mod channel {
+    use async_trait::async_trait;
     use std::error::Error;
 
     pub trait Sender<T> {
@@ -6,9 +7,17 @@ pub mod channel {
 
         fn try_send(&self, item: T) -> Result<(), Self::Error>;
     }
+
+    #[async_trait(?Send)]
+    pub trait Receiver<T> {
+        async fn recv(&self) -> Option<T>;
+    }
 }
 
+pub mod executor {}
+
 pub mod partition;
+pub mod shard;
 pub mod tokio_compat;
 
 #[cfg(target_os = "linux")]

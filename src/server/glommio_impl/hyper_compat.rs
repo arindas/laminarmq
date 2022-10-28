@@ -1,22 +1,20 @@
 use futures_lite::Future;
 use glommio::{enclose, net::TcpListener, sync::Semaphore};
-use hyper::service::service_fn;
-use hyper::{server::conn::Http, Body, Request, Response};
+use hyper::{rt::Executor, server::conn::Http, service::service_fn, Body, Request, Response};
 use log::error;
-use std::net::SocketAddr;
-use std::{io, rc::Rc};
+use std::{io, net::SocketAddr, rc::Rc};
 
 use crate::server::tokio_compat::TokioIO;
 
 #[derive(Clone)]
 struct HyperExecutor;
 
-impl<Fut> hyper::rt::Executor<Fut> for HyperExecutor
+impl<F> Executor<F> for HyperExecutor
 where
-    Fut: Future + 'static,
-    Fut::Output: 'static,
+    F: Future + 'static,
+    F::Output: 'static,
 {
-    fn execute(&self, fut: Fut) {
+    fn execute(&self, fut: F) {
         glommio::spawn_local(fut).detach();
     }
 }
