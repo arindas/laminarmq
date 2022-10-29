@@ -22,6 +22,7 @@ serde = { version = "1.0.144", features = ["derive"] }
 hyper = { version = "0.14.20", features = ["server", "http2"] }
 tokio = "1.21.2"
 log = "0.4.17"
+enclose = "1.1.8"
 
 [lib]
 name = "laminarmq"

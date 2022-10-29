@@ -249,7 +249,7 @@ where
     /// given offset from the underlying [`Store`](super::store::Store) instance.
     /// - [`SegmentError::SerializationError`] if there is an error during deserializing the
     /// record from the bytes read from storage.
-    pub async fn read(&self, offset: u64) -> Result<(Record, u64), SegmentError<T, S>> {
+    pub async fn read(&self, offset: u64) -> Result<(Record<'static>, u64), SegmentError<T, S>> {
         if !self.offset_within_bounds(offset) {
             return Err(SegmentError::OffsetOutOfBounds);
         }

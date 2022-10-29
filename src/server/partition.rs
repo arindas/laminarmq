@@ -1,61 +1,38 @@
 #[async_trait::async_trait(?Send)]
-pub trait Partition<'partition> {
+pub trait Partition {
     type Error: std::error::Error;
 
-    async fn process<'req, 'resp>(
-        &mut self,
-        request: Request<'req>,
-    ) -> Result<Response<'resp>, Self::Error>
-    where
-        'partition: 'resp;
+    async fn serve_idempotent(&self, request: Request) -> Result<Response, Self::Error>;
+
+    async fn serve(&mut self, request: Request) -> Result<Response, Self::Error>;
 }
 
-#[doc(hidden)]
-mod sample_partition_impl {
-    use super::{Partition, Request, Response};
-    use crate::commit_log::Record;
-
-    struct MockPart<'a>(&'a [u8]);
-
-    #[async_trait::async_trait(?Send)]
-    impl<'partition> Partition<'partition> for MockPart<'partition> {
-        type Error = std::fmt::Error;
-
-        async fn process<'req, 'resp>(
-            &mut self,
-            _request: Request<'req>,
-        ) -> Result<Response<'resp>, Self::Error>
-        where
-            'partition: 'resp,
-        {
-            async {}.await; // do some async stuff
-            Ok(Response::Read {
-                record: Record {
-                    value: self.0.into(),
-                    offset: 0,
-                },
-                next_record_offset: 0,
-            })
-        }
-    }
-}
-
+#[derive(Eq, Hash, PartialEq, Debug)]
 pub struct PartitionId {
     pub topic: String,
     pub partition_number: u64,
 }
 
-pub enum Request<'a> {
-    Append { record_bytes: &'a [u8] },
+pub enum Request {
+    Append { record_bytes: Vec<u8> },
     Read { offset: u64 },
 }
 
-pub enum Response<'a> {
+impl Request {
+    pub fn idempotent(&self) -> bool {
+        match self {
+            Request::Append { record_bytes: _ } => false,
+            Request::Read { offset: _ } => true,
+        }
+    }
+}
+
+pub enum Response {
     Append {
         write_offset: u64,
     },
     Read {
-        record: crate::commit_log::Record<'a>,
+        record: crate::commit_log::Record<'static>,
         next_record_offset: u64,
     },
 }

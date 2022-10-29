@@ -1,3 +1,11 @@
+pub mod executor {
+    use std::{future::Future, pin::Pin};
+
+    pub trait Executor {
+        fn execute(&self, fut: Pin<Box<dyn Future<Output = ()>>>);
+    }
+}
+
 pub mod channel {
     use async_trait::async_trait;
     use std::error::Error;
@@ -14,10 +22,9 @@ pub mod channel {
     }
 }
 
-pub mod executor {}
-
 pub mod partition;
-pub mod shard;
+pub mod worker;
+
 pub mod tokio_compat;
 
 #[cfg(target_os = "linux")]
