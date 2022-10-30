@@ -54,12 +54,13 @@ where
 {
 }
 
-impl<P, S> BaseProcessor<P, S> for Processor<P>
+type ResponseSender<P> = super::channel::Sender<Result<Response, <P as Partition>::Error>>;
+
+impl<P> BaseProcessor<P, ResponseSender<P>> for Processor<P>
 where
     P: Partition + 'static,
-    S: Sender<Result<Response, P::Error>> + 'static,
 {
-    fn process(&self, task: Task<P::Error, S>) {
+    fn process(&self, task: Task<P::Error, ResponseSender<P>>) {
         if let Some(partition) = self.partitions.get(&task.partition_id).cloned() {
             let (request, response_sender) = (task.request, task.response_sender);
 
@@ -71,7 +72,7 @@ where
                             .await
                             .map_err(|err| {
                                 log::error!("Error acquiring read lock: {:?}", err);
-                                ProcessorError::<P, S>::ReadLock
+                                ProcessorError::<P, ResponseSender<P>>::ReadLock
                             })?
                             .serve_idempotent(request)
                             .await
@@ -81,7 +82,7 @@ where
                             .await
                             .map_err(|err| {
                                 log::error!("Error acquiring write lock: {:?}", err);
-                                ProcessorError::<P, S>::WriteLock
+                                ProcessorError::<P, ResponseSender<P>>::WriteLock
                             })?
                             .serve(request)
                             .await
@@ -92,7 +93,7 @@ where
                         ProcessorError::SendError(err)
                     })?;
 
-                    Ok::<(), ProcessorError<P, S>>(())
+                    Ok::<(), ProcessorError<P, ResponseSender<P>>>(())
                 },
                 self.task_queue,
             );

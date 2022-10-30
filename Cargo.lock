@@ -502,7 +502,6 @@ dependencies = [
  "bincode",
  "byteorder",
  "crc32fast",
- "enclose",
  "futures-lite",
  "glommio",
  "hyper",
