@@ -529,7 +529,7 @@ where
             .map_err(SegmentedLogError::SegmentError)
     }
 
-    async fn read(&self, offset: u64) -> Result<(Record<'static>, u64), Self::Error> {
+    async fn read<'record>(&self, offset: u64) -> Result<(Record<'record>, u64), Self::Error> {
         if !self.offset_within_bounds(offset) {
             return Err(SegmentedLogError::OffsetOutOfBounds);
         }

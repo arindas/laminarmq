@@ -65,7 +65,7 @@ pub trait CommitLog {
 
     /// Reads the [`Record`] at the given offset, along with the offset of the next record from
     /// this [`CommitLog`].
-    async fn read(&self, offset: u64) -> Result<(Record<'static>, u64), Self::Error>;
+    async fn read<'record>(&self, offset: u64) -> Result<(Record<'record>, u64), Self::Error>;
 
     /// Removes all underlying storage files associated. Consumes this [`CommitLog`] instance to
     /// prevent further operations on this instance.
