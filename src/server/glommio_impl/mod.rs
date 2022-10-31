@@ -1,13 +1,3 @@
-pub mod executor {
-    pub struct LocalSpawner;
-
-    impl super::super::executor::Executor for LocalSpawner {
-        fn execute(&self, fut: std::pin::Pin<Box<dyn std::future::Future<Output = ()>>>) {
-            glommio::spawn_local(fut).detach();
-        }
-    }
-}
-
 pub mod channel {
     use crate::server::channel::{Receiver as BaseReceiver, Sender as BaseSender};
     use async_trait::async_trait;
