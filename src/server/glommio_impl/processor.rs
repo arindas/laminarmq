@@ -1,111 +1,159 @@
-use std::{
-    collections::HashMap,
-    error::Error,
-    fmt::{Debug, Display},
-    rc::Rc,
-};
-
-use glommio::{sync::RwLock, TaskQueueHandle};
-
 use super::super::{
     channel::Sender,
-    partition::{Partition, PartitionId, Response},
-    worker::{Processor as BaseProcessor, Task},
+    partition::{Partition, PartitionCreator, PartitionId, Request, Response},
+    worker::{Processor as BaseProcessor, Task, TaskError, TaskResult},
 };
+use glommio::{sync::RwLock, TaskQueueHandle};
+use std::{collections::HashMap, rc::Rc};
 
-pub struct Processor<P: Partition> {
-    partitions: HashMap<PartitionId, Rc<RwLock<P>>>,
+pub struct Processor<P: Partition, PC: PartitionCreator<P>> {
+    partitions: Rc<RwLock<HashMap<PartitionId, Rc<RwLock<P>>>>>,
     task_queue: TaskQueueHandle,
+
+    partition_creator: PC,
 }
 
-#[derive(Debug)]
-pub enum ProcessorError<P: Partition, ResponseSender: Sender<Result<Response, P::Error>>> {
-    WriteLock,
-    ReadLock,
+type ResponseSender<P> = super::channel::Sender<TaskResult<P>>;
 
-    PartitionOp(P::Error),
-
-    SendError(ResponseSender::Error),
+async fn handle_idempotent_requests<P: Partition>(
+    partitions: Rc<RwLock<HashMap<PartitionId, Rc<RwLock<P>>>>>,
+    partition_id: PartitionId,
+    request: Request,
+) -> TaskResult<P> {
+    partitions
+        .read()
+        .await
+        .map_err(|_| TaskError::LockAcqFailed)?
+        .get(&partition_id)
+        .ok_or_else(|| TaskError::PartitionNotFound(partition_id))?
+        .read()
+        .await
+        .map_err(|_| TaskError::LockAcqFailed)?
+        .serve_idempotent(request)
+        .await
+        .map_err(TaskError::PartitionError)
 }
 
-impl<P, ResponseSender> Display for ProcessorError<P, ResponseSender>
-where
-    P: Partition,
-    ResponseSender: Sender<Result<Response, P::Error>>,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ProcessorError::WriteLock => write!(f, "Unable to acquire write lock."),
-            ProcessorError::ReadLock => write!(f, "Unable to acquire read lock."),
-            ProcessorError::PartitionOp(error) => {
-                write!(f, "Error during partition operation: {:?}", error)
-            }
-            ProcessorError::SendError(error) => {
-                write!(f, "Error during sending back response: {:?}", error)
-            }
-        }
+async fn handle_requests<P: Partition>(
+    partitions: Rc<RwLock<HashMap<PartitionId, Rc<RwLock<P>>>>>,
+    partition_id: PartitionId,
+    request: Request,
+) -> TaskResult<P> {
+    partitions
+        .read()
+        .await
+        .map_err(|_| TaskError::LockAcqFailed)?
+        .get(&partition_id)
+        .ok_or_else(|| TaskError::PartitionNotFound(partition_id))?
+        .write()
+        .await
+        .map_err(|_| TaskError::LockAcqFailed)?
+        .serve(request)
+        .await
+        .map_err(TaskError::PartitionError)
+}
+
+async fn handle_create_partition<P: Partition, PC: PartitionCreator<P>>(
+    partitions: Rc<RwLock<HashMap<PartitionId, Rc<RwLock<P>>>>>,
+    partition_id: PartitionId,
+    partition_creator: PC,
+) -> TaskResult<P> {
+    if partitions
+        .read()
+        .await
+        .map_err(|_| TaskError::LockAcqFailed)?
+        .get(&partition_id)
+        .is_none()
+    {
+        let partition = partition_creator
+            .new_partition(&partition_id)
+            .await
+            .map_err(TaskError::PartitionError)?;
+
+        partitions
+            .write()
+            .await
+            .map_err(|_| TaskError::LockAcqFailed)?
+            .insert(partition_id, Rc::new(RwLock::new(partition)));
     }
+
+    Ok(Response::PartitionCreated)
 }
 
-impl<P, ResponseSender> Error for ProcessorError<P, ResponseSender>
-where
-    P: Partition + Debug,
-    ResponseSender: Sender<Result<Response, P::Error>> + Debug,
-{
+async fn handle_remove_partition<P: Partition>(
+    partitions: Rc<RwLock<HashMap<PartitionId, Rc<RwLock<P>>>>>,
+    partition_id: PartitionId,
+) -> TaskResult<P> {
+    let partition = partitions
+        .write()
+        .await
+        .map_err(|_| TaskError::LockAcqFailed)?
+        .remove(&partition_id)
+        .ok_or_else(|| TaskError::PartitionNotFound(partition_id.clone()))?;
+
+    let partition =
+        Rc::try_unwrap(partition).map_err(|_| TaskError::PartitionInUse(partition_id.clone()))?;
+
+    let partition = partition
+        .into_inner()
+        .map_err(|_| TaskError::PartitionInUse(partition_id))?;
+
+    partition
+        .remove()
+        .await
+        .map_err(TaskError::PartitionError)?;
+
+    Ok(Response::PartitionRemoved)
 }
 
-type ResponseSender<P> = super::channel::Sender<Result<Response, <P as Partition>::Error>>;
-
-impl<P> BaseProcessor<P, ResponseSender<P>> for Processor<P>
+impl<P, PC> BaseProcessor<P, ResponseSender<P>> for Processor<P, PC>
 where
     P: Partition + 'static,
+    PC: PartitionCreator<P> + Clone + 'static,
 {
-    fn process(&self, task: Task<P::Error, ResponseSender<P>>) {
-        if let Some(partition) = self.partitions.get(&task.partition_id).cloned() {
-            let (request, response_sender) = (task.request, task.response_sender);
+    fn process(&self, task: Task<P, ResponseSender<P>>) {
+        let (partitions, partition_creator) =
+            (self.partitions.clone(), self.partition_creator.clone());
 
-            let spawn_result = glommio::spawn_local_into(
-                async move {
-                    let result = if request.idempotent() {
-                        partition
-                            .read()
+        let spawn_result = glommio::spawn_local_into(
+            async move {
+                let task_result = match &task.request {
+                    Request::Read { offset: _ }
+                    | Request::LowestOffset
+                    | Request::HighestOffset => {
+                        handle_idempotent_requests(partitions, task.partition_id, task.request)
                             .await
-                            .map_err(|err| {
-                                log::error!("Error acquiring read lock: {:?}", err);
-                                ProcessorError::<P, ResponseSender<P>>::ReadLock
-                            })?
-                            .serve_idempotent(request)
-                            .await
-                    } else {
-                        partition
-                            .write()
-                            .await
-                            .map_err(|err| {
-                                log::error!("Error acquiring write lock: {:?}", err);
-                                ProcessorError::<P, ResponseSender<P>>::WriteLock
-                            })?
-                            .serve(request)
-                            .await
-                    };
+                    }
 
-                    response_sender.try_send(result).map_err(|err| {
-                        log::error!("Error sending back response: {:?}", err);
-                        ProcessorError::SendError(err)
-                    })?;
+                    Request::RemoveExpired { expiry_duration: _ }
+                    | Request::Append { record_bytes: _ } => {
+                        handle_requests(partitions, task.partition_id, task.request).await
+                    }
 
-                    Ok::<(), ProcessorError<P, ResponseSender<P>>>(())
-                },
-                self.task_queue,
-            );
+                    Request::CreatePartition => {
+                        handle_create_partition(partitions, task.partition_id, partition_creator)
+                            .await
+                    }
 
-            match spawn_result {
-                Ok(task) => {
-                    task.detach();
+                    Request::RemovePartition => {
+                        handle_remove_partition(partitions, task.partition_id).await
+                    }
+                };
+
+                if let Err(send_error) = task.response_sender.try_send(task_result) {
+                    log::error!("Unable to send result back: {:?}", send_error);
                 }
-                Err(error) => {
-                    log::error!("Error spawning task: {:?}", error);
-                }
-            };
-        }
+            },
+            self.task_queue,
+        );
+
+        match spawn_result {
+            Ok(task) => {
+                task.detach();
+            }
+            Err(spawn_error) => {
+                log::error!("Error detaching spawned task: {:?}", spawn_error);
+            }
+        };
     }
 }

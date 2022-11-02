@@ -39,7 +39,6 @@ impl BasePartition for Partition {
 
     async fn serve_idempotent(&self, request: Request) -> Result<Response, Self::Error> {
         match request {
-            Request::RemoveExpired { expiry_duration: _ } => Err(PartitionError::NotSupported),
             Request::LowestOffset => Ok(Response::LowestOffset(0)),
             Request::HighestOffset => Ok(Response::HighestOffset(self.size as u64)),
             Request::Append { record_bytes: _ } => Err(PartitionError::NotSupported),
@@ -55,6 +54,7 @@ impl BasePartition for Partition {
                     }
                 })
                 .ok_or(PartitionError::NotFound),
+            _ => Err(PartitionError::NotSupported),
         }
     }
 
@@ -79,6 +79,10 @@ impl BasePartition for Partition {
             }
             _ => self.serve_idempotent(request).await,
         }
+    }
+
+    async fn remove(self) -> Result<(), Self::Error> {
+        Ok(())
     }
 }
 
