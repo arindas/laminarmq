@@ -2,7 +2,8 @@ use std::marker::PhantomData;
 
 use super::{
     channel::{Receiver, Sender},
-    partition::{Partition, PartitionId, Request, Response},
+    partition::{Partition, PartitionId},
+    Request, Response,
 };
 
 pub enum TaskError<P: Partition> {

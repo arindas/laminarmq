@@ -621,7 +621,7 @@ pub mod common {
                 dir_entries
                     .filter_map(|dir_entry| dir_entry.ok().map(|x| x.path()))
                     .filter_map(|path| {
-                        (path.extension()?.to_str()? == STORE_FILE_EXTENSION).then(|| path)
+                        (path.extension()?.to_str()? == STORE_FILE_EXTENSION).then_some(path)
                     })
             },
         ))

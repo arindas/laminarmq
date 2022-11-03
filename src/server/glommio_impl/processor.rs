@@ -1,7 +1,8 @@
 use super::super::{
     channel::Sender,
-    partition::{Partition, PartitionCreator, PartitionId, Request, Response},
+    partition::{Partition, PartitionCreator, PartitionId},
     worker::{Processor as BaseProcessor, Task, TaskError, TaskResult},
+    Request, Response,
 };
 use glommio::{sync::RwLock, TaskQueueHandle};
 use std::{collections::HashMap, rc::Rc};
@@ -25,7 +26,7 @@ async fn handle_idempotent_requests<P: Partition>(
         .await
         .map_err(|_| TaskError::LockAcqFailed)?
         .get(&partition_id)
-        .ok_or_else(|| TaskError::PartitionNotFound(partition_id))?
+        .ok_or(TaskError::PartitionNotFound(partition_id))?
         .read()
         .await
         .map_err(|_| TaskError::LockAcqFailed)?
@@ -44,7 +45,7 @@ async fn handle_requests<P: Partition>(
         .await
         .map_err(|_| TaskError::LockAcqFailed)?
         .get(&partition_id)
-        .ok_or_else(|| TaskError::PartitionNotFound(partition_id))?
+        .ok_or(TaskError::PartitionNotFound(partition_id))?
         .write()
         .await
         .map_err(|_| TaskError::LockAcqFailed)?

@@ -1,4 +1,7 @@
-use super::{Partition as BasePartition, Record, Request, Response};
+use super::{
+    super::{Record, Request, Response},
+    Partition as BasePartition,
+};
 use async_trait::async_trait;
 use std::{collections::HashMap, error::Error, fmt::Display};
 
@@ -13,6 +16,12 @@ impl Partition {
             records: HashMap::new(),
             size: 0,
         }
+    }
+}
+
+impl Default for Partition {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
