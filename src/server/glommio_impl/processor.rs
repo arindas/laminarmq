@@ -85,6 +85,18 @@ async fn handle_remove_partition<P: Partition>(
     partitions: Rc<RwLock<HashMap<PartitionId, Rc<RwLock<P>>>>>,
     partition_id: PartitionId,
 ) -> TaskResult<P> {
+    if Rc::weak_count(
+        partitions
+            .read()
+            .await
+            .map_err(|_| TaskError::LockAcqFailed)?
+            .get(&partition_id)
+            .ok_or_else(|| TaskError::PartitionNotFound(partition_id.clone()))?,
+    ) > 1
+    {
+        return Err(TaskError::PartitionInUse(partition_id));
+    }
+
     let partition = partitions
         .write()
         .await
