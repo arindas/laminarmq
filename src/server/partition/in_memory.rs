@@ -1,6 +1,6 @@
 use super::{
     super::{Record, Request, Response},
-    Partition as BasePartition,
+    Partition as BasePartition, PartitionCreator as BasePartitionCreator, PartitionId,
 };
 use async_trait::async_trait;
 use std::{collections::HashMap, error::Error, fmt::Display};
@@ -95,16 +95,37 @@ impl BasePartition for Partition {
     }
 }
 
+struct PartitionCreator;
+
+#[async_trait(?Send)]
+impl BasePartitionCreator<Partition> for PartitionCreator {
+    async fn new_partition(
+        &self,
+        _partition_id: &PartitionId,
+    ) -> Result<Partition, PartitionError> {
+        Ok(Partition::default())
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Partition, PartitionError};
-    use crate::server::partition::{Partition as BasePartition, Request, Response};
+    use super::{PartitionCreator, PartitionError};
+    use crate::server::partition::{
+        Partition as BasePartition, PartitionCreator as BasePartitionCreator, PartitionId, Request,
+        Response,
+    };
     use std::time::Duration;
 
     #[test]
     fn test_partition() {
         futures_lite::future::block_on(async {
-            let mut partition = Partition::new();
+            let mut partition = PartitionCreator
+                .new_partition(&PartitionId {
+                    topic: "some_topic".to_string(),
+                    partition_number: 0,
+                })
+                .await
+                .unwrap();
 
             assert!(matches!(
                 partition

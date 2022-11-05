@@ -10,6 +10,7 @@ pub enum TaskError<P: Partition> {
     PartitionError(P::Error),
     PartitionNotFound(PartitionId),
     PartitionInUse(PartitionId),
+    PartitionLost(PartitionId),
     LockAcqFailed,
 }
 

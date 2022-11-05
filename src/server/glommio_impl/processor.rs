@@ -81,22 +81,139 @@ async fn handle_create_partition<P: Partition, PC: PartitionCreator<P>>(
     Ok(Response::PartitionCreated)
 }
 
-async fn handle_remove_partition<P: Partition>(
-    partitions: Rc<RwLock<HashMap<PartitionId, Rc<RwLock<P>>>>>,
-    partition_id: PartitionId,
-) -> TaskResult<P> {
-    if Rc::weak_count(
-        partitions
-            .read()
-            .await
-            .map_err(|_| TaskError::LockAcqFailed)?
-            .get(&partition_id)
-            .ok_or_else(|| TaskError::PartitionNotFound(partition_id.clone()))?,
-    ) > 1
-    {
-        return Err(TaskError::PartitionInUse(partition_id));
+mod partition_remover {
+    use super::super::super::{
+        partition::{Partition, PartitionCreator, PartitionId},
+        worker::{TaskError, TaskResult},
+        Response,
+    };
+    use glommio::sync::RwLock;
+    use std::{rc::Rc, time::Duration};
+
+    pub(crate) enum PartitionRemainder<P: Partition> {
+        Rc(Rc<RwLock<P>>),
+        RwLock(RwLock<P>),
+        Partition(P),
+        PartitionConsumed,
     }
 
+    pub(crate) struct PartitionRemover<P, PC>
+    where
+        P: Partition,
+        PC: PartitionCreator<P>,
+    {
+        partition_remainder: Option<PartitionRemainder<P>>,
+        partition_id: PartitionId,
+        partition_creator: PC,
+
+        retries: u32,
+        wait_duration: Duration,
+    }
+
+    impl<P, PC> PartitionRemover<P, PC>
+    where
+        P: Partition,
+        PC: PartitionCreator<P>,
+    {
+        pub(crate) fn with_retries_and_wait_duration(
+            partition_remainder: PartitionRemainder<P>,
+            partition_id: PartitionId,
+            partition_creator: PC,
+            retries: u32,
+            wait_duration: Duration,
+        ) -> Self {
+            Self {
+                partition_remainder: Some(partition_remainder),
+                partition_id,
+                partition_creator,
+                retries,
+                wait_duration,
+            }
+        }
+
+        pub(crate) fn new(
+            partition_remainder: PartitionRemainder<P>,
+            partition_id: PartitionId,
+            partition_creator: PC,
+        ) -> Self {
+            Self::with_retries_and_wait_duration(
+                partition_remainder,
+                partition_id,
+                partition_creator,
+                5,
+                Duration::from_millis(100),
+            )
+        }
+
+        async fn remove_remainder(
+            &self,
+            partition_remainder: PartitionRemainder<P>,
+        ) -> Result<Option<PartitionRemainder<P>>, PartitionRemainder<P>> {
+            match partition_remainder {
+                PartitionRemainder::Rc(rc) => Rc::try_unwrap(rc)
+                    .map(|x| Some(PartitionRemainder::RwLock(x)))
+                    .map_err(PartitionRemainder::Rc),
+                PartitionRemainder::RwLock(rwlock) => rwlock
+                    .into_inner()
+                    .map(|x| Some(PartitionRemainder::Partition(x)))
+                    .map_err(|_| PartitionRemainder::PartitionConsumed),
+                PartitionRemainder::Partition(partition) => partition
+                    .remove()
+                    .await
+                    .map(|_| None)
+                    .map_err(|_| PartitionRemainder::PartitionConsumed),
+                PartitionRemainder::PartitionConsumed => {
+                    if let Ok(partition) = self
+                        .partition_creator
+                        .new_partition(&self.partition_id)
+                        .await
+                    {
+                        Ok(Some(PartitionRemainder::Partition(partition)))
+                    } else {
+                        Err(PartitionRemainder::PartitionConsumed)
+                    }
+                }
+            }
+        }
+
+        pub(crate) async fn remove(mut self) -> TaskResult<P> {
+            // Initial value of self.partition_remainder must be a Some
+            let mut last_iter_ok = false;
+
+            while let Some(remainder) = self.partition_remainder.take() {
+                self.partition_remainder = match self.remove_remainder(remainder).await {
+                    Err(partition_remainder) => {
+                        last_iter_ok = false;
+
+                        if self.retries.checked_sub(1).is_none() {
+                            None
+                        } else {
+                            glommio::timer::sleep(self.wait_duration).await;
+                            self.wait_duration *= 2;
+                            Some(partition_remainder)
+                        }
+                    }
+                    Ok(val) => {
+                        last_iter_ok = true;
+                        val
+                    }
+                }
+            }
+
+            if last_iter_ok {
+                Ok(Response::PartitionRemoved)
+            } else {
+                Err(TaskError::PartitionLost(self.partition_id))
+            }
+        }
+    }
+}
+
+async fn handle_remove_partition<P: Partition, PC: PartitionCreator<P>>(
+    partitions: Rc<RwLock<HashMap<PartitionId, Rc<RwLock<P>>>>>,
+    partition_id: PartitionId,
+    partition_creator: PC,
+) -> TaskResult<P> {
     let partition = partitions
         .write()
         .await
@@ -104,19 +221,15 @@ async fn handle_remove_partition<P: Partition>(
         .remove(&partition_id)
         .ok_or_else(|| TaskError::PartitionNotFound(partition_id.clone()))?;
 
-    let partition =
-        Rc::try_unwrap(partition).map_err(|_| TaskError::PartitionInUse(partition_id.clone()))?;
+    use partition_remover::{PartitionRemainder, PartitionRemover};
 
-    let partition = partition
-        .into_inner()
-        .map_err(|_| TaskError::PartitionInUse(partition_id))?;
-
-    partition
-        .remove()
-        .await
-        .map_err(TaskError::PartitionError)?;
-
-    Ok(Response::PartitionRemoved)
+    PartitionRemover::new(
+        PartitionRemainder::Rc(partition),
+        partition_id,
+        partition_creator,
+    )
+    .remove()
+    .await
 }
 
 impl<P, PC> BaseProcessor<P, ResponseSender<P>> for Processor<P, PC>
@@ -149,7 +262,8 @@ where
                     }
 
                     Request::RemovePartition => {
-                        handle_remove_partition(partitions, task.partition_id).await
+                        handle_remove_partition(partitions, task.partition_id, partition_creator)
+                            .await
                     }
                 };
 
