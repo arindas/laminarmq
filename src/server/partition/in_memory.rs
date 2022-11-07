@@ -5,6 +5,7 @@ use super::{
 use async_trait::async_trait;
 use std::{collections::HashMap, error::Error, fmt::Display};
 
+#[derive(Debug)]
 pub struct Partition {
     records: HashMap<u64, Record>,
     size: usize,
@@ -95,7 +96,7 @@ impl BasePartition for Partition {
     }
 }
 
-struct PartitionCreator;
+pub struct PartitionCreator;
 
 #[async_trait(?Send)]
 impl BasePartitionCreator<Partition> for PartitionCreator {

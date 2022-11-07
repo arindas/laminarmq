@@ -6,6 +6,7 @@ use super::{
     Request, Response,
 };
 
+#[derive(Debug)]
 pub enum TaskError<P: Partition> {
     PartitionError(P::Error),
     PartitionNotFound(PartitionId),

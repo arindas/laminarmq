@@ -207,6 +207,56 @@ mod partition_remover {
             }
         }
     }
+
+    #[cfg(test)]
+    mod tests {
+        use super::{
+            super::super::super::partition::in_memory::{
+                Partition as InMemPartition, PartitionCreator as InMemPartitionCreator,
+            },
+            *,
+        };
+        use glommio::{LocalExecutorBuilder, Placement};
+        use std::collections::HashMap;
+
+        #[test]
+        fn test_partition_remover() {
+            LocalExecutorBuilder::new(Placement::Unbound)
+                .spawn(|| async move {
+                    let partition_container = Rc::new(RwLock::new(HashMap::<
+                        PartitionId,
+                        Rc<RwLock<InMemPartition>>,
+                    >::new()));
+
+                    let partition_id = PartitionId {
+                        topic: "some_topic".to_string(),
+                        partition_number: 0,
+                    };
+
+                    partition_container.write().await.unwrap().insert(
+                        partition_id.clone(),
+                        Rc::new(RwLock::new(InMemPartition::new())),
+                    );
+
+                    let partition = partition_container
+                        .write()
+                        .await
+                        .unwrap()
+                        .remove(&partition_id)
+                        .unwrap();
+
+                    PartitionRemover::new(
+                        PartitionRemainder::Rc(partition),
+                        partition_id,
+                        InMemPartitionCreator,
+                    )
+                    .remove()
+                    .await
+                    .unwrap();
+                })
+                .unwrap();
+        }
+    }
 }
 
 async fn handle_remove_partition<P: Partition, PC: PartitionCreator<P>>(

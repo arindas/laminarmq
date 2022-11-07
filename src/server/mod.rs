@@ -45,6 +45,7 @@ pub enum Response {
 pub mod partition;
 pub mod worker;
 
+#[cfg(not(tarpaulin_include))]
 pub mod tokio_compat;
 
 #[cfg(target_os = "linux")]
