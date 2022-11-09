@@ -17,13 +17,32 @@ pub enum TaskError<P: Partition> {
 
 pub type TaskResult<P> = Result<Response, TaskError<P>>;
 
-pub struct Task<P: Partition, S: Sender<TaskResult<P>>> {
+pub struct Task<P, S>
+where
+    P: Partition,
+    S: Sender<TaskResult<P>>,
+{
     pub partition_id: PartitionId,
     pub request: Request,
 
     pub response_sender: S,
 
     _phantom_data: PhantomData<P>,
+}
+
+impl<P, S> Task<P, S>
+where
+    P: Partition,
+    S: Sender<TaskResult<P>>,
+{
+    pub fn new(partition_id: PartitionId, request: Request, response_sender: S) -> Self {
+        Self {
+            partition_id,
+            request,
+            response_sender,
+            _phantom_data: PhantomData,
+        }
+    }
 }
 
 pub trait Processor<P, S>

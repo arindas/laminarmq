@@ -1,20 +1,39 @@
-use super::super::{
-    channel::Sender,
-    partition::{Partition, PartitionCreator, PartitionId},
-    worker::{Processor as BaseProcessor, Task, TaskError, TaskResult},
-    Request, Response,
+use super::{
+    super::{
+        channel::Sender,
+        partition::{Partition, PartitionCreator, PartitionId},
+        worker::{Processor as BaseProcessor, Task, TaskError, TaskResult},
+        Request, Response,
+    },
+    worker::ResponseSender,
 };
 use glommio::{sync::RwLock, TaskQueueHandle};
 use std::{collections::HashMap, rc::Rc};
 
-pub struct Processor<P: Partition, PC: PartitionCreator<P>> {
+pub struct Processor<P, PC>
+where
+    P: Partition,
+    PC: PartitionCreator<P>,
+{
     partitions: Rc<RwLock<HashMap<PartitionId, Rc<RwLock<P>>>>>,
     task_queue: TaskQueueHandle,
 
     partition_creator: PC,
 }
 
-type ResponseSender<P> = super::channel::Sender<TaskResult<P>>;
+impl<P, PC> Processor<P, PC>
+where
+    P: Partition,
+    PC: PartitionCreator<P>,
+{
+    pub fn new(task_queue: TaskQueueHandle, partition_creator: PC) -> Self {
+        Self {
+            partitions: Rc::new(RwLock::new(HashMap::new())),
+            task_queue,
+            partition_creator,
+        }
+    }
+}
 
 async fn handle_idempotent_requests<P: Partition>(
     partitions: Rc<RwLock<HashMap<PartitionId, Rc<RwLock<P>>>>>,

@@ -1,25 +1,36 @@
+use crate::server::tokio_compat::TokioIO;
 use futures_lite::Future;
-use glommio::{enclose, net::TcpListener, sync::Semaphore};
+use glommio::{enclose, net::TcpListener, sync::Semaphore, TaskQueueHandle};
 use hyper::{rt::Executor, server::conn::Http, service::service_fn, Body, Request, Response};
-use log::error;
 use std::{io, net::SocketAddr, rc::Rc};
 
-use crate::server::tokio_compat::TokioIO;
-
 #[derive(Clone)]
-struct HyperExecutor;
+struct HyperExecutor {
+    task_queue_handle: TaskQueueHandle,
+}
 
 impl<F> Executor<F> for HyperExecutor
 where
     F: Future + 'static,
     F::Output: 'static,
 {
-    fn execute(&self, fut: F) {
-        glommio::spawn_local(fut).detach();
+    fn execute(&self, f: F) {
+        if let Err(err) = glommio::spawn_local_into(f, self.task_queue_handle).map(|x| x.detach()) {
+            log::error!(
+                "Error: {:?} when spawning future on queue: {:?}",
+                err,
+                self.task_queue_handle
+            );
+        }
     }
 }
 
-pub async fn serve_http<S, F, R, A>(addr: A, service: S, max_connections: usize) -> io::Result<()>
+pub async fn serve_http<S, F, R, A>(
+    addr: A,
+    service: S,
+    max_connections: usize,
+    task_queue_handle: TaskQueueHandle,
+) -> io::Result<()>
 where
     S: FnMut(Request<Body>) -> F + 'static + Copy,
     F: Future<Output = Result<Response<Body>, R>> + 'static,
@@ -38,10 +49,10 @@ where
                 glommio::spawn_local(enclose! {(conn_control) async move {
                     let _permit = conn_control.acquire_permit(1).await;
 
-                    if let Err(x) = Http::new().with_executor(HyperExecutor)
+                    if let Err(x) = Http::new().with_executor(HyperExecutor{task_queue_handle})
                         .serve_connection(TokioIO(stream), service_fn(service)).await {
                         if !x.is_incomplete_message() {
-                            error!("Stream from {:?} failed with error {:?}", addr, x);
+                            log::error!("Stream from {:?} failed with error {:?}", addr, x);
                         }
                     }
                 }})
