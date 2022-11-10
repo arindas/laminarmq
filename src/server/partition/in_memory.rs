@@ -51,15 +51,13 @@ impl BasePartition for Partition {
         match request {
             Request::LowestOffset => Ok(Response::LowestOffset(0)),
             Request::HighestOffset => Ok(Response::HighestOffset(self.size as u64)),
-            Request::Append { record_bytes: _ } => Err(PartitionError::NotSupported),
             Request::Read { offset } => self
                 .records
                 .get(&offset)
-                .cloned()
                 .map(|x| {
                     let next_offset = x.offset + x.value.len() as u64;
                     Response::Read {
-                        record: x,
+                        record: x.clone(),
                         next_offset,
                     }
                 })
@@ -70,7 +68,6 @@ impl BasePartition for Partition {
 
     async fn serve(&mut self, request: Request) -> Result<Response, Self::Error> {
         match request {
-            Request::RemoveExpired { expiry_duration: _ } => Err(PartitionError::NotSupported),
             Request::Append { record_bytes } => {
                 let current_offset = self.size as u64;
                 let record_size = record_bytes.len();
@@ -210,7 +207,7 @@ mod tests {
 
             let mut offset = 0;
 
-            for i in 0..records.len() {
+            for record_str in records {
                 if let Response::Read {
                     record,
                     next_offset,
@@ -219,7 +216,7 @@ mod tests {
                     .await
                     .unwrap()
                 {
-                    assert_eq!(record.value, records[i].as_bytes());
+                    assert_eq!(record.value, record_str.as_bytes());
                     offset = next_offset;
                 } else {
                     assert!(false, "Wrong response type!");

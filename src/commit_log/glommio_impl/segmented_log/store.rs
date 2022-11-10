@@ -256,9 +256,9 @@ mod tests {
 
         let local_ex = LocalExecutorBuilder::new(Placement::Fixed(1))
             .spawn(move || async move {
-                let store = Store::new(test_file_path.clone()).await.unwrap();
+                let store = Store::new(&test_file_path).await.unwrap();
 
-                assert_eq!(store.path().unwrap().deref(), test_file_path.clone());
+                assert_eq!(store.path().unwrap().deref(), test_file_path);
 
                 store.remove().await.unwrap();
             })
@@ -302,13 +302,13 @@ mod tests {
             PathBuf::from(test_file_path_string("test_store_reads_reflect_writes"));
 
         if test_file_path.exists() {
-            std::fs::remove_file(test_file_path.clone()).unwrap();
+            std::fs::remove_file(&test_file_path).unwrap();
         }
 
         let local_ex = LocalExecutorBuilder::new(Placement::Fixed(1))
             .spawn(move || async move {
                 let mut store =
-                    Store::with_path_and_buffer_size(test_file_path.clone(), WRITE_BUFFER_SIZE)
+                    Store::with_path_and_buffer_size(&test_file_path, WRITE_BUFFER_SIZE)
                         .await
                         .unwrap();
 
@@ -348,7 +348,7 @@ mod tests {
                 let mut records_read_before_sync = Vec::with_capacity(RECORDS.len());
 
                 for (position, _written_bytes) in &record_positions_and_sizes {
-                    if let Ok((record, _next_record_offset)) = store.read(position.clone()).await {
+                    if let Ok((record, _next_record_offset)) = store.read(*position).await {
                         records_read_before_sync.push(record);
                     } else {
                         break;
@@ -377,10 +377,9 @@ mod tests {
                 store.close().await.unwrap();
 
                 // reopen store and check stored records to test durability
-                let store =
-                    Store::with_path_and_buffer_size(test_file_path.clone(), WRITE_BUFFER_SIZE)
-                        .await
-                        .unwrap();
+                let store = Store::with_path_and_buffer_size(&test_file_path, WRITE_BUFFER_SIZE)
+                    .await
+                    .unwrap();
 
                 assert_eq!(store.size() as usize, EXPECTED_STORAGE_SIZE);
 

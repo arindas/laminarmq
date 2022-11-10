@@ -9,27 +9,18 @@ use crate::commit_log::segmented_log::segment::{config::SegmentConfig, Segment, 
 
 use super::store::Store;
 
-type Error = SegmentError<ReadResult, Store>;
-
-impl Segment<ReadResult, Store> {
-    /// Creates a new [`Segment`] specialized for the [`glommio`] runtime with a [`Store`] at the
-    /// given path with the given base offset and config.
-    ///
-    /// ## Errors
-    /// - [`SegmentError::StoreError`]: if there is an error in creating the store.
-    pub async fn new<P: AsRef<Path>>(
-        path: P,
-        base_offset: u64,
-        config: SegmentConfig,
-    ) -> Result<Self, Error> {
-        Ok(Self::with_config_base_offset_and_store(
-            config,
-            base_offset,
-            Store::with_path_and_buffer_size(path, config.store_buffer_size)
-                .await
-                .map_err(SegmentError::StoreError)?,
-        ))
-    }
+pub async fn glommio_segment(
+    path: impl AsRef<Path>,
+    base_offset: u64,
+    config: SegmentConfig,
+) -> Result<Segment<ReadResult, Store>, SegmentError<ReadResult, Store>> {
+    Ok(Segment::with_config_base_offset_and_store(
+        config,
+        base_offset,
+        Store::with_path_and_buffer_size(path, config.store_buffer_size)
+            .await
+            .map_err(SegmentError::StoreError)?,
+    ))
 }
 
 #[cfg(test)]
@@ -39,10 +30,12 @@ mod tests {
     use glommio::{LocalExecutorBuilder, Placement};
 
     use crate::commit_log::{
-        segmented_log::segment::{config::SegmentConfig, Segment, SegmentError, SegmentScanner},
+        segmented_log::segment::{config::SegmentConfig, SegmentError, SegmentScanner},
         segmented_log::store::common::{bincoded_serialized_record_size, STORE_FILE_EXTENSION},
         Record, Scanner,
     };
+
+    use super::glommio_segment;
 
     #[inline]
     fn test_file_path_string(test_name: &str) -> String {
@@ -62,8 +55,8 @@ mod tests {
 
         let local_ex = LocalExecutorBuilder::new(Placement::Fixed(1))
             .spawn(move || async move {
-                let segment = Segment::new(
-                    test_file_path.clone(),
+                let segment = glommio_segment(
+                    &test_file_path,
                     0,
                     SegmentConfig {
                         store_buffer_size: 512,
@@ -100,8 +93,8 @@ mod tests {
                 let record_representation_size = bincoded_serialized_record_size(&record).unwrap();
                 let expected_segment_size: u64 = 2 * record_representation_size;
 
-                let mut segment = Segment::new(
-                    test_file_path.clone(),
+                let mut segment = glommio_segment(
+                    &test_file_path,
                     0,
                     SegmentConfig {
                         store_buffer_size: 512,
@@ -139,8 +132,8 @@ mod tests {
                 // close segment to ensure that the records are presisted
                 segment.close().await.unwrap();
 
-                let mut segment = Segment::new(
-                    test_file_path.clone(),
+                let mut segment = glommio_segment(
+                    &test_file_path,
                     0,
                     SegmentConfig {
                         store_buffer_size: 512,
