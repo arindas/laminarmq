@@ -93,6 +93,7 @@ impl BasePartition for Partition {
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct PartitionCreator;
 
 #[async_trait(?Send)]

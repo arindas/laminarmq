@@ -353,3 +353,57 @@ where
         };
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::worker::new_task;
+    use super::Processor;
+    use crate::server::{
+        channel::Receiver,
+        partition::{
+            in_memory::{Partition, PartitionCreator},
+            PartitionId,
+        },
+        worker::Processor as BaseProcessor,
+        Request,
+    };
+    use glommio::{executor, Latency, LocalExecutorBuilder, Placement, Shares};
+
+    #[test]
+    fn test_processor() {
+        LocalExecutorBuilder::new(Placement::Fixed(0))
+            .spawn(|| async move {
+                let task_queue = executor().create_task_queue(
+                    Shares::default(),
+                    Latency::NotImportant,
+                    "processor_tq",
+                );
+
+                let processor = Processor::new(task_queue, PartitionCreator);
+
+                let partition_id_1 = PartitionId {
+                    topic: "topic_1".to_string(),
+                    partition_number: 1,
+                };
+                let partition_id_2 = PartitionId {
+                    topic: "topic_2".to_string(),
+                    partition_number: 2,
+                };
+
+                let (create_partition_task_1, recv_1) =
+                    new_task::<Partition>(partition_id_1, Request::CreatePartition);
+
+                let (create_partition_task_2, recv_2) =
+                    new_task::<Partition>(partition_id_2, Request::CreatePartition);
+
+                processor.process(create_partition_task_1);
+
+                processor.process(create_partition_task_2);
+
+                recv_1.recv().await.unwrap().unwrap();
+
+                recv_2.recv().await.unwrap().unwrap();
+            })
+            .unwrap();
+    }
+}
