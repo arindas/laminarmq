@@ -120,7 +120,7 @@ mod tests {
         futures_lite::future::block_on(async {
             let mut partition = PartitionCreator
                 .new_partition(&PartitionId {
-                    topic: "some_topic".to_string(),
+                    topic: "some_topic".into(),
                     partition_number: 0,
                 })
                 .await
@@ -177,7 +177,7 @@ mod tests {
             for record in records {
                 if let Response::Append { write_offset } = partition
                     .serve(Request::Append {
-                        record_bytes: record.as_bytes().to_vec(),
+                        record_bytes: record.as_bytes().into(),
                     })
                     .await
                     .unwrap()

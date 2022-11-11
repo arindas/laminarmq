@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{borrow::Cow, time::Duration};
 
 pub mod channel {
     use async_trait::async_trait;
@@ -25,7 +25,7 @@ pub enum Request {
     LowestOffset,
     HighestOffset,
 
-    Append { record_bytes: Vec<u8> },
+    Append { record_bytes: Cow<'static, [u8]> },
 }
 
 pub type Record = crate::commit_log::Record<'static>;
@@ -45,7 +45,6 @@ pub enum Response {
 pub mod partition;
 pub mod worker;
 
-#[cfg(not(tarpaulin_include))]
 pub mod tokio_compat;
 
 #[cfg(target_os = "linux")]

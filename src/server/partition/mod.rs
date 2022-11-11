@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use super::{Request, Response};
 use async_trait::async_trait;
 
@@ -19,7 +21,7 @@ pub trait PartitionCreator<P: Partition> {
 
 #[derive(Eq, Hash, PartialEq, Debug, Clone)]
 pub struct PartitionId {
-    pub topic: String,
+    pub topic: Cow<'static, str>,
     pub partition_number: u64,
 }
 

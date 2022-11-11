@@ -248,7 +248,7 @@ mod partition_remover {
                     >::new()));
 
                     let partition_id = PartitionId {
-                        topic: "some_topic".to_string(),
+                        topic: "some_topic".into(),
                         partition_number: 0,
                     };
 
@@ -364,8 +364,8 @@ mod tests {
             in_memory::{Partition, PartitionCreator},
             PartitionId,
         },
-        worker::Processor as BaseProcessor,
-        Request,
+        worker::{Processor as BaseProcessor, TaskError},
+        Request, Response,
     };
     use glommio::{executor, Latency, LocalExecutorBuilder, Placement, Shares};
 
@@ -382,19 +382,33 @@ mod tests {
                 let processor = Processor::new(task_queue, PartitionCreator);
 
                 let partition_id_1 = PartitionId {
-                    topic: "topic_1".to_string(),
+                    topic: "topic_1".into(),
                     partition_number: 1,
                 };
                 let partition_id_2 = PartitionId {
-                    topic: "topic_2".to_string(),
+                    topic: "topic_2".into(),
                     partition_number: 2,
                 };
 
+                let (lowest_offset_task, recv) =
+                    new_task::<Partition>(partition_id_1.clone(), Request::LowestOffset);
+
+                processor.process(lowest_offset_task);
+
+                if let Some(Err(TaskError::PartitionNotFound(partition_id))) = recv.recv().await {
+                    assert_eq!(partition_id_1, partition_id);
+                } else {
+                    assert!(
+                        false,
+                        "Wrong error type received for task when partition not found"
+                    );
+                }
+
                 let (create_partition_task_1, recv_1) =
-                    new_task::<Partition>(partition_id_1, Request::CreatePartition);
+                    new_task::<Partition>(partition_id_1.clone(), Request::CreatePartition);
 
                 let (create_partition_task_2, recv_2) =
-                    new_task::<Partition>(partition_id_2, Request::CreatePartition);
+                    new_task::<Partition>(partition_id_2.clone(), Request::CreatePartition);
 
                 processor.process(create_partition_task_1);
 
@@ -402,6 +416,71 @@ mod tests {
 
                 recv_1.recv().await.unwrap().unwrap();
 
+                recv_2.recv().await.unwrap().unwrap();
+
+                let sample_record_bytes: &[u8] = b"Lorem ipsum dolor sit amet.";
+
+                let (append_record_task_1, recv_1) = new_task::<Partition>(
+                    partition_id_1.clone(),
+                    Request::Append {
+                        record_bytes: sample_record_bytes.into(),
+                    },
+                );
+
+                processor.process(append_record_task_1);
+
+                if let Some(Ok(Response::Append { write_offset })) = recv_1.recv().await {
+                    assert_eq!(write_offset, 0);
+                } else {
+                    assert!(false, "Wrong response type for Append request.");
+                }
+
+                let (highest_offset_task_1, recv_1) =
+                    new_task::<Partition>(partition_id_1.clone(), Request::HighestOffset);
+
+                let (highest_offset_task_2, recv_2) =
+                    new_task::<Partition>(partition_id_2.clone(), Request::HighestOffset);
+
+                processor.process(highest_offset_task_1);
+                processor.process(highest_offset_task_2);
+
+                if let Some(Ok(Response::HighestOffset(highest_offset))) = recv_1.recv().await {
+                    assert!(highest_offset > 0);
+                } else {
+                    assert!(false, "Wrong response type for HighestOffset request");
+                }
+
+                if let Some(Ok(Response::HighestOffset(highest_offset))) = recv_2.recv().await {
+                    assert_eq!(highest_offset, 0);
+                } else {
+                    assert!(false, "Wrong response type for HighestOffset request");
+                }
+
+                let (read_record_task_1, recv_1) =
+                    new_task::<Partition>(partition_id_1.clone(), Request::Read { offset: 0 });
+
+                processor.process(read_record_task_1);
+
+                if let Some(Ok(Response::Read {
+                    record,
+                    next_offset: _,
+                })) = recv_1.recv().await
+                {
+                    assert_eq!(record.value, sample_record_bytes);
+                } else {
+                    assert!(false, "Wrong response type for Read request");
+                }
+
+                let (remove_partition_task_1, recv_1) =
+                    new_task::<Partition>(partition_id_1, Request::RemovePartition);
+
+                let (remove_partition_task_2, recv_2) =
+                    new_task::<Partition>(partition_id_2, Request::RemovePartition);
+
+                processor.process(remove_partition_task_1);
+                processor.process(remove_partition_task_2);
+
+                recv_1.recv().await.unwrap().unwrap();
                 recv_2.recv().await.unwrap().unwrap();
             })
             .unwrap();
