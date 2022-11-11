@@ -12,7 +12,7 @@
 //!         const LOG_CONFIG: SegmentedLogConfig = SegmentedLogConfig {
 //!             initial_offset: 0,
 //!             segment_config: SegmentConfig {
-//!                 store_buffer_size: 512,
+//!                 store_buffer_size: None,
 //!                 max_store_bytes: 512,
 //!             },
 //!         };

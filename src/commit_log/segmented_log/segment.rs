@@ -391,7 +391,7 @@ pub mod config {
         /// Segment store's write buffer size. The write buffer is flushed to the disk when it is
         /// filled. Reads of records in a write buffer are only possible when the write buffer is
         /// flushed.
-        pub store_buffer_size: usize,
+        pub store_buffer_size: Option<usize>,
 
         /// Maximum segment storage size, after which this segment is demoted from the current
         /// write segment to a read segment.

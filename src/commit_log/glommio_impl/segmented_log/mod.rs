@@ -69,7 +69,7 @@ mod tests {
                 const LOG_CONFIG: LogConfig = LogConfig {
                     initial_offset: 0,
                     segment_config: SegmentConfig {
-                        store_buffer_size: 512,
+                        store_buffer_size: None,
                         max_store_bytes: 512,
                     },
                 };
@@ -116,7 +116,7 @@ mod tests {
                 let log_config = LogConfig {
                     initial_offset: 0,
                     segment_config: SegmentConfig {
-                        store_buffer_size: 512,
+                        store_buffer_size: None,
                         max_store_bytes: record_size,
                     },
                 };
@@ -195,7 +195,7 @@ mod tests {
                 let log_config = LogConfig {
                     initial_offset: 0,
                     segment_config: SegmentConfig {
-                        store_buffer_size: 512,
+                        store_buffer_size: None,
                         max_store_bytes: record_size,
                     },
                 };
@@ -267,7 +267,7 @@ mod tests {
                 let log_config = LogConfig {
                     initial_offset: 0,
                     segment_config: SegmentConfig {
-                        store_buffer_size: 512,
+                        store_buffer_size: None,
                         max_store_bytes: record_size,
                     },
                 };

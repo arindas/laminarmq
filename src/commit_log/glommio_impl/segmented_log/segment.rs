@@ -7,7 +7,7 @@ use glommio::io::ReadResult;
 
 use crate::commit_log::segmented_log::segment::{config::SegmentConfig, Segment, SegmentError};
 
-use super::store::Store;
+use super::store::{Store, DEFAULT_STORE_WRITER_BUFFER_SIZE};
 
 pub async fn glommio_segment(
     path: impl AsRef<Path>,
@@ -17,9 +17,14 @@ pub async fn glommio_segment(
     Ok(Segment::with_config_base_offset_and_store(
         config,
         base_offset,
-        Store::with_path_and_buffer_size(path, config.store_buffer_size)
-            .await
-            .map_err(SegmentError::StoreError)?,
+        Store::with_path_and_buffer_size(
+            path,
+            config
+                .store_buffer_size
+                .unwrap_or(DEFAULT_STORE_WRITER_BUFFER_SIZE),
+        )
+        .await
+        .map_err(SegmentError::StoreError)?,
     ))
 }
 
@@ -59,7 +64,7 @@ mod tests {
                     &test_file_path,
                     0,
                     SegmentConfig {
-                        store_buffer_size: 512,
+                        store_buffer_size: None,
                         max_store_bytes: 512,
                     },
                 )
@@ -97,7 +102,7 @@ mod tests {
                     &test_file_path,
                     0,
                     SegmentConfig {
-                        store_buffer_size: 512,
+                        store_buffer_size: None,
                         max_store_bytes: expected_segment_size,
                     },
                 )
@@ -136,7 +141,7 @@ mod tests {
                     &test_file_path,
                     0,
                     SegmentConfig {
-                        store_buffer_size: 512,
+                        store_buffer_size: None,
                         max_store_bytes: expected_segment_size,
                     },
                 )
