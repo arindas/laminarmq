@@ -1,14 +1,17 @@
 use super::{
     super::{
         channel::Sender,
-        partition::{Partition, PartitionCreator, PartitionId},
-        worker::{Processor as BaseProcessor, Task, TaskError, TaskResult},
-        Request, Response,
+        partition::{Partition, PartitionCreator, PartitionId, PartitionRequest},
+        worker::{
+            AdministrativeRequest, Processor as BaseProcessor, Task, TaskError, TaskResult,
+            WorkerRequest,
+        },
+        Response,
     },
     worker::ResponseSender,
 };
 use glommio::{sync::RwLock, TaskQueueHandle};
-use std::{collections::HashMap, rc::Rc};
+use std::{borrow::Cow, collections::HashMap, rc::Rc};
 
 pub struct Processor<P, PC>
 where
@@ -38,7 +41,7 @@ where
 async fn handle_idempotent_requests<P: Partition>(
     partitions: Rc<RwLock<HashMap<PartitionId, Rc<RwLock<P>>>>>,
     partition_id: PartitionId,
-    request: Request,
+    request: PartitionRequest,
 ) -> TaskResult<P> {
     partitions
         .read()
@@ -57,7 +60,7 @@ async fn handle_idempotent_requests<P: Partition>(
 async fn handle_requests<P: Partition>(
     partitions: Rc<RwLock<HashMap<PartitionId, Rc<RwLock<P>>>>>,
     partition_id: PartitionId,
-    request: Request,
+    request: PartitionRequest,
 ) -> TaskResult<P> {
     partitions
         .read()
@@ -301,6 +304,29 @@ async fn handle_remove_partition<P: Partition, PC: PartitionCreator<P>>(
     .await
 }
 
+async fn partition_hierachy<P: Partition>(
+    partitions: Rc<RwLock<HashMap<PartitionId, Rc<RwLock<P>>>>>,
+) -> TaskResult<P> {
+    let mut topic_to_partitions = HashMap::<Cow<'static, str>, Vec<u64>>::new();
+
+    for key in partitions
+        .read()
+        .await
+        .map_err(|_| TaskError::LockAcqFailed)?
+        .keys()
+    {
+        if topic_to_partitions.get(&key.topic).is_none() {
+            topic_to_partitions.insert(key.topic.clone(), vec![key.partition_number]);
+        } else {
+            topic_to_partitions
+                .get_mut(&key.topic)
+                .map(|x| x.push(key.partition_number));
+        }
+    }
+
+    Ok(Response::PartitionHierachy(topic_to_partitions))
+}
+
 impl<P, PC> BaseProcessor<P, ResponseSender<P>> for Processor<P, PC>
 where
     P: Partition + 'static,
@@ -312,28 +338,30 @@ where
 
         let spawn_result = glommio::spawn_local_into(
             async move {
-                let task_result = match &task.request {
-                    Request::Read { offset: _ }
-                    | Request::LowestOffset
-                    | Request::HighestOffset => {
-                        handle_idempotent_requests(partitions, task.partition_id, task.request)
-                            .await
-                    }
+                let task_result = match WorkerRequest::from(task.request) {
+                    WorkerRequest::Partition { partition, request } => match &request {
+                        PartitionRequest::Read { offset: _ }
+                        | PartitionRequest::LowestOffset
+                        | PartitionRequest::HighestOffset => {
+                            handle_idempotent_requests(partitions, partition, request).await
+                        }
 
-                    Request::RemoveExpired { expiry_duration: _ }
-                    | Request::Append { record_bytes: _ } => {
-                        handle_requests(partitions, task.partition_id, task.request).await
-                    }
-
-                    Request::CreatePartition => {
-                        handle_create_partition(partitions, task.partition_id, partition_creator)
-                            .await
-                    }
-
-                    Request::RemovePartition => {
-                        handle_remove_partition(partitions, task.partition_id, partition_creator)
-                            .await
-                    }
+                        PartitionRequest::RemoveExpired { expiry_duration: _ }
+                        | PartitionRequest::Append { record_bytes: _ } => {
+                            handle_requests(partitions, partition, request).await
+                        }
+                    },
+                    WorkerRequest::Administrative(request) => match request {
+                        AdministrativeRequest::CreatePartition(partition) => {
+                            handle_create_partition(partitions, partition, partition_creator).await
+                        }
+                        AdministrativeRequest::RemovePartition(partition) => {
+                            handle_remove_partition(partitions, partition, partition_creator).await
+                        }
+                        AdministrativeRequest::PartitionHierarchy => {
+                            partition_hierachy(partitions).await
+                        }
+                    },
                 };
 
                 if let Err(send_error) = task.response_sender.try_send(task_result) {
@@ -362,10 +390,10 @@ mod tests {
         channel::Receiver,
         partition::{
             in_memory::{Partition, PartitionCreator},
-            PartitionId,
+            PartitionId, PartitionRequest,
         },
-        worker::{Processor as BaseProcessor, TaskError},
-        Request, Response,
+        worker::{AdministrativeRequest, Processor as BaseProcessor, TaskError, WorkerRequest},
+        Response,
     };
     use glommio::{executor, Latency, LocalExecutorBuilder, Placement, Shares};
 
@@ -390,8 +418,10 @@ mod tests {
                     partition_number: 2,
                 };
 
-                let (lowest_offset_task, recv) =
-                    new_task::<Partition>(partition_id_1.clone(), Request::LowestOffset);
+                let (lowest_offset_task, recv) = new_task::<Partition>(WorkerRequest::Partition {
+                    partition: partition_id_1.clone(),
+                    request: PartitionRequest::LowestOffset,
+                });
 
                 processor.process(lowest_offset_task);
 
@@ -405,10 +435,14 @@ mod tests {
                 }
 
                 let (create_partition_task_1, recv_1) =
-                    new_task::<Partition>(partition_id_1.clone(), Request::CreatePartition);
+                    new_task::<Partition>(WorkerRequest::Administrative(
+                        AdministrativeRequest::CreatePartition(partition_id_1.clone()),
+                    ));
 
                 let (create_partition_task_2, recv_2) =
-                    new_task::<Partition>(partition_id_2.clone(), Request::CreatePartition);
+                    new_task::<Partition>(WorkerRequest::Administrative(
+                        AdministrativeRequest::CreatePartition(partition_id_2.clone()),
+                    ));
 
                 processor.process(create_partition_task_1);
 
@@ -420,12 +454,13 @@ mod tests {
 
                 let sample_record_bytes: &[u8] = b"Lorem ipsum dolor sit amet.";
 
-                let (append_record_task_1, recv_1) = new_task::<Partition>(
-                    partition_id_1.clone(),
-                    Request::Append {
-                        record_bytes: sample_record_bytes.into(),
-                    },
-                );
+                let (append_record_task_1, recv_1) =
+                    new_task::<Partition>(WorkerRequest::Partition {
+                        partition: partition_id_1.clone(),
+                        request: PartitionRequest::Append {
+                            record_bytes: sample_record_bytes.into(),
+                        },
+                    });
 
                 processor.process(append_record_task_1);
 
@@ -436,10 +471,16 @@ mod tests {
                 }
 
                 let (highest_offset_task_1, recv_1) =
-                    new_task::<Partition>(partition_id_1.clone(), Request::HighestOffset);
+                    new_task::<Partition>(WorkerRequest::Partition {
+                        partition: partition_id_1.clone(),
+                        request: PartitionRequest::HighestOffset,
+                    });
 
                 let (highest_offset_task_2, recv_2) =
-                    new_task::<Partition>(partition_id_2.clone(), Request::HighestOffset);
+                    new_task::<Partition>(WorkerRequest::Partition {
+                        partition: partition_id_2.clone(),
+                        request: PartitionRequest::HighestOffset,
+                    });
 
                 processor.process(highest_offset_task_1);
                 processor.process(highest_offset_task_2);
@@ -457,7 +498,10 @@ mod tests {
                 }
 
                 let (read_record_task_1, recv_1) =
-                    new_task::<Partition>(partition_id_1.clone(), Request::Read { offset: 0 });
+                    new_task::<Partition>(WorkerRequest::Partition {
+                        partition: partition_id_1.clone(),
+                        request: PartitionRequest::Read { offset: 0 },
+                    });
 
                 processor.process(read_record_task_1);
 
@@ -471,12 +515,30 @@ mod tests {
                     assert!(false, "Wrong response type for Read request");
                 }
 
+                let (partition_hierachy_task, recv) = new_task::<Partition>(
+                    WorkerRequest::Administrative(AdministrativeRequest::PartitionHierarchy),
+                );
+
+                processor.process(partition_hierachy_task);
+
+                if let Some(Ok(Response::PartitionHierachy(topic_to_partitions))) =
+                    recv.recv().await
+                {
+                    assert_eq!(topic_to_partitions.get("topic_1".into()), Some(&vec![1]));
+                    assert_eq!(topic_to_partitions.get("topic_2".into()), Some(&vec![2]));
+                } else {
+                    assert!(false, "Wrong response type for PartitionHierachy request");
+                }
+
                 let (remove_partition_task_1, recv_1) =
-                    new_task::<Partition>(partition_id_1, Request::RemovePartition);
+                    new_task::<Partition>(WorkerRequest::Administrative(
+                        AdministrativeRequest::RemovePartition(partition_id_1.clone()),
+                    ));
 
                 let (remove_partition_task_2, recv_2) =
-                    new_task::<Partition>(partition_id_2, Request::RemovePartition);
-
+                    new_task::<Partition>(WorkerRequest::Administrative(
+                        AdministrativeRequest::RemovePartition(partition_id_2.clone()),
+                    ));
                 processor.process(remove_partition_task_1);
                 processor.process(remove_partition_task_2);
 

@@ -39,9 +39,8 @@ pub mod channel {
 pub mod worker {
     use super::{
         super::{
-            partition::{Partition, PartitionId},
-            worker::{Task, TaskResult},
-            Request,
+            partition::Partition,
+            worker::{Task, TaskResult, WorkerRequest},
         },
         channel,
     };
@@ -50,13 +49,12 @@ pub mod worker {
     pub type ResponseSender<P> = channel::Sender<TaskResult<P>>;
 
     pub fn new_task<P: Partition>(
-        partition_id: PartitionId,
-        request: Request,
+        worker_request: WorkerRequest,
     ) -> (Task<P, ResponseSender<P>>, ResponseReceiver<P>) {
         let (response_sender, response_receiver) = channel::new_bounded(1);
 
         (
-            Task::new(partition_id, request, response_sender),
+            Task::new(worker_request.into(), response_sender),
             response_receiver,
         )
     }

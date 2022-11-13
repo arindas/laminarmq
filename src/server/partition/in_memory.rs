@@ -1,9 +1,11 @@
-use super::{
-    super::{Record, Request, Response},
-    Partition as BasePartition, PartitionCreator as BasePartitionCreator, PartitionId,
-};
-use async_trait::async_trait;
 use std::{collections::HashMap, error::Error, fmt::Display};
+
+use async_trait::async_trait;
+
+use super::{
+    super::{Record, Response},
+    PartitionId, PartitionRequest,
+};
 
 #[derive(Debug)]
 pub struct Partition {
@@ -44,14 +46,14 @@ impl Display for PartitionError {
 impl Error for PartitionError {}
 
 #[async_trait(?Send)]
-impl BasePartition for Partition {
+impl super::Partition for Partition {
     type Error = PartitionError;
 
-    async fn serve_idempotent(&self, request: Request) -> Result<Response, Self::Error> {
+    async fn serve_idempotent(&self, request: PartitionRequest) -> Result<Response, Self::Error> {
         match request {
-            Request::LowestOffset => Ok(Response::LowestOffset(0)),
-            Request::HighestOffset => Ok(Response::HighestOffset(self.size as u64)),
-            Request::Read { offset } => self
+            PartitionRequest::LowestOffset => Ok(Response::LowestOffset(0)),
+            PartitionRequest::HighestOffset => Ok(Response::HighestOffset(self.size as u64)),
+            PartitionRequest::Read { offset } => self
                 .records
                 .get(&offset)
                 .map(|x| {
@@ -66,9 +68,9 @@ impl BasePartition for Partition {
         }
     }
 
-    async fn serve(&mut self, request: Request) -> Result<Response, Self::Error> {
+    async fn serve(&mut self, request: PartitionRequest) -> Result<Response, Self::Error> {
         match request {
-            Request::Append { record_bytes } => {
+            PartitionRequest::Append { record_bytes } => {
                 let current_offset = self.size as u64;
                 let record_size = record_bytes.len();
                 let record = Record {
@@ -97,7 +99,7 @@ impl BasePartition for Partition {
 pub struct PartitionCreator;
 
 #[async_trait(?Send)]
-impl BasePartitionCreator<Partition> for PartitionCreator {
+impl super::PartitionCreator<Partition> for PartitionCreator {
     async fn new_partition(
         &self,
         _partition_id: &PartitionId,
@@ -108,10 +110,9 @@ impl BasePartitionCreator<Partition> for PartitionCreator {
 
 #[cfg(test)]
 mod tests {
-    use super::{PartitionCreator, PartitionError};
-    use crate::server::partition::{
-        Partition as BasePartition, PartitionCreator as BasePartitionCreator, PartitionId, Request,
-        Response,
+    use super::{
+        super::super::partition::{Partition as _, PartitionCreator as _, PartitionId, Response},
+        PartitionCreator, PartitionError, PartitionRequest as Request,
     };
     use std::time::Duration;
 

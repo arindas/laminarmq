@@ -1,15 +1,15 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, time::Duration};
 
-use super::{Request, Response};
+use super::Response;
 use async_trait::async_trait;
 
 #[async_trait(?Send)]
 pub trait Partition {
     type Error: std::error::Error;
 
-    async fn serve_idempotent(&self, request: Request) -> Result<Response, Self::Error>;
+    async fn serve_idempotent(&self, request: PartitionRequest) -> Result<Response, Self::Error>;
 
-    async fn serve(&mut self, request: Request) -> Result<Response, Self::Error>;
+    async fn serve(&mut self, request: PartitionRequest) -> Result<Response, Self::Error>;
 
     async fn remove(self) -> Result<(), Self::Error>;
 }
@@ -25,4 +25,13 @@ pub struct PartitionId {
     pub partition_number: u64,
 }
 
+pub enum PartitionRequest {
+    RemoveExpired { expiry_duration: Duration },
+
+    Read { offset: u64 },
+    Append { record_bytes: Cow<'static, [u8]> },
+
+    LowestOffset,
+    HighestOffset,
+}
 pub mod in_memory;
