@@ -106,7 +106,7 @@ where
     }
 }
 
-pub enum AdministrativeRequest {
+pub enum ProcessorRequest {
     CreatePartition(PartitionId),
     RemovePartition(PartitionId),
     PartitionHierarchy,
@@ -117,7 +117,7 @@ pub enum WorkerRequest {
         partition: PartitionId,
         request: PartitionRequest,
     },
-    Administrative(AdministrativeRequest),
+    Processor(ProcessorRequest),
 }
 
 impl From<Request> for WorkerRequest {
@@ -151,14 +151,12 @@ impl From<Request> for WorkerRequest {
             },
 
             Request::CreatePartition(partition) => {
-                Self::Administrative(AdministrativeRequest::CreatePartition(partition))
+                Self::Processor(ProcessorRequest::CreatePartition(partition))
             }
             Request::RemovePartition(partition) => {
-                Self::Administrative(AdministrativeRequest::RemovePartition(partition))
+                Self::Processor(ProcessorRequest::RemovePartition(partition))
             }
-            Request::PartitionHierachy => {
-                Self::Administrative(AdministrativeRequest::PartitionHierarchy)
-            }
+            Request::PartitionHierachy => Self::Processor(ProcessorRequest::PartitionHierarchy),
         }
     }
 }
@@ -179,10 +177,10 @@ impl From<WorkerRequest> for Request {
                 PartitionRequest::LowestOffset => Self::LowestOffset { partition },
                 PartitionRequest::HighestOffset => Self::HighestOffset { partition },
             },
-            WorkerRequest::Administrative(request) => match request {
-                AdministrativeRequest::CreatePartition(x) => Self::CreatePartition(x),
-                AdministrativeRequest::RemovePartition(x) => Self::RemovePartition(x),
-                AdministrativeRequest::PartitionHierarchy => Self::PartitionHierachy,
+            WorkerRequest::Processor(request) => match request {
+                ProcessorRequest::CreatePartition(x) => Self::CreatePartition(x),
+                ProcessorRequest::RemovePartition(x) => Self::RemovePartition(x),
+                ProcessorRequest::PartitionHierarchy => Self::PartitionHierachy,
             },
         }
     }

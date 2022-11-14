@@ -2,10 +2,7 @@ use super::{
     super::{
         channel::Sender,
         partition::{Partition, PartitionCreator, PartitionId, PartitionRequest},
-        worker::{
-            AdministrativeRequest, Processor as BaseProcessor, Task, TaskError, TaskResult,
-            WorkerRequest,
-        },
+        worker::{ProcessorRequest, Task, TaskError, TaskResult, WorkerRequest},
         Response,
     },
     worker::ResponseSender,
@@ -13,10 +10,11 @@ use super::{
 use glommio::{sync::RwLock, TaskQueueHandle};
 use std::{borrow::Cow, collections::HashMap, rc::Rc};
 
+#[derive(Clone)]
 pub struct Processor<P, PC>
 where
-    P: Partition,
-    PC: PartitionCreator<P>,
+    P: Partition + 'static,
+    PC: PartitionCreator<P> + Clone + 'static,
 {
     partitions: Rc<RwLock<HashMap<PartitionId, Rc<RwLock<P>>>>>,
     task_queue: TaskQueueHandle,
@@ -26,8 +24,8 @@ where
 
 impl<P, PC> Processor<P, PC>
 where
-    P: Partition,
-    PC: PartitionCreator<P>,
+    P: Partition + 'static,
+    PC: PartitionCreator<P> + Clone + 'static,
 {
     pub fn new(task_queue: TaskQueueHandle, partition_creator: PC) -> Self {
         Self {
@@ -103,7 +101,7 @@ async fn handle_create_partition<P: Partition, PC: PartitionCreator<P>>(
     Ok(Response::PartitionCreated)
 }
 
-mod partition_remover {
+mod partition_consumer {
     use super::super::super::{
         partition::{Partition, PartitionCreator, PartitionId},
         worker::{TaskError, TaskResult},
@@ -119,7 +117,12 @@ mod partition_remover {
         PartitionConsumed,
     }
 
-    pub(crate) struct PartitionRemover<P, PC>
+    pub(crate) enum ConsumeMethod {
+        Close,
+        Remove,
+    }
+
+    pub(crate) struct PartitionConsumer<P, PC>
     where
         P: Partition,
         PC: PartitionCreator<P>,
@@ -128,11 +131,13 @@ mod partition_remover {
         partition_id: PartitionId,
         partition_creator: PC,
 
+        consume_method: ConsumeMethod,
+
         retries: u32,
         wait_duration: Duration,
     }
 
-    impl<P, PC> PartitionRemover<P, PC>
+    impl<P, PC> PartitionConsumer<P, PC>
     where
         P: Partition,
         PC: PartitionCreator<P>,
@@ -141,6 +146,7 @@ mod partition_remover {
             partition_remainder: PartitionRemainder<P>,
             partition_id: PartitionId,
             partition_creator: PC,
+            consume_method: ConsumeMethod,
             retries: u32,
             wait_duration: Duration,
         ) -> Self {
@@ -148,6 +154,7 @@ mod partition_remover {
                 partition_remainder: Some(partition_remainder),
                 partition_id,
                 partition_creator,
+                consume_method,
                 retries,
                 wait_duration,
             }
@@ -157,11 +164,13 @@ mod partition_remover {
             partition_remainder: PartitionRemainder<P>,
             partition_id: PartitionId,
             partition_creator: PC,
+            consume_method: ConsumeMethod,
         ) -> Self {
             Self::with_retries_and_wait_duration(
                 partition_remainder,
                 partition_id,
                 partition_creator,
+                consume_method,
                 5,
                 Duration::from_millis(100),
             )
@@ -179,11 +188,13 @@ mod partition_remover {
                     .into_inner()
                     .map(|x| Some(PartitionRemainder::Partition(x)))
                     .map_err(|_| PartitionRemainder::PartitionConsumed),
-                PartitionRemainder::Partition(partition) => partition
-                    .remove()
-                    .await
-                    .map(|_| None)
-                    .map_err(|_| PartitionRemainder::PartitionConsumed),
+                PartitionRemainder::Partition(partition) => match &self.consume_method {
+                    ConsumeMethod::Remove => partition.remove(),
+                    ConsumeMethod::Close => partition.close(),
+                }
+                .await
+                .map(|_| None)
+                .map_err(|_| PartitionRemainder::PartitionConsumed),
                 PartitionRemainder::PartitionConsumed => {
                     if let Ok(partition) = self
                         .partition_creator
@@ -198,7 +209,7 @@ mod partition_remover {
             }
         }
 
-        pub(crate) async fn remove(mut self) -> TaskResult<P> {
+        pub(crate) async fn consume(mut self) -> TaskResult<P> {
             // Initial value of self.partition_remainder must be a Some
             let mut last_iter_ok = false;
 
@@ -242,7 +253,7 @@ mod partition_remover {
         use std::collections::HashMap;
 
         #[test]
-        fn test_partition_remover() {
+        fn test_partition_consumer() {
             LocalExecutorBuilder::new(Placement::Unbound)
                 .spawn(|| async move {
                     let partition_container = Rc::new(RwLock::new(HashMap::<
@@ -267,12 +278,13 @@ mod partition_remover {
                         .remove(&partition_id)
                         .unwrap();
 
-                    PartitionRemover::new(
+                    PartitionConsumer::new(
                         PartitionRemainder::Rc(partition),
                         partition_id,
                         InMemPartitionCreator,
+                        ConsumeMethod::Remove,
                     )
-                    .remove()
+                    .consume()
                     .await
                     .unwrap();
                 })
@@ -293,14 +305,13 @@ async fn handle_remove_partition<P: Partition, PC: PartitionCreator<P>>(
         .remove(&partition_id)
         .ok_or_else(|| TaskError::PartitionNotFound(partition_id.clone()))?;
 
-    use partition_remover::{PartitionRemainder, PartitionRemover};
-
-    PartitionRemover::new(
-        PartitionRemainder::Rc(partition),
+    partition_consumer::PartitionConsumer::new(
+        partition_consumer::PartitionRemainder::Rc(partition),
         partition_id,
         partition_creator,
+        partition_consumer::ConsumeMethod::Remove,
     )
-    .remove()
+    .consume()
     .await
 }
 
@@ -315,19 +326,17 @@ async fn partition_hierachy<P: Partition>(
         .map_err(|_| TaskError::LockAcqFailed)?
         .keys()
     {
-        if topic_to_partitions.get(&key.topic).is_none() {
-            topic_to_partitions.insert(key.topic.clone(), vec![key.partition_number]);
+        if let Some(partitions_in_topic) = topic_to_partitions.get_mut(&key.topic) {
+            partitions_in_topic.push(key.partition_number);
         } else {
-            topic_to_partitions
-                .get_mut(&key.topic)
-                .map(|x| x.push(key.partition_number));
+            topic_to_partitions.insert(key.topic.clone(), vec![key.partition_number]);
         }
     }
 
     Ok(Response::PartitionHierachy(topic_to_partitions))
 }
 
-impl<P, PC> BaseProcessor<P, ResponseSender<P>> for Processor<P, PC>
+impl<P, PC> crate::server::worker::Processor<P, ResponseSender<P>> for Processor<P, PC>
 where
     P: Partition + 'static,
     PC: PartitionCreator<P> + Clone + 'static,
@@ -351,14 +360,14 @@ where
                             handle_requests(partitions, partition, request).await
                         }
                     },
-                    WorkerRequest::Administrative(request) => match request {
-                        AdministrativeRequest::CreatePartition(partition) => {
+                    WorkerRequest::Processor(request) => match request {
+                        ProcessorRequest::CreatePartition(partition) => {
                             handle_create_partition(partitions, partition, partition_creator).await
                         }
-                        AdministrativeRequest::RemovePartition(partition) => {
+                        ProcessorRequest::RemovePartition(partition) => {
                             handle_remove_partition(partitions, partition, partition_creator).await
                         }
-                        AdministrativeRequest::PartitionHierarchy => {
+                        ProcessorRequest::PartitionHierarchy => {
                             partition_hierachy(partitions).await
                         }
                     },
@@ -382,6 +391,40 @@ where
     }
 }
 
+impl<P, PC> Drop for Processor<P, PC>
+where
+    P: Partition + 'static,
+    PC: PartitionCreator<P> + Clone + 'static,
+{
+    fn drop(&mut self) {
+        let (partitions, partition_creator) =
+            (self.partitions.clone(), self.partition_creator.clone());
+
+        if let Ok(x) = glommio::spawn_local_into(
+            async move {
+                let partitions = partitions.write().await;
+
+                if let Ok(mut partitions) = partitions {
+                    for (partition_id, partition) in partitions.drain() {
+                        partition_consumer::PartitionConsumer::new(
+                            partition_consumer::PartitionRemainder::Rc(partition),
+                            partition_id,
+                            partition_creator.clone(),
+                            partition_consumer::ConsumeMethod::Close,
+                        )
+                        .consume()
+                        .await
+                        .ok();
+                    }
+                }
+            },
+            self.task_queue,
+        ) {
+            x.detach();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::worker::new_task;
@@ -392,7 +435,7 @@ mod tests {
             in_memory::{Partition, PartitionCreator},
             PartitionId, PartitionRequest,
         },
-        worker::{AdministrativeRequest, Processor as BaseProcessor, TaskError, WorkerRequest},
+        worker::{Processor as BaseProcessor, ProcessorRequest, TaskError, WorkerRequest},
         Response,
     };
     use glommio::{executor, Latency, LocalExecutorBuilder, Placement, Shares};
@@ -435,13 +478,13 @@ mod tests {
                 }
 
                 let (create_partition_task_1, recv_1) =
-                    new_task::<Partition>(WorkerRequest::Administrative(
-                        AdministrativeRequest::CreatePartition(partition_id_1.clone()),
+                    new_task::<Partition>(WorkerRequest::Processor(
+                        ProcessorRequest::CreatePartition(partition_id_1.clone()),
                     ));
 
                 let (create_partition_task_2, recv_2) =
-                    new_task::<Partition>(WorkerRequest::Administrative(
-                        AdministrativeRequest::CreatePartition(partition_id_2.clone()),
+                    new_task::<Partition>(WorkerRequest::Processor(
+                        ProcessorRequest::CreatePartition(partition_id_2.clone()),
                     ));
 
                 processor.process(create_partition_task_1);
@@ -516,7 +559,7 @@ mod tests {
                 }
 
                 let (partition_hierachy_task, recv) = new_task::<Partition>(
-                    WorkerRequest::Administrative(AdministrativeRequest::PartitionHierarchy),
+                    WorkerRequest::Processor(ProcessorRequest::PartitionHierarchy),
                 );
 
                 processor.process(partition_hierachy_task);
@@ -531,18 +574,37 @@ mod tests {
                 }
 
                 let (remove_partition_task_1, recv_1) =
-                    new_task::<Partition>(WorkerRequest::Administrative(
-                        AdministrativeRequest::RemovePartition(partition_id_1.clone()),
+                    new_task::<Partition>(WorkerRequest::Processor(
+                        ProcessorRequest::RemovePartition(partition_id_1.clone()),
                     ));
 
                 let (remove_partition_task_2, recv_2) =
-                    new_task::<Partition>(WorkerRequest::Administrative(
-                        AdministrativeRequest::RemovePartition(partition_id_2.clone()),
+                    new_task::<Partition>(WorkerRequest::Processor(
+                        ProcessorRequest::RemovePartition(partition_id_2.clone()),
                     ));
                 processor.process(remove_partition_task_1);
                 processor.process(remove_partition_task_2);
 
                 recv_1.recv().await.unwrap().unwrap();
+                recv_2.recv().await.unwrap().unwrap();
+
+                // test drop
+                let (create_partition_task_1, recv_1) =
+                    new_task::<Partition>(WorkerRequest::Processor(
+                        ProcessorRequest::CreatePartition(partition_id_1.clone()),
+                    ));
+
+                let (create_partition_task_2, recv_2) =
+                    new_task::<Partition>(WorkerRequest::Processor(
+                        ProcessorRequest::CreatePartition(partition_id_2.clone()),
+                    ));
+
+                processor.process(create_partition_task_1);
+
+                processor.process(create_partition_task_2);
+
+                recv_1.recv().await.unwrap().unwrap();
+
                 recv_2.recv().await.unwrap().unwrap();
             })
             .unwrap();

@@ -11,6 +11,8 @@ pub trait Partition {
 
     async fn serve(&mut self, request: PartitionRequest) -> Result<Response, Self::Error>;
 
+    async fn close(self) -> Result<(), Self::Error>;
+
     async fn remove(self) -> Result<(), Self::Error>;
 }
 

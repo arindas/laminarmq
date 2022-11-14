@@ -74,7 +74,7 @@ impl super::Partition for Partition {
                 let current_offset = self.size as u64;
                 let record_size = record_bytes.len();
                 let record = Record {
-                    value: record_bytes.into(),
+                    value: record_bytes,
                     offset: current_offset,
                 };
 
@@ -88,6 +88,10 @@ impl super::Partition for Partition {
             }
             _ => self.serve_idempotent(request).await,
         }
+    }
+
+    async fn close(self) -> Result<(), Self::Error> {
+        Ok(())
     }
 
     async fn remove(self) -> Result<(), Self::Error> {
