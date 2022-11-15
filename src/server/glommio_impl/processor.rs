@@ -36,7 +36,9 @@ where
     }
 }
 
-async fn handle_idempotent_requests<P: Partition>(
+async fn handle_idempotent_requests<
+    P: Partition<Request = PartitionRequest, Response = Response>,
+>(
     partitions: Rc<RwLock<HashMap<PartitionId, Rc<RwLock<P>>>>>,
     partition_id: PartitionId,
     request: PartitionRequest,
@@ -55,7 +57,7 @@ async fn handle_idempotent_requests<P: Partition>(
         .map_err(TaskError::PartitionError)
 }
 
-async fn handle_requests<P: Partition>(
+async fn handle_requests<P: Partition<Request = PartitionRequest, Response = Response>>(
     partitions: Rc<RwLock<HashMap<PartitionId, Rc<RwLock<P>>>>>,
     partition_id: PartitionId,
     request: PartitionRequest,
@@ -74,7 +76,10 @@ async fn handle_requests<P: Partition>(
         .map_err(TaskError::PartitionError)
 }
 
-async fn handle_create_partition<P: Partition, PC: PartitionCreator<P>>(
+async fn handle_create_partition<
+    P: Partition<Request = PartitionRequest, Response = Response>,
+    PC: PartitionCreator<P>,
+>(
     partitions: Rc<RwLock<HashMap<PartitionId, Rc<RwLock<P>>>>>,
     partition_id: PartitionId,
     partition_creator: PC,
@@ -338,7 +343,7 @@ async fn partition_hierachy<P: Partition>(
 
 impl<P, PC> crate::server::worker::Processor<P, ResponseSender<P>> for Processor<P, PC>
 where
-    P: Partition + 'static,
+    P: Partition<Request = PartitionRequest, Response = Response> + 'static,
     PC: PartitionCreator<P> + Clone + 'static,
 {
     fn process(&self, task: Task<P, ResponseSender<P>>) {

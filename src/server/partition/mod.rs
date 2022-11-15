@@ -1,15 +1,17 @@
 use std::{borrow::Cow, time::Duration};
 
-use super::Response;
 use async_trait::async_trait;
 
 #[async_trait(?Send)]
 pub trait Partition {
     type Error: std::error::Error;
+    type Request;
+    type Response;
 
-    async fn serve_idempotent(&self, request: PartitionRequest) -> Result<Response, Self::Error>;
+    async fn serve_idempotent(&self, request: Self::Request)
+        -> Result<Self::Response, Self::Error>;
 
-    async fn serve(&mut self, request: PartitionRequest) -> Result<Response, Self::Error>;
+    async fn serve(&mut self, request: Self::Request) -> Result<Self::Response, Self::Error>;
 
     async fn close(self) -> Result<(), Self::Error>;
 

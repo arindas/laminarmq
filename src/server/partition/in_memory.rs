@@ -48,6 +48,8 @@ impl Error for PartitionError {}
 #[async_trait(?Send)]
 impl super::Partition for Partition {
     type Error = PartitionError;
+    type Request = PartitionRequest;
+    type Response = Response;
 
     async fn serve_idempotent(&self, request: PartitionRequest) -> Result<Response, Self::Error> {
         match request {
@@ -115,8 +117,8 @@ impl super::PartitionCreator<Partition> for PartitionCreator {
 #[cfg(test)]
 mod tests {
     use super::{
-        super::super::partition::{Partition as _, PartitionCreator as _, PartitionId, Response},
-        PartitionCreator, PartitionError, PartitionRequest as Request,
+        super::super::partition::{Partition as _, PartitionCreator as _, PartitionId},
+        PartitionCreator, PartitionError, PartitionRequest as Request, Response,
     };
     use std::time::Duration;
 

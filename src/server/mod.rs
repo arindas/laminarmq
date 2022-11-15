@@ -16,6 +16,8 @@ pub mod channel {
     }
 }
 
+pub type Record = crate::commit_log::Record<'static>;
+
 pub enum Request {
     PartitionHierachy,
 
@@ -43,8 +45,6 @@ pub enum Request {
         partition: partition::PartitionId,
     },
 }
-
-pub type Record = crate::commit_log::Record<'static>;
 
 pub enum Response {
     PartitionHierachy(HashMap<Cow<'static, str>, Vec<u64>>),
