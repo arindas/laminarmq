@@ -11,6 +11,8 @@
 //! In the context of `laminarmq` this module is intended to provide the storage for individual
 //! partitions in a topic.
 
+use std::{borrow::Cow, time::Duration};
+
 use async_trait::async_trait;
 
 /// Represents a record in a [`CommitLog`].
@@ -18,7 +20,7 @@ use async_trait::async_trait;
 pub struct Record<'a> {
     /// Value stored in this record entry. The value itself might be serialized bytes of some other
     /// form of record.
-    pub value: std::borrow::Cow<'a, [u8]>,
+    pub value: Cow<'a, [u8]>,
 
     /// Offset at which this record is stored in the log.
     pub offset: u64,
@@ -66,6 +68,11 @@ pub trait CommitLog {
     /// Reads the [`Record`] at the given offset, along with the offset of the next record from
     /// this [`CommitLog`].
     async fn read<'record>(&self, offset: u64) -> Result<(Record<'record>, u64), Self::Error>;
+
+    /// Remove expired storage used, if any. Default implementation simply returns with [`Ok(())`]
+    async fn remove_expired(&mut self, _expiry_duration: Duration) -> Result<(), Self::Error> {
+        Ok(())
+    }
 
     /// Removes all underlying storage files associated. Consumes this [`CommitLog`] instance to
     /// prevent further operations on this instance.

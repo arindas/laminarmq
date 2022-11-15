@@ -569,6 +569,10 @@ where
             .unwrap_or(self.config.initial_offset)
     }
 
+    async fn remove_expired(&mut self, expiry_duration: Duration) -> Result<(), Self::Error> {
+        self.remove_expired_segments(expiry_duration).await
+    }
+
     async fn remove(mut self) -> Result<(), Self::Error> {
         consume_segments_from_segmented_log_with_method!(self, remove);
         fs::remove_dir_all(self.storage_directory).map_err(SegmentedLogError::IoError)?;
