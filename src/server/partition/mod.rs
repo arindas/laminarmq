@@ -1,5 +1,3 @@
-use std::{borrow::Cow, time::Duration};
-
 use async_trait::async_trait;
 
 #[async_trait(?Send)]
@@ -25,17 +23,22 @@ pub trait PartitionCreator<P: Partition> {
 
 #[derive(Eq, Hash, PartialEq, Debug, Clone)]
 pub struct PartitionId {
-    pub topic: Cow<'static, str>,
+    pub topic: std::borrow::Cow<'static, str>,
     pub partition_number: u64,
 }
 
-pub enum PartitionRequest {
-    RemoveExpired { expiry_duration: Duration },
+pub mod single_node {
+    use std::{borrow::Cow, time::Duration};
 
-    Read { offset: u64 },
-    Append { record_bytes: Cow<'static, [u8]> },
+    pub enum PartitionRequest {
+        RemoveExpired { expiry_duration: Duration },
 
-    LowestOffset,
-    HighestOffset,
+        Read { offset: u64 },
+        Append { record_bytes: Cow<'static, [u8]> },
+
+        LowestOffset,
+        HighestOffset,
+    }
 }
+
 pub mod in_memory;

@@ -40,23 +40,23 @@ pub mod worker {
     use super::{
         super::{
             partition::Partition,
-            worker::{Task, TaskResult, WorkerRequest},
+            worker::{Task, TaskResult},
         },
         channel,
     };
 
-    pub type ResponseReceiver<P> = channel::Receiver<TaskResult<P>>;
-    pub type ResponseSender<P> = channel::Sender<TaskResult<P>>;
+    pub type ResponseReceiver<Response, P> = channel::Receiver<TaskResult<Response, P>>;
+    pub type ResponseSender<Response, P> = channel::Sender<TaskResult<Response, P>>;
 
-    pub fn new_task<P: Partition>(
-        worker_request: WorkerRequest,
-    ) -> (Task<P, ResponseSender<P>>, ResponseReceiver<P>) {
+    pub fn new_task<P: Partition, Request, Response>(
+        request: Request,
+    ) -> (
+        Task<P, Request, Response, ResponseSender<Response, P>>,
+        ResponseReceiver<Response, P>,
+    ) {
         let (response_sender, response_receiver) = channel::new_bounded(1);
 
-        (
-            Task::new(worker_request.into(), response_sender),
-            response_receiver,
-        )
+        (Task::new(request, response_sender), response_receiver)
     }
 }
 

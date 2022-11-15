@@ -1,5 +1,3 @@
-use std::{borrow::Cow, collections::HashMap, time::Duration};
-
 pub mod channel {
     use async_trait::async_trait;
     use std::error::Error;
@@ -18,46 +16,51 @@ pub mod channel {
 
 pub type Record = crate::commit_log::Record<'static>;
 
-pub enum Request {
-    PartitionHierachy,
+pub mod single_node {
+    use super::{partition::PartitionId, Record};
+    use std::{borrow::Cow, collections::HashMap, time::Duration};
 
-    RemoveExpired {
-        partition: partition::PartitionId,
-        expiry_duration: Duration,
-    },
+    pub enum Request {
+        PartitionHierachy,
 
-    CreatePartition(partition::PartitionId),
-    RemovePartition(partition::PartitionId),
+        RemoveExpired {
+            partition: PartitionId,
+            expiry_duration: Duration,
+        },
 
-    Read {
-        partition: partition::PartitionId,
-        offset: u64,
-    },
-    Append {
-        partition: partition::PartitionId,
-        record_bytes: Cow<'static, [u8]>,
-    },
+        CreatePartition(PartitionId),
+        RemovePartition(PartitionId),
 
-    LowestOffset {
-        partition: partition::PartitionId,
-    },
-    HighestOffset {
-        partition: partition::PartitionId,
-    },
-}
+        Read {
+            partition: PartitionId,
+            offset: u64,
+        },
+        Append {
+            partition: PartitionId,
+            record_bytes: Cow<'static, [u8]>,
+        },
 
-pub enum Response {
-    PartitionHierachy(HashMap<Cow<'static, str>, Vec<u64>>),
+        LowestOffset {
+            partition: PartitionId,
+        },
+        HighestOffset {
+            partition: PartitionId,
+        },
+    }
 
-    Read { record: Record, next_offset: u64 },
-    LowestOffset(u64),
-    HighestOffset(u64),
+    pub enum Response {
+        PartitionHierachy(HashMap<Cow<'static, str>, Vec<u64>>),
 
-    Append { write_offset: u64 },
+        Read { record: Record, next_offset: u64 },
+        LowestOffset(u64),
+        HighestOffset(u64),
 
-    ExpiredRemoved,
-    PartitionCreated,
-    PartitionRemoved,
+        Append { write_offset: u64 },
+
+        ExpiredRemoved,
+        PartitionCreated,
+        PartitionRemoved,
+    }
 }
 
 pub mod partition;

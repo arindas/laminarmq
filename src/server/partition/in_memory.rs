@@ -3,8 +3,9 @@ use std::{collections::HashMap, error::Error, fmt::Display};
 use async_trait::async_trait;
 
 use super::{
-    super::{Record, Response},
-    PartitionId, PartitionRequest,
+    super::{single_node::Response, Record},
+    single_node::PartitionRequest,
+    PartitionId,
 };
 
 #[derive(Debug)]
