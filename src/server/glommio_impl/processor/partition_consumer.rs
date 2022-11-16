@@ -183,6 +183,8 @@ mod tests {
                 .await
                 .unwrap();
             })
+            .unwrap()
+            .join()
             .unwrap();
     }
 }

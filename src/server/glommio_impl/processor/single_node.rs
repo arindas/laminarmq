@@ -15,6 +15,7 @@ use super::{
 };
 use glommio::{sync::RwLock, TaskQueueHandle};
 use std::{borrow::Cow, collections::HashMap, rc::Rc};
+use tracing::{error, error_span, instrument, Instrument};
 
 #[derive(Clone)]
 pub struct Processor<P, PC>
@@ -166,6 +167,7 @@ where
     P: Partition<Request = PartitionRequest, Response = Response> + 'static,
     PC: PartitionCreator<P> + Clone + 'static,
 {
+    #[instrument(skip(self, task))]
     fn process(&self, task: Task<P, Request, Response, ResponseSender<Response, P>>) {
         let (partitions, partition_creator) =
             (self.partitions.clone(), self.partition_creator.clone());
@@ -177,7 +179,6 @@ where
                         PartitionRequest::Read { offset: _ }
                         | PartitionRequest::LowestOffset
                         | PartitionRequest::HighestOffset => {
-                            let request = request;
                             handle_idempotent_requests(partitions, partition, request).await
                         }
 
@@ -200,20 +201,16 @@ where
                 };
 
                 if let Err(send_error) = task.response_sender.try_send(task_result) {
-                    log::error!("Unable to send result back: {:?}", send_error);
+                    error!("Unable to send result back: {:?}", send_error);
                 }
-            },
+            }
+            .instrument(error_span!("single_node_processor_task_handler")),
             self.task_queue,
         );
 
-        match spawn_result {
-            Ok(task) => {
-                task.detach();
-            }
-            Err(spawn_error) => {
-                log::error!("Error detaching spawned task: {:?}", spawn_error);
-            }
-        };
+        if let Err(spawn_error) = spawn_result.map(|task| task.detach()) {
+            error!("Error detaching spawned task: {:?}", spawn_error);
+        }
     }
 }
 
@@ -450,6 +447,8 @@ mod tests {
 
                 recv_2.recv().await.unwrap().unwrap();
             })
+            .unwrap()
+            .join()
             .unwrap();
     }
 }

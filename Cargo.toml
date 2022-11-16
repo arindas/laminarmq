@@ -21,7 +21,7 @@ byteorder = "1.4.3"
 serde = { version = "1.0.144", features = ["derive"] }
 hyper = { version = "0.14.20", features = ["server", "http2"] }
 tokio = "1.21.2"
-log = "0.4.17"
+tracing = "0.1.37"
 
 [lib]
 name = "laminarmq"

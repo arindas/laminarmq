@@ -48,10 +48,13 @@ pub mod worker {
     pub type ResponseReceiver<Response, P> = channel::Receiver<TaskResult<Response, P>>;
     pub type ResponseSender<Response, P> = channel::Sender<TaskResult<Response, P>>;
 
+    type GlommioTask<P, Request, Response> =
+        Task<P, Request, Response, ResponseSender<Response, P>>;
+
     pub fn new_task<P: Partition, Request, Response>(
         request: Request,
     ) -> (
-        Task<P, Request, Response, ResponseSender<Response, P>>,
+        GlommioTask<P, Request, Response>,
         ResponseReceiver<Response, P>,
     ) {
         let (response_sender, response_receiver) = channel::new_bounded(1);
