@@ -139,7 +139,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        super::super::super::partition::in_memory::{
+        super::super::super::partition::single_node::in_memory::{
             Partition as InMemPartition, PartitionCreator as InMemPartitionCreator,
         },
         *,

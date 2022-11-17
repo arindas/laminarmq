@@ -256,8 +256,10 @@ mod tests {
                 channel::Receiver,
                 glommio_impl::worker::{ResponseReceiver, ResponseSender},
                 partition::{
-                    in_memory::{Partition, PartitionCreator},
-                    single_node::PartitionRequest,
+                    single_node::{
+                        in_memory::{Partition, PartitionCreator},
+                        PartitionRequest,
+                    },
                     PartitionId,
                 },
                 single_node::{Request, Response},

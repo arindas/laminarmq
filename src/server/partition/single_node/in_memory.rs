@@ -2,7 +2,7 @@ use std::{collections::HashMap, error::Error, fmt::Display};
 
 use async_trait::async_trait;
 
-use super::{
+use super::super::{
     super::{single_node::Response, Record},
     single_node::PartitionRequest,
     PartitionId,
@@ -47,7 +47,7 @@ impl Display for PartitionError {
 impl Error for PartitionError {}
 
 #[async_trait(?Send)]
-impl super::Partition for Partition {
+impl super::super::Partition for Partition {
     type Error = PartitionError;
     type Request = PartitionRequest;
     type Response = Response;
@@ -106,7 +106,7 @@ impl super::Partition for Partition {
 pub struct PartitionCreator;
 
 #[async_trait(?Send)]
-impl super::PartitionCreator<Partition> for PartitionCreator {
+impl super::super::PartitionCreator<Partition> for PartitionCreator {
     async fn new_partition(
         &self,
         _partition_id: &PartitionId,
@@ -118,7 +118,7 @@ impl super::PartitionCreator<Partition> for PartitionCreator {
 #[cfg(test)]
 mod tests {
     use super::{
-        super::super::partition::{Partition as _, PartitionCreator as _, PartitionId},
+        super::super::super::partition::{Partition as _, PartitionCreator as _, PartitionId},
         PartitionCreator, PartitionError, PartitionRequest as Request, Response,
     };
     use std::time::Duration;
