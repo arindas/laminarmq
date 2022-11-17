@@ -64,4 +64,5 @@ pub mod worker {
 }
 
 pub mod hyper_compat;
+pub mod partition;
 pub mod processor;

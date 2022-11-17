@@ -5,7 +5,6 @@ use super::super::{
 use async_trait::async_trait;
 use std::fmt::{Debug, Display};
 
-#[derive(Debug)]
 pub enum PartitionError<CL: CommitLog> {
     CommitLog(CL::Error),
     NotSupported,
@@ -24,19 +23,32 @@ where
     }
 }
 
+impl<CL> Debug for PartitionError<CL>
+where
+    CL: CommitLog,
+    CL::Error: std::error::Error,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::CommitLog(error) => f.debug_tuple("CommitLog").field(error).finish(),
+            Self::NotSupported => write!(f, "NotSupported"),
+        }
+    }
+}
+
 impl<CL> std::error::Error for PartitionError<CL>
 where
-    CL: CommitLog + Debug,
+    CL: CommitLog,
     CL::Error: std::error::Error,
 {
 }
 
-pub struct Partition<CL: CommitLog>(CL);
+pub struct Partition<CL: CommitLog>(pub CL);
 
 #[async_trait(?Send)]
 impl<CL> super::super::Partition for Partition<CL>
 where
-    CL: CommitLog + Debug,
+    CL: CommitLog,
     CL::Error: std::error::Error,
 {
     type Error = PartitionError<CL>;
@@ -87,5 +99,30 @@ where
 
     async fn remove(self) -> Result<(), Self::Error> {
         self.0.remove().await.map_err(PartitionError::CommitLog)
+    }
+}
+
+pub mod segmented_log {
+    use crate::{commit_log::prelude::SegmentedLogConfig, server::partition::PartitionId};
+    use std::{
+        borrow::Cow,
+        path::{Path, PathBuf},
+    };
+
+    #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+    pub struct PartitionConfig {
+        pub base_storage_directory: Cow<'static, str>,
+        pub segmented_log_config: SegmentedLogConfig,
+    }
+
+    #[inline]
+    pub fn partition_storage_path<P: AsRef<Path>>(
+        base_directory: P,
+        partition_id: &PartitionId,
+    ) -> PathBuf {
+        base_directory.as_ref().join(format!(
+            "{}/{}",
+            partition_id.topic, partition_id.partition_number
+        ))
     }
 }
