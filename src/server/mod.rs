@@ -64,6 +64,7 @@ pub mod single_node {
 }
 
 pub mod partition;
+pub mod router;
 pub mod worker;
 
 pub mod tokio_compat;
