@@ -61,6 +61,20 @@ pub mod single_node {
         PartitionCreated,
         PartitionRemoved,
     }
+
+    #[derive(Clone, Copy)]
+    pub enum RequestKind {
+        Read,
+        Append,
+
+        LowestOffset,
+        HighestOffset,
+        RemoveExpired,
+
+        PartitionHierachy,
+        CreatePartition,
+        RemovePartition,
+    }
 }
 
 pub mod partition;
