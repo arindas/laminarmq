@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use std::time::Duration;
 
 #[async_trait(?Send)]
 pub trait Partition {
@@ -26,5 +27,7 @@ pub struct PartitionId {
     pub topic: std::borrow::Cow<'static, str>,
     pub partition_number: u64,
 }
+
+pub const DEFAULT_EXPIRY_DURATION: Duration = Duration::from_secs(86400 * 7);
 
 pub mod single_node;

@@ -5,7 +5,7 @@ pub trait Router<Request> {
 
 pub mod single_node {
     use super::super::{
-        partition::PartitionId,
+        partition::{PartitionId, DEFAULT_EXPIRY_DURATION},
         single_node::{Request, RequestKind},
     };
     use hyper::Method;
@@ -64,7 +64,9 @@ pub mod single_node {
                 map.insert(method.clone(), UriRouter::new());
             }
 
-            map.get_mut(method).map(|x| x.add(*path, *req_kind));
+            if let Some(router) = map.get_mut(method) {
+                router.add(path, *req_kind);
+            }
         }
 
         map
@@ -74,7 +76,7 @@ pub mod single_node {
 
     #[async_trait::async_trait(?Send)]
     impl super::Router<Request> for Router {
-        async fn route(&self, req: hyper::Request<hyper::Body>) -> Option<Request> {
+        async fn route(&self, mut req: hyper::Request<hyper::Body>) -> Option<Request> {
             let route_match = self
                 .0
                 .get(req.method())
@@ -88,13 +90,47 @@ pub mod single_node {
                     .and_then(|x| x.parse::<u64>().ok()),
             );
 
+            macro_rules! partition_id {
+                ($topic_id:ident, $partition_number:ident) => {
+                    PartitionId {
+                        topic: $topic_id?.to_owned().into(),
+                        partition_number: $partition_number?,
+                    }
+                };
+            }
+
             match (req.method(), route_match.handler()) {
-                (&Method::GET, &&RequestKind::LowestOffset) => Some(Request::LowestOffset {
-                    partition: PartitionId {
-                        topic: topic_id?.to_owned().into(),
-                        partition_number: partition_number?,
-                    },
+                (&Method::GET, &&RequestKind::Read) => Some(Request::Read {
+                    partition: partition_id!(topic_id, partition_number),
+                    offset: params.find("offset").and_then(|x| x.parse::<u64>().ok())?,
                 }),
+                (&Method::POST, &&RequestKind::Append) => Some(Request::Append {
+                    partition: partition_id!(topic_id, partition_number),
+                    record_bytes: hyper::body::to_bytes(req.body_mut())
+                        .await
+                        .ok()?
+                        .to_vec()
+                        .into(),
+                }),
+                (&Method::GET, &&RequestKind::LowestOffset) => Some(Request::LowestOffset {
+                    partition: partition_id!(topic_id, partition_number),
+                }),
+                (&Method::GET, &&RequestKind::HighestOffset) => Some(Request::HighestOffset {
+                    partition: partition_id!(topic_id, partition_number),
+                }),
+                (&Method::POST, &&RequestKind::RemoveExpired) => Some(Request::RemoveExpired {
+                    partition: partition_id!(topic_id, partition_number),
+                    expiry_duration: DEFAULT_EXPIRY_DURATION,
+                }),
+                (&Method::GET, &&RequestKind::PartitionHierachy) => {
+                    Some(Request::PartitionHierachy)
+                }
+                (&Method::POST, &&RequestKind::CreatePartition) => Some(Request::CreatePartition(
+                    partition_id!(topic_id, partition_number),
+                )),
+                (&Method::DELETE, &&RequestKind::RemovePartition) => Some(
+                    Request::RemovePartition(partition_id!(topic_id, partition_number)),
+                ),
                 _ => None,
             }
         }
