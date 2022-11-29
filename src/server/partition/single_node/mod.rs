@@ -1,5 +1,7 @@
 use std::{borrow::Cow, time::Duration};
 
+pub const DEFAULT_EXPIRY_DURATION: Duration = Duration::from_secs(86400 * 7);
+
 pub enum PartitionRequest {
     RemoveExpired { expiry_duration: Duration },
 

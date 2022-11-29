@@ -1,4 +1,5 @@
 pub mod commit_log;
+pub mod common;
 pub mod server;
 
 pub mod prelude {

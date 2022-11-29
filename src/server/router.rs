@@ -5,7 +5,7 @@ pub trait Router<Request> {
 
 pub mod single_node {
     use super::super::{
-        partition::{PartitionId, DEFAULT_EXPIRY_DURATION},
+        partition::{single_node::DEFAULT_EXPIRY_DURATION, PartitionId},
         single_node::{Request, RequestKind},
     };
     use hyper::Method;
