@@ -106,11 +106,10 @@ pub mod single_node {
                 }),
                 (&Method::POST, &&RequestKind::Append) => Some(Request::Append {
                     partition: partition_id!(topic_id, partition_number),
-                    record_bytes: hyper::body::to_bytes(req.body_mut())
-                        .await
-                        .ok()?
-                        .to_vec()
-                        .into(),
+                    record_bytes: Into::<Vec<u8>>::into(
+                        hyper::body::to_bytes(req.body_mut()).await.ok()?,
+                    )
+                    .into(),
                 }),
                 (&Method::GET, &&RequestKind::LowestOffset) => Some(Request::LowestOffset {
                     partition: partition_id!(topic_id, partition_number),

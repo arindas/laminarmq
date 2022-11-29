@@ -1,6 +1,7 @@
-use std::{collections::HashMap, error::Error, fmt::Display};
+use std::{borrow::Cow, collections::HashMap, error::Error, fmt::Display};
 
 use async_trait::async_trait;
+use bytes::Bytes;
 
 use super::super::{
     super::{single_node::Response, Record},
@@ -10,7 +11,7 @@ use super::super::{
 
 #[derive(Debug)]
 pub struct Partition {
-    records: HashMap<u64, Record>,
+    records: HashMap<u64, Bytes>,
     size: usize,
 }
 
@@ -60,9 +61,12 @@ impl super::super::Partition for Partition {
                 .records
                 .get(&offset)
                 .map(|x| {
-                    let next_offset = x.offset + x.value.len() as u64;
+                    let next_offset = offset + x.len() as u64;
                     Response::Read {
-                        record: x.clone(),
+                        record: Record {
+                            value: Into::<Vec<u8>>::into(x.clone()).into(),
+                            offset,
+                        },
                         next_offset,
                     }
                 })
@@ -76,12 +80,13 @@ impl super::super::Partition for Partition {
             PartitionRequest::Append { record_bytes } => {
                 let current_offset = self.size as u64;
                 let record_size = record_bytes.len();
-                let record = Record {
-                    value: record_bytes,
-                    offset: current_offset,
+
+                let record_bytes = match record_bytes {
+                    Cow::Borrowed(borrowed_bytes) => Bytes::from_static(borrowed_bytes),
+                    Cow::Owned(owned_bytes) => Bytes::from(owned_bytes),
                 };
 
-                self.records.insert(current_offset, record);
+                self.records.insert(current_offset, record_bytes);
 
                 self.size += record_size;
 
