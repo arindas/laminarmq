@@ -5,13 +5,13 @@ pub mod borrow {
     use std::{borrow::Cow, ops::Deref};
 
     #[derive(Debug)]
-    pub enum BytesCow {
+    pub enum BytesCow<'borrowed> {
         Owned(Bytes),
-        Borrowed(Cow<'static, [u8]>),
+        Borrowed(Cow<'borrowed, [u8]>),
     }
 
-    impl From<Cow<'static, [u8]>> for BytesCow {
-        fn from(cow: Cow<'static, [u8]>) -> Self {
+    impl<'borrowed> From<Cow<'borrowed, [u8]>> for BytesCow<'borrowed> {
+        fn from(cow: Cow<'borrowed, [u8]>) -> Self {
             match cow {
                 Cow::Borrowed(_) => BytesCow::Borrowed(cow),
                 Cow::Owned(owned_bytes) => BytesCow::Owned(Bytes::from(owned_bytes)),
@@ -19,8 +19,8 @@ pub mod borrow {
         }
     }
 
-    impl Into<Cow<'static, [u8]>> for &BytesCow {
-        fn into(self) -> Cow<'static, [u8]> {
+    impl<'borrowed> Into<Cow<'borrowed, [u8]>> for &BytesCow<'borrowed> {
+        fn into(self) -> Cow<'borrowed, [u8]> {
             match self {
                 BytesCow::Owned(x) => Into::<Vec<u8>>::into(x.clone()).into(),
                 BytesCow::Borrowed(cow) => cow.clone(),
@@ -28,7 +28,7 @@ pub mod borrow {
         }
     }
 
-    impl Deref for BytesCow {
+    impl<'borrowed> Deref for BytesCow<'borrowed> {
         type Target = [u8];
 
         fn deref(&self) -> &Self::Target {

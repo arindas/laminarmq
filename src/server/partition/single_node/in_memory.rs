@@ -8,7 +8,7 @@ use std::{collections::HashMap, error::Error, fmt::Display};
 
 #[derive(Debug)]
 pub struct Partition {
-    records: HashMap<u64, BytesCow>,
+    records: HashMap<u64, BytesCow<'static>>,
     size: usize,
 }
 
