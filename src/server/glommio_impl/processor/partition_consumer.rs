@@ -28,7 +28,7 @@ where
 
     consume_method: ConsumeMethod,
 
-    retries: u32,
+    retries: i32,
     wait_duration: Duration,
 }
 
@@ -42,7 +42,7 @@ where
         partition_id: PartitionId,
         partition_creator: PC,
         consume_method: ConsumeMethod,
-        retries: u32,
+        retries: i32,
         wait_duration: Duration,
     ) -> Self {
         Self {
@@ -105,34 +105,25 @@ where
     }
 
     pub(crate) async fn consume(mut self) -> TaskResult<(), P> {
-        // Initial value of self.partition_remainder must be a Some
-        let mut last_iter_ok = false;
+        let mut partition_remainder = Ok(self.partition_remainder.take());
 
-        while let Some(remainder) = self.partition_remainder.take() {
-            self.partition_remainder = match self.remove_remainder(remainder).await {
+        loop {
+            partition_remainder = match partition_remainder {
+                Ok(Some(partition_remainder)) => self.remove_remainder(partition_remainder).await,
+                Ok(None) => break,
+                Err(_) if self.retries <= 0 => break,
                 Err(partition_remainder) => {
-                    last_iter_ok = false;
-
-                    if self.retries.checked_sub(1).is_none() {
-                        None
-                    } else {
-                        glommio::timer::sleep(self.wait_duration).await;
-                        self.wait_duration *= 2;
-                        Some(partition_remainder)
-                    }
+                    glommio::timer::sleep(self.wait_duration).await;
+                    self.retries -= 1;
+                    self.wait_duration *= 2;
+                    Ok(Some(partition_remainder))
                 }
-                Ok(val) => {
-                    last_iter_ok = true;
-                    val
-                }
-            }
+            };
         }
 
-        if last_iter_ok {
-            Ok(())
-        } else {
-            Err(TaskError::PartitionLost(self.partition_id))
-        }
+        partition_remainder
+            .map(|_| ())
+            .map_err(|_| TaskError::PartitionLost(self.partition_id))
     }
 }
 
