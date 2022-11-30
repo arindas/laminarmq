@@ -27,22 +27,4 @@ pub struct PartitionId {
     pub partition_number: u64,
 }
 
-pub mod cached;
 pub mod single_node;
-
-pub mod base {
-    use super::super::super::server::Record;
-    use std::borrow::Cow;
-
-    pub enum Request {
-        Read { offset: u64 },
-        Append { record_bytes: Cow<'static, [u8]> },
-        Unmapped,
-    }
-
-    pub enum Response {
-        Read { record: Record, next_offset: u64 },
-        Append { write_offset: u64 },
-        Unmapped,
-    }
-}
