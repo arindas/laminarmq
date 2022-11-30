@@ -19,9 +19,9 @@ pub mod borrow {
         }
     }
 
-    impl<'a> Into<Cow<'a, [u8]>> for BytesCow<'a> {
-        fn into(self) -> Cow<'a, [u8]> {
-            match self {
+    impl<'a> From<BytesCow<'a>> for Cow<'a, [u8]> {
+        fn from(bytes_cow: BytesCow<'a>) -> Self {
+            match bytes_cow {
                 BytesCow::Owned(x) => Into::<Vec<u8>>::into(x).into(),
                 BytesCow::Borrowed(cow) => cow,
             }
