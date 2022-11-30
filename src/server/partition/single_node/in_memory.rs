@@ -61,7 +61,7 @@ impl super::super::Partition for Partition {
                     let next_offset = offset + x.len() as u64;
                     Response::Read {
                         record: Record {
-                            value: x.into(),
+                            value: x.clone().into(),
                             offset,
                         },
                         next_offset,

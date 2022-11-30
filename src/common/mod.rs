@@ -4,14 +4,14 @@ pub mod borrow {
     use bytes::Bytes;
     use std::{borrow::Cow, ops::Deref};
 
-    #[derive(Debug)]
-    pub enum BytesCow<'borrowed> {
+    #[derive(Debug, Clone)]
+    pub enum BytesCow<'a> {
         Owned(Bytes),
-        Borrowed(Cow<'borrowed, [u8]>),
+        Borrowed(Cow<'a, [u8]>),
     }
 
-    impl<'borrowed> From<Cow<'borrowed, [u8]>> for BytesCow<'borrowed> {
-        fn from(cow: Cow<'borrowed, [u8]>) -> Self {
+    impl<'a> From<Cow<'a, [u8]>> for BytesCow<'a> {
+        fn from(cow: Cow<'a, [u8]>) -> Self {
             match cow {
                 Cow::Borrowed(_) => BytesCow::Borrowed(cow),
                 Cow::Owned(owned_bytes) => BytesCow::Owned(Bytes::from(owned_bytes)),
@@ -19,16 +19,16 @@ pub mod borrow {
         }
     }
 
-    impl<'borrowed> Into<Cow<'borrowed, [u8]>> for &BytesCow<'borrowed> {
-        fn into(self) -> Cow<'borrowed, [u8]> {
+    impl<'a> Into<Cow<'a, [u8]>> for BytesCow<'a> {
+        fn into(self) -> Cow<'a, [u8]> {
             match self {
-                BytesCow::Owned(x) => Into::<Vec<u8>>::into(x.clone()).into(),
-                BytesCow::Borrowed(cow) => cow.clone(),
+                BytesCow::Owned(x) => Into::<Vec<u8>>::into(x).into(),
+                BytesCow::Borrowed(cow) => cow,
             }
         }
     }
 
-    impl<'borrowed> Deref for BytesCow<'borrowed> {
+    impl<'a> Deref for BytesCow<'a> {
         type Target = [u8];
 
         fn deref(&self) -> &Self::Target {

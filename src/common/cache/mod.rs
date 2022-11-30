@@ -1,5 +1,5 @@
 pub trait Cache<Key, Value> {
-    type Error;
+    type Error: std::error::Error;
 
     fn get<'value>(&self, key: &Key) -> Result<&'value Value, Self::Error>;
 
