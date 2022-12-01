@@ -12,5 +12,6 @@ pub enum PartitionRequest {
     HighestOffset,
 }
 
+pub mod cached;
 pub mod commit_log;
 pub mod in_memory;
