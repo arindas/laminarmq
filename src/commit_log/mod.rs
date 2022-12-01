@@ -63,6 +63,7 @@ pub trait CommitLog {
     }
 
     /// Appends a new [`Record`] at the end of this [`CommitLog`].
+    /// Returns the offset at which the record was written, along with the number of bytes written.
     async fn append(&mut self, record_bytes: &[u8]) -> Result<(u64, usize), Self::Error>;
 
     /// Reads the [`Record`] at the given offset, along with the offset of the next record from

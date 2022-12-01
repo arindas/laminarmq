@@ -114,8 +114,9 @@ mod tests {
                     Err(SegmentError::OffsetOutOfBounds)
                 ));
 
-                let offset_1 = segment.append(RECORD_VALUE).await.unwrap();
-                assert_eq!(offset_1.0, 0);
+                let (offset_1, record_1_size) = segment.append(RECORD_VALUE).await.unwrap();
+                assert_eq!(offset_1, 0);
+                assert_eq!(record_1_size as u64, record_representation_size);
                 assert_eq!(segment.next_offset(), record_representation_size);
 
                 assert!(matches!(
@@ -128,8 +129,8 @@ mod tests {
                     Ok(_)
                 ));
 
-                let offset_2 = segment.append(RECORD_VALUE).await.unwrap();
-                assert_eq!(offset_2.0, record_representation_size);
+                let (offset_2, _) = segment.append(RECORD_VALUE).await.unwrap();
+                assert_eq!(offset_2, record_representation_size);
 
                 assert_eq!(segment.size(), expected_segment_size);
                 assert!(segment.is_maxed());
@@ -156,21 +157,19 @@ mod tests {
                     Err(SegmentError::SegmentMaxed)
                 ));
 
-                let (record_1, record_1_next_record_offset) =
-                    segment.read(offset_1.0).await.unwrap();
-                assert_eq!(record_1.offset, offset_1.0);
+                let (record_1, record_1_next_record_offset) = segment.read(offset_1).await.unwrap();
+                assert_eq!(record_1.offset, offset_1);
                 assert_eq!(record_1.value, RECORD_VALUE);
-                assert_eq!(record_1_next_record_offset, offset_2.0);
+                assert_eq!(record_1_next_record_offset, offset_2);
 
-                let (record_2, record_2_next_record_offset) =
-                    segment.read(offset_2.0).await.unwrap();
-                assert_eq!(record_2.offset, offset_2.0);
+                let (record_2, record_2_next_record_offset) = segment.read(offset_2).await.unwrap();
+                assert_eq!(record_2.offset, offset_2);
                 assert_eq!(record_2.value, RECORD_VALUE);
                 assert_eq!(record_2_next_record_offset, segment.next_offset());
 
                 // read at invalid loacation
                 assert!(matches!(
-                    segment.read(offset_2.0 + 1).await,
+                    segment.read(offset_2 + 1).await,
                     Err(SegmentError::StoreError(_))
                 ));
 

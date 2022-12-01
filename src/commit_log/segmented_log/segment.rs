@@ -196,7 +196,7 @@ where
     /// Appends the given record to the end of this store.
     ///
     /// ## Returns
-    /// The offset at which the record was written.
+    /// The offset at which the record was written, along with the number of bytes written.
     ///
     /// ## Errors
     /// - [`SegmentError::SegmentMaxed`] if [`Self::is_maxed`] returns true.

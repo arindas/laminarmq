@@ -181,7 +181,10 @@ mod tests {
             ));
 
             for record in records {
-                if let Response::Append { write_offset, .. } = partition
+                if let Response::Append {
+                    write_offset,
+                    bytes_written,
+                } = partition
                     .serve(Request::Append {
                         record_bytes: record.as_bytes().into(),
                     })
@@ -189,6 +192,7 @@ mod tests {
                     .unwrap()
                 {
                     assert_eq!(write_offset, total_size);
+                    assert_eq!(bytes_written, record.len());
                 } else {
                     assert!(false, "Wrong response type!");
                 }
