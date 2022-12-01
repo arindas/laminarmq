@@ -350,7 +350,7 @@ mod tests {
 
                 processor.process(append_record_task_1);
 
-                if let Some(Ok(Response::Append { write_offset })) = recv_1.recv().await {
+                if let Some(Ok(Response::Append { write_offset, .. })) = recv_1.recv().await {
                     assert_eq!(write_offset, 0);
                 } else {
                     assert!(false, "Wrong response type for Append request.");

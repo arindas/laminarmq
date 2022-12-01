@@ -62,31 +62,27 @@ where
             PartitionRequest::Append { record_bytes } => {
                 let stored_record_bytes = BytesCow::from(record_bytes);
 
-                let append_response = self
+                match self
                     .partition
                     .serve(PartitionRequest::Append {
                         record_bytes: stored_record_bytes.clone().into(),
                     })
                     .await
-                    .map_err(CachedPartitionError::PartitionError)?;
-
-                let highest_offset_response = self
-                    .partition
-                    .serve(PartitionRequest::HighestOffset)
-                    .await
-                    .map_err(CachedPartitionError::PartitionError)?;
-
-                match (append_response, highest_offset_response) {
-                    (
-                        Response::Append { write_offset },
-                        Response::HighestOffset(highest_offset),
-                    ) => {
-                        let entry = (stored_record_bytes, highest_offset);
+                    .map_err(CachedPartitionError::PartitionError)?
+                {
+                    Response::Append {
+                        write_offset,
+                        bytes_written,
+                    } => {
+                        let entry = (stored_record_bytes, write_offset + bytes_written as u64);
                         self.cache
                             .insert(write_offset, entry)
                             .map_err(CachedPartitionError::CacheError)?;
 
-                        BinAlt::A(Response::Append { write_offset })
+                        BinAlt::A(Response::Append {
+                            write_offset,
+                            bytes_written,
+                        })
                     }
                     _ => Err(CachedPartitionError::WrongResponseFromPartition)?,
                 }

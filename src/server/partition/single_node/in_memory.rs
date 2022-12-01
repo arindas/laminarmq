@@ -84,6 +84,7 @@ impl super::super::Partition for Partition {
 
                 Ok(Response::Append {
                     write_offset: current_offset,
+                    bytes_written: record_size,
                 })
             }
             _ => self.serve_idempotent(request).await,
@@ -180,7 +181,7 @@ mod tests {
             ));
 
             for record in records {
-                if let Response::Append { write_offset } = partition
+                if let Response::Append { write_offset, .. } = partition
                     .serve(Request::Append {
                         record_bytes: record.as_bytes().into(),
                     })

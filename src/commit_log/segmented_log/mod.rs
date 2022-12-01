@@ -516,7 +516,7 @@ where
 {
     type Error = SegmentedLogError<T, S>;
 
-    async fn append(&mut self, record_bytes: &[u8]) -> Result<u64, Self::Error> {
+    async fn append(&mut self, record_bytes: &[u8]) -> Result<(u64, usize), Self::Error> {
         while self.is_write_segment_maxed()? {
             self.rotate_new_write_segment().await?;
         }

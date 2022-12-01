@@ -55,7 +55,7 @@ pub mod single_node {
         LowestOffset(u64),
         HighestOffset(u64),
 
-        Append { write_offset: u64 },
+        Append { write_offset: u64, bytes_written: usize, },
 
         ExpiredRemoved,
         PartitionCreated,

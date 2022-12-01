@@ -204,7 +204,10 @@ where
     /// given record instance.
     /// - [`SegmentError::StoreError`] if there was an error during writing to the underlying
     /// [`Store`](super::store::Store) instance.
-    pub async fn append(&mut self, record_bytes: &[u8]) -> Result<u64, SegmentError<T, S>> {
+    pub async fn append(
+        &mut self,
+        record_bytes: &[u8],
+    ) -> Result<(u64, usize), SegmentError<T, S>> {
         if self.is_maxed() {
             return Err(SegmentError::SegmentMaxed);
         }
@@ -226,7 +229,7 @@ where
 
         self.next_offset += bytes_written as u64;
 
-        Ok(current_offset)
+        Ok((current_offset, bytes_written))
     }
 
     pub fn offset_within_bounds(&self, offset: u64) -> bool {

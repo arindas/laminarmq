@@ -126,9 +126,9 @@ mod tests {
                     .unwrap();
 
                 let offset_0 = log.append(RECORD_VALUE).await.unwrap();
-                assert_eq!(offset_0, log_config.initial_offset);
+                assert_eq!(offset_0.0, log_config.initial_offset);
                 // not enough bytes written to trigger sync
-                matches!(log.read(offset_0).await, Err(LogError::SegmentError(_)));
+                matches!(log.read(offset_0.0).await, Err(LogError::SegmentError(_)));
 
                 const NUM_RECORDS: u32 = 17;
                 let mut prev_offset = offset_0;
@@ -138,15 +138,15 @@ mod tests {
                     // this write will trigger log rotation
                     let curr_offset = log.append(RECORD_VALUE).await.unwrap();
 
-                    let (record, next_record_offset) = log.read(prev_offset).await.unwrap();
+                    let (record, next_record_offset) = log.read(prev_offset.0).await.unwrap();
                     assert_eq!(
                         record,
                         Record {
                             value: RECORD_VALUE.into(),
-                            offset: prev_offset
+                            offset: prev_offset.0
                         }
                     );
-                    assert_eq!(next_record_offset, curr_offset);
+                    assert_eq!(next_record_offset, curr_offset.0);
                     prev_offset = curr_offset;
                 }
 
@@ -211,7 +211,7 @@ mod tests {
                 for _ in 0..NUM_RECORDS / 2 {
                     // this write will trigger log rotation
                     base_offset_of_first_non_expired_segment =
-                        log.append(RECORD_VALUE).await.unwrap();
+                        log.append(RECORD_VALUE).await.unwrap().0;
                 }
 
                 let expiry_duration = Duration::from_millis(200);

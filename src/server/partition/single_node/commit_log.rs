@@ -87,7 +87,10 @@ where
                 .0
                 .append(&record_bytes)
                 .await
-                .map(|write_offset| Response::Append { write_offset })
+                .map(|(write_offset, bytes_written)| Response::Append {
+                    write_offset,
+                    bytes_written,
+                })
                 .map_err(PartitionError::CommitLog),
             _ => self.serve_idempotent(request).await,
         }
