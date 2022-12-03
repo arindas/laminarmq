@@ -1,7 +1,9 @@
 //! Module providing [`Store`](crate::commit_log::segmented_log::store::Store)
 //! implementation for the [`glommio`] runtime.
 
-use std::{cell::Ref, error::Error, fmt::Display, path::Path, result::Result};
+use std::{
+    cell::Ref, collections::HashSet, error::Error, fmt::Display, path::Path, result::Result,
+};
 
 use async_trait::async_trait;
 use futures_lite::AsyncWriteExt;
@@ -18,6 +20,7 @@ use crate::commit_log::segmented_log::store::common::{RecordHeader, RECORD_HEADE
 pub enum StoreError {
     SerializationError(std::io::Error),
     StorageError(GlommioError<()>),
+    InvalidReadPosition(u64),
     InvalidRecordHeader,
     NoBackingFileError,
 }
@@ -37,11 +40,42 @@ impl Display for StoreError {
             StoreError::NoBackingFileError => {
                 write!(f, "Store not backed by a file.")
             }
+            StoreError::InvalidReadPosition(pos) => {
+                write!(f, "Not a valid read position: {:?}", pos)
+            }
         }
     }
 }
 
 impl Error for StoreError {}
+
+async fn positions_of_records_in_store_file(
+    store_file: &DmaFile,
+) -> Result<HashSet<u64>, StoreError> {
+    let file_size = store_file
+        .file_size()
+        .await
+        .map_err(StoreError::StorageError)?;
+
+    let mut position = 0;
+    let mut positions = HashSet::new();
+
+    while position < file_size {
+        let record_header_bytes = store_file
+            .read_at(position, RECORD_HEADER_LENGTH)
+            .await
+            .map_err(StoreError::StorageError)?;
+
+        let record_header = RecordHeader::from_bytes(&record_header_bytes)
+            .map_err(StoreError::SerializationError)?;
+
+        positions.insert(position);
+
+        position += record_header_bytes.len() as u64 + record_header.length as u64;
+    }
+
+    Ok(positions)
+}
 
 /// [`crate::commit_log::store::Store`] implementation for the [`glommio`] runtime.
 ///
@@ -57,6 +91,7 @@ impl Error for StoreError {}
 pub struct Store {
     reader: DmaFile,
     writer: DmaStreamWriter,
+    valid_positions: HashSet<u64>,
     size: u64,
 }
 
@@ -92,13 +127,18 @@ impl Store {
             .await
             .map_err(StoreError::StorageError)?;
 
+        let reader = DmaFile::open(path.as_ref())
+            .await
+            .map_err(StoreError::StorageError)?;
+
+        let valid_positions = positions_of_records_in_store_file(&reader).await?;
+
         Ok(Self {
-            reader: DmaFile::open(path.as_ref())
-                .await
-                .map_err(StoreError::StorageError)?,
+            reader,
             writer: DmaStreamWriterBuilder::new(writer_dma_file)
                 .with_buffer_size(buffer_size)
                 .build(),
+            valid_positions,
             size: initial_size,
         })
     }
@@ -138,6 +178,8 @@ impl crate::commit_log::segmented_log::store::Store<ReadResult> for Store {
         let bytes_written = record_header_bytes.len() + record_bytes.len();
         self.size += bytes_written as u64;
 
+        self.valid_positions.insert(current_position);
+
         Ok((current_position, bytes_written))
     }
 
@@ -157,6 +199,10 @@ impl crate::commit_log::segmented_log::store::Store<ReadResult> for Store {
     /// [`ReadResult`] instance read from the underlying [`DmaFile`]. (Checksum mismatch or invalid
     /// record length).
     async fn read(&self, position: u64) -> Result<(ReadResult, u64), Self::Error> {
+        self.valid_positions
+            .get(&position)
+            .ok_or(StoreError::InvalidReadPosition(position))?;
+
         let record_header_bytes = self
             .reader
             .read_at(position, RECORD_HEADER_LENGTH)
@@ -242,6 +288,13 @@ mod tests {
         Scanner,
     };
 
+    impl Store {
+        #[inline]
+        fn valid_read_position(&self, position: &u64) -> bool {
+            self.valid_positions.get(position).is_some()
+        }
+    }
+
     #[inline]
     fn test_file_path_string(test_name: &str) -> String {
         format!(
@@ -312,16 +365,14 @@ mod tests {
                         .await
                         .unwrap();
 
-                // read on empty store should result in storage error
+                // read() on empty store should result in an invalid read position
                 assert!(matches!(
                     store.read(0).await,
-                    Err(StoreError::SerializationError(_))
+                    Err(StoreError::InvalidReadPosition(_))
                 ));
-
-                // read on arbitrary high position should end in storage error
                 assert!(matches!(
-                    store.read(68419).await,
-                    Err(StoreError::SerializationError(_))
+                    store.read(68419).await, // We were this close to greatness!
+                    Err(StoreError::InvalidReadPosition(_))
                 ));
 
                 // append a record
@@ -342,7 +393,9 @@ mod tests {
                 let mut record_positions_and_sizes = Vec::with_capacity(RECORDS.len());
 
                 for &record in RECORDS {
-                    record_positions_and_sizes.push(store.append(&record).await.unwrap());
+                    let (position, bytes_written) = store.append(&record).await.unwrap();
+                    assert!(store.valid_read_position(&position));
+                    record_positions_and_sizes.push((position, bytes_written));
                 }
 
                 let mut records_read_before_sync = Vec::with_capacity(RECORDS.len());
