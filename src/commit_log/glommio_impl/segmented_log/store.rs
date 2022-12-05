@@ -2,11 +2,12 @@
 //! implementation for the [`glommio`] runtime.
 
 use std::{
-    cell::Ref, collections::HashSet, error::Error, fmt::Display, path::Path, result::Result,
+    cell::Ref, collections::BTreeSet, error::Error, fmt::Display, path::Path, result::Result,
 };
 
 use async_trait::async_trait;
-use futures_lite::AsyncWriteExt;
+use futures_core::Stream;
+use futures_lite::{AsyncWriteExt, StreamExt};
 
 use glommio::{
     io::{DmaFile, DmaStreamWriter, DmaStreamWriterBuilder, OpenOptions, ReadResult},
@@ -49,32 +50,41 @@ impl Display for StoreError {
 
 impl Error for StoreError {}
 
-async fn positions_of_records_in_store_file(
-    store_file: &DmaFile,
-) -> Result<HashSet<u64>, StoreError> {
-    let file_size = store_file
-        .file_size()
-        .await
-        .map_err(StoreError::StorageError)?;
-
-    let mut position = 0;
-    let mut positions = HashSet::new();
-
-    while position < file_size {
-        let record_header_bytes = store_file
-            .read_at(position, RECORD_HEADER_LENGTH)
+fn record_positions_in<P: AsRef<Path>>(store: P) -> impl Stream<Item = Result<u64, StoreError>> {
+    async_stream::stream! {
+        let store = DmaFile::open(store.as_ref())
             .await
             .map_err(StoreError::StorageError)?;
 
-        let record_header = RecordHeader::from_bytes(&record_header_bytes)
-            .map_err(StoreError::SerializationError)?;
+        let store_size = store
+            .file_size()
+            .await
+            .map_err(StoreError::StorageError)?;
 
-        positions.insert(position);
+        let mut position = 0;
 
-        position += record_header_bytes.len() as u64 + record_header.length as u64;
+        while position < store_size {
+            let record_header_bytes = store
+                .read_at(position, RECORD_HEADER_LENGTH)
+                .await
+                .map_err(StoreError::StorageError)?;
+
+            let record_header = RecordHeader::from_bytes(&record_header_bytes)
+                .map_err(StoreError::SerializationError)?;
+
+            yield Ok(position);
+
+            position += record_header_bytes.len() as u64 + record_header.length as u64;
+        }
+
+        store.close().await.map_err(StoreError::StorageError)?;
     }
+}
 
-    Ok(positions)
+async fn record_positions_set<P: AsRef<Path>>(store: P) -> Result<BTreeSet<u64>, StoreError> {
+    let record_positions = record_positions_in(store);
+    futures_util::pin_mut!(record_positions);
+    record_positions.try_collect().await
 }
 
 /// [`crate::commit_log::store::Store`] implementation for the [`glommio`] runtime.
@@ -91,7 +101,7 @@ async fn positions_of_records_in_store_file(
 pub struct Store {
     reader: DmaFile,
     writer: DmaStreamWriter,
-    valid_positions: HashSet<u64>,
+    valid_positions: BTreeSet<u64>,
     size: u64,
 }
 
@@ -131,14 +141,12 @@ impl Store {
             .await
             .map_err(StoreError::StorageError)?;
 
-        let valid_positions = positions_of_records_in_store_file(&reader).await?;
-
         Ok(Self {
             reader,
             writer: DmaStreamWriterBuilder::new(writer_dma_file)
                 .with_buffer_size(buffer_size)
                 .build(),
-            valid_positions,
+            valid_positions: record_positions_set(path).await?,
             size: initial_size,
         })
     }
