@@ -249,8 +249,6 @@ impl crate::commit_log::segmented_log::store::Store<ReadResult> for Store {
         let record_index = self.record_index(&position)?;
         self.record_positions.truncate(record_index);
 
-        let path = self.path()?.to_path_buf();
-
         self.writer
             .close()
             .await
@@ -260,7 +258,7 @@ impl crate::commit_log::segmented_log::store::Store<ReadResult> for Store {
             .write(true)
             .append(true)
             .create(true)
-            .dma_open(path)
+            .dma_open(self.path()?.to_path_buf())
             .await
             .map_err(StoreError::StorageError)?;
 

@@ -194,6 +194,33 @@ mod tests {
                     Err(SegmentError::OffsetBeyondCapacity)
                 ));
 
+                assert!(matches!(
+                    segment.truncate(segment.next_offset()).await,
+                    Err(SegmentError::OffsetOutOfBounds)
+                ));
+
+                assert!(matches!(
+                    segment.truncate(records[0].offset + 1).await,
+                    Err(SegmentError::StoreError(_))
+                ));
+
+                segment
+                    .truncate(records.last().unwrap().offset)
+                    .await
+                    .unwrap();
+
+                let mut segment_scanner = SegmentScanner::new(&segment).unwrap();
+                let mut i = 0;
+                while let Some(record) = segment_scanner.next().await {
+                    assert_eq!(record, records[i]);
+
+                    i += 1;
+                }
+                assert_eq!(i, records.len() - 1);
+
+                segment.truncate(segment.base_offset()).await.unwrap();
+                assert_eq!(segment.size(), 0);
+
                 segment.remove().await.unwrap();
 
                 assert!(!test_file_path.exists());

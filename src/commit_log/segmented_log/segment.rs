@@ -233,7 +233,7 @@ where
     }
 
     pub fn offset_within_bounds(&self, offset: u64) -> bool {
-        offset < self.next_offset()
+        offset >= self.base_offset() && offset < self.next_offset()
     }
 
     /// Reads the record at the given offset.
@@ -292,6 +292,25 @@ where
         }
 
         self.next_offset = new_next_offset;
+
+        Ok(())
+    }
+
+    pub async fn truncate(&mut self, offset: u64) -> Result<(), SegmentError<T, S>> {
+        if !self.offset_within_bounds(offset) {
+            return Err(SegmentError::OffsetOutOfBounds);
+        }
+
+        let truncate_position = self
+            .store_position(offset)
+            .ok_or(SegmentError::OffsetBeyondCapacity)?;
+
+        self.store
+            .truncate(truncate_position)
+            .await
+            .map_err(SegmentError::StoreError)?;
+
+        self.next_offset = self.base_offset + self.store().size();
 
         Ok(())
     }
