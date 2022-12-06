@@ -1,9 +1,7 @@
 //! Module providing [`Store`](crate::commit_log::segmented_log::store::Store)
 //! implementation for the [`glommio`] runtime.
 
-use std::{
-    cell::Ref, collections::BTreeSet, error::Error, fmt::Display, path::Path, result::Result,
-};
+use std::{cell::Ref, error::Error, fmt::Display, iter::Extend, path::Path, result::Result};
 
 use async_trait::async_trait;
 use futures_core::Stream;
@@ -81,7 +79,11 @@ fn record_positions_in<P: AsRef<Path>>(store: P) -> impl Stream<Item = Result<u6
     }
 }
 
-async fn record_positions_set<P: AsRef<Path>>(store: P) -> Result<BTreeSet<u64>, StoreError> {
+async fn record_positions<P, T>(store: P) -> Result<T, StoreError>
+where
+    P: AsRef<Path>,
+    T: Default + Extend<u64>,
+{
     let record_positions = record_positions_in(store);
     futures_util::pin_mut!(record_positions);
     record_positions.try_collect().await
@@ -101,7 +103,8 @@ async fn record_positions_set<P: AsRef<Path>>(store: P) -> Result<BTreeSet<u64>,
 pub struct Store {
     reader: DmaFile,
     writer: DmaStreamWriter,
-    valid_positions: BTreeSet<u64>,
+    record_positions: Vec<u64>,
+    buffer_size: usize,
     size: u64,
 }
 
@@ -146,9 +149,16 @@ impl Store {
             writer: DmaStreamWriterBuilder::new(writer_dma_file)
                 .with_buffer_size(buffer_size)
                 .build(),
-            valid_positions: record_positions_set(path).await?,
+            record_positions: record_positions(path).await?,
             size: initial_size,
+            buffer_size,
         })
+    }
+
+    fn record_index(&self, position: &u64) -> Result<usize, StoreError> {
+        self.record_positions
+            .binary_search(position)
+            .map_err(|_| StoreError::InvalidReadPosition(*position))
     }
 }
 
@@ -186,7 +196,7 @@ impl crate::commit_log::segmented_log::store::Store<ReadResult> for Store {
         let bytes_written = record_header_bytes.len() + record_bytes.len();
         self.size += bytes_written as u64;
 
-        self.valid_positions.insert(current_position);
+        self.record_positions.push(current_position);
 
         Ok((current_position, bytes_written))
     }
@@ -207,9 +217,7 @@ impl crate::commit_log::segmented_log::store::Store<ReadResult> for Store {
     /// [`ReadResult`] instance read from the underlying [`DmaFile`]. (Checksum mismatch or invalid
     /// record length).
     async fn read(&self, position: u64) -> Result<(ReadResult, u64), Self::Error> {
-        self.valid_positions
-            .get(&position)
-            .ok_or(StoreError::InvalidReadPosition(position))?;
+        let _index = self.record_index(&position)?;
 
         let record_header_bytes = self
             .reader
@@ -235,6 +243,38 @@ impl crate::commit_log::segmented_log::store::Store<ReadResult> for Store {
         let bytes_read = (record_header_bytes.len() + record_bytes.len()) as u64;
 
         Ok((record_bytes, position + bytes_read))
+    }
+
+    async fn truncate(&mut self, position: u64) -> Result<(), Self::Error> {
+        let record_index = self.record_index(&position)?;
+        self.record_positions.truncate(record_index);
+
+        let path = self.path()?.to_path_buf();
+
+        self.writer
+            .close()
+            .await
+            .map_err(|x| StoreError::StorageError(GlommioError::from(x)))?;
+
+        let writer_dma_file = OpenOptions::new()
+            .write(true)
+            .append(true)
+            .create(true)
+            .dma_open(path)
+            .await
+            .map_err(StoreError::StorageError)?;
+
+        writer_dma_file
+            .truncate(position)
+            .await
+            .map_err(StoreError::StorageError)?;
+
+        self.writer = DmaStreamWriterBuilder::new(writer_dma_file)
+            .with_buffer_size(self.buffer_size)
+            .build();
+
+        self.size = position;
+        Ok(())
     }
 
     /// Closes this [`Store`] instance.
@@ -295,13 +335,6 @@ mod tests {
         },
         Scanner,
     };
-
-    impl Store {
-        #[inline]
-        fn valid_read_position(&self, position: &u64) -> bool {
-            self.valid_positions.get(position).is_some()
-        }
-    }
 
     #[inline]
     fn test_file_path_string(test_name: &str) -> String {
@@ -402,14 +435,14 @@ mod tests {
 
                 for &record in RECORDS {
                     let (position, bytes_written) = store.append(&record).await.unwrap();
-                    assert!(store.valid_read_position(&position));
+                    assert!(store.record_index(&position).is_ok());
                     record_positions_and_sizes.push((position, bytes_written));
                 }
 
                 let mut records_read_before_sync = Vec::with_capacity(RECORDS.len());
 
                 for (position, _written_bytes) in &record_positions_and_sizes {
-                    if let Ok((record, _next_record_offset)) = store.read(*position).await {
+                    if let Ok((record, _next_record_position)) = store.read(*position).await {
                         records_read_before_sync.push(record);
                     } else {
                         break;
@@ -438,11 +471,17 @@ mod tests {
                 store.close().await.unwrap();
 
                 // reopen store and check stored records to test durability
-                let store = Store::with_path_and_buffer_size(&test_file_path, WRITE_BUFFER_SIZE)
-                    .await
-                    .unwrap();
+                let mut store =
+                    Store::with_path_and_buffer_size(&test_file_path, WRITE_BUFFER_SIZE)
+                        .await
+                        .unwrap();
 
                 assert_eq!(store.size() as usize, EXPECTED_STORAGE_SIZE);
+
+                assert!(matches!(
+                    store.read(store.size()).await,
+                    Err(StoreError::InvalidReadPosition(_))
+                ));
 
                 let mut i = 0;
 
@@ -456,6 +495,39 @@ mod tests {
                     i += 1;
                 }
                 assert_eq!(i, RECORDS.len() + 1);
+
+                let trunate_index = record_positions_and_sizes.len() / 2;
+
+                let (truncate_position, _) = record_positions_and_sizes[trunate_index];
+
+                assert!(matches!(
+                    store.truncate(truncate_position + 1).await,
+                    Err(StoreError::InvalidReadPosition(_))
+                ));
+
+                store.truncate(truncate_position).await.unwrap();
+
+                assert_eq!(store.size(), truncate_position);
+
+                assert!(matches!(
+                    store.read(store.size()).await,
+                    Err(StoreError::InvalidReadPosition(_))
+                ));
+
+                let mut i = 0;
+
+                let mut scanner = StoreScanner::new(&store);
+                while let Some(record) = scanner.next().await {
+                    if i == 0 {
+                        assert_eq!(record.deref(), first_record_bytes)
+                    } else {
+                        assert_eq!(record.deref(), RECORDS[i - 1]);
+                    }
+                    i += 1;
+                }
+
+                assert_eq!(i, trunate_index + 1); // account for the first "Hello World!" record.
+
                 store.remove().await.unwrap();
             })
             .unwrap();

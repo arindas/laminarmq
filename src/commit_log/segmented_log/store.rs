@@ -40,6 +40,11 @@ where
     /// of the next record.
     async fn read(&self, position: u64) -> Result<(Record, u64), Self::Error>;
 
+    /// Truncates this [`Store`] instance by removing all records after the given position
+    /// and makes the given position the size of this store.
+    /// Returns a suitable error if this position is not a valid record position.
+    async fn truncate(&mut self, position: u64) -> Result<(), Self::Error>;
+
     /// Closes this record. Consumes this record instance to stop further operations on this
     /// closed store instance.
     async fn close(self) -> Result<(), Self::Error>;
