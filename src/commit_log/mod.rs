@@ -75,6 +75,12 @@ pub trait CommitLog {
         Ok(())
     }
 
+    /// Truncates this [`CommitLog`] instance by removing all records starting from the given
+    /// offset.
+    async fn truncate(&mut self, _offset: u64) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
     /// Removes all underlying storage files associated. Consumes this [`CommitLog`] instance to
     /// prevent further operations on this instance.
     async fn remove(self) -> Result<(), Self::Error>;
