@@ -1,7 +1,9 @@
 //! Module providing [`Store`](crate::commit_log::segmented_log::store::Store)
 //! implementation for the [`glommio`] runtime.
 
-use std::{cell::Ref, error::Error, fmt::Display, iter::Extend, path::Path, result::Result};
+use std::{
+    cell::Ref, error::Error, fmt::Display, iter::Extend, marker::Unpin, path::Path, result::Result,
+};
 
 use async_trait::async_trait;
 use futures_core::Stream;
@@ -89,6 +91,18 @@ where
     record_positions.try_collect().await
 }
 
+async fn write_byte_slices<'a, I, W>(writer: &mut W, byte_slices: I) -> std::io::Result<()>
+where
+    W: AsyncWriteExt + Unpin,
+    I: Iterator<Item = &'a &'a [u8]>,
+{
+    for byte_slice in byte_slices {
+        writer.write_all(byte_slice).await?;
+    }
+
+    Ok(())
+}
+
 /// [`crate::commit_log::store::Store`] implementation for the [`glommio`] runtime.
 ///
 /// This implementation uses directly mapped files to leverage `io_uring` powered operations. A
@@ -160,6 +174,68 @@ impl Store {
             .binary_search(position)
             .map_err(|_| StoreError::InvalidReadPosition(*position))
     }
+
+    #[tracing::instrument]
+    async fn truncate_to(&mut self, position: u64) -> Result<(), StoreError> {
+        let record_index = self.record_index(&position)?;
+        self.record_positions.truncate(record_index);
+
+        // avoid propagating error, to avoid leaving this [`Store`] instance
+        // in an inconsitent state
+        if let Err(error) = self.writer.close().await {
+            tracing::error!("error closing old writer: {:?}", error);
+        }
+
+        let writer = OpenOptions::new()
+            .write(true)
+            .append(true)
+            .create(true)
+            .dma_open(
+                self.reader
+                    .path()
+                    .ok_or(StoreError::NoBackingFileError)?
+                    .to_path_buf(),
+            )
+            .await
+            .map_err(StoreError::StorageError)?;
+
+        writer
+            .truncate(position)
+            .await
+            .map_err(StoreError::StorageError)?;
+
+        self.writer = DmaStreamWriterBuilder::new(writer)
+            .with_buffer_size(self.buffer_size)
+            .build();
+
+        self.size = position;
+        Ok(())
+    }
+
+    pub async fn append_multipart(
+        &mut self,
+        record_parts: &[&[u8]],
+    ) -> Result<(u64, usize), StoreError> {
+        let record_header = RecordHeader::from_record_parts(record_parts);
+        let record_length = *&record_header.length as usize + RECORD_HEADER_LENGTH;
+        let record_header_bytes = record_header
+            .as_bytes()
+            .map_err(StoreError::SerializationError)?;
+        let record_header_bytes_ref: &[u8] = &record_header_bytes;
+
+        let record_parts = std::iter::once(&record_header_bytes_ref).chain(record_parts.iter());
+
+        let current_position = self.size;
+
+        if let Err(error) = write_byte_slices(&mut self.writer, record_parts).await {
+            self.truncate_to(current_position).await?;
+            Err(StoreError::StorageError(GlommioError::from(error)))
+        } else {
+            self.record_positions.push(current_position);
+            self.size += record_length as u64;
+            Ok((current_position, record_length))
+        }
+    }
 }
 
 #[async_trait(?Send)]
@@ -177,28 +253,10 @@ impl crate::commit_log::segmented_log::store::Store<ReadResult> for Store {
     /// - [`StoreError::StorageError`]: if there was an error during writing to the underlying
     /// [`DmaStreamWriter`] instance.
     async fn append(&mut self, record_bytes: &[u8]) -> Result<(u64, usize), Self::Error> {
-        let record_header = RecordHeader::from_record_bytes(record_bytes);
-        let record_header_bytes = record_header
-            .as_bytes()
-            .map_err(StoreError::SerializationError)?;
+        let record_parts: [&[u8]; 1] = [record_bytes];
+        let record_parts: &[&[u8]] = &record_parts;
 
-        let current_position = self.size;
-
-        self.writer
-            .write_all(&record_header_bytes)
-            .await
-            .map_err(|x| StoreError::StorageError(GlommioError::from(x)))?;
-        self.writer
-            .write_all(record_bytes)
-            .await
-            .map_err(|x| StoreError::StorageError(GlommioError::from(x)))?;
-
-        let bytes_written = record_header_bytes.len() + record_bytes.len();
-        self.size += bytes_written as u64;
-
-        self.record_positions.push(current_position);
-
-        Ok((current_position, bytes_written))
+        self.append_multipart(record_parts).await
     }
 
     /// Reads the record at the given position.
@@ -246,33 +304,7 @@ impl crate::commit_log::segmented_log::store::Store<ReadResult> for Store {
     }
 
     async fn truncate(&mut self, position: u64) -> Result<(), Self::Error> {
-        let record_index = self.record_index(&position)?;
-        self.record_positions.truncate(record_index);
-
-        self.writer
-            .close()
-            .await
-            .map_err(|x| StoreError::StorageError(GlommioError::from(x)))?;
-
-        let writer_dma_file = OpenOptions::new()
-            .write(true)
-            .append(true)
-            .create(true)
-            .dma_open(self.path()?.to_path_buf())
-            .await
-            .map_err(StoreError::StorageError)?;
-
-        writer_dma_file
-            .truncate(position)
-            .await
-            .map_err(StoreError::StorageError)?;
-
-        self.writer = DmaStreamWriterBuilder::new(writer_dma_file)
-            .with_buffer_size(self.buffer_size)
-            .build();
-
-        self.size = position;
-        Ok(())
+        self.truncate_to(position).await
     }
 
     /// Closes this [`Store`] instance.

@@ -153,6 +153,21 @@ pub mod common {
     }
 
     impl RecordHeader {
+        pub fn from_record_parts<'a>(record_parts: &[&[u8]]) -> Self {
+            let mut hasher = crc32fast::Hasher::new();
+            let mut length = 0;
+
+            for part in record_parts {
+                hasher.update(part);
+                length += part.len() as u32;
+            }
+
+            Self {
+                checksum: hasher.finalize(),
+                length,
+            }
+        }
+
         /// Creates a new [`RecordHeader`] instance from the given record bytes. This function
         /// computes the checksum for the given byte slice and returns a [`RecordHeader`]
         /// instance with the checksum and the length of the given byte slice.
