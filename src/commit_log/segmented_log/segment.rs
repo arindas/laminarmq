@@ -1,9 +1,11 @@
 //! Module providing cross platform [`Segment`](Segment) abstractions for reading and writing
 //! [`Record`](super::Record) instances from [`Store`](super::store::Store) instances.
 
-use std::{fmt::Display, marker::PhantomData, ops::Deref, time::Instant};
+use std::{fmt::Display, marker::PhantomData, mem::size_of, ops::Deref, time::Instant};
 
 use async_trait::async_trait;
+
+use crate::commit_log::Record_;
 
 use super::{
     super::Scanner,
@@ -208,28 +210,33 @@ where
         &mut self,
         record_bytes: &[u8],
     ) -> Result<(u64, usize), SegmentError<T, S>> {
+        self.append_with_metadata(record_bytes, self.next_offset)
+            .await
+    }
+
+    pub async fn append_with_metadata(
+        &mut self,
+        record_bytes: &[u8],
+        metadata: u64,
+    ) -> Result<(u64, usize), SegmentError<T, S>> {
         if self.is_maxed() {
             return Err(SegmentError::SegmentMaxed);
         }
 
-        let current_offset = self.next_offset;
-        let record = Record {
-            value: record_bytes.into(),
-            offset: current_offset,
-        };
+        let metadata_bytes =
+            bincode::serialize(&metadata).map_err(|_| SegmentError::SerializationError)?;
 
-        let bincoded_record =
-            bincode::serialize(&record).map_err(|_x| SegmentError::SerializationError)?;
+        let record_parts: [&[u8]; 2] = [&metadata_bytes, record_bytes];
 
-        let (_, bytes_written) = self
+        let (write_position, bytes_written) = self
             .store
-            .append(&bincoded_record)
+            .append_multipart(&record_parts)
             .await
             .map_err(SegmentError::StoreError)?;
 
         self.next_offset += bytes_written as u64;
 
-        Ok((current_offset, bytes_written))
+        Ok((self.base_offset() + write_position, bytes_written))
     }
 
     pub fn offset_within_bounds(&self, offset: u64) -> bool {
@@ -256,6 +263,20 @@ where
         &self,
         offset: u64,
     ) -> Result<(Record<'record>, u64), SegmentError<T, S>> {
+        let (record_, next_record_offset) = self.read_(offset).await?;
+
+        let record = Record {
+            value: record_.value.to_vec().into(),
+            offset: record_.metadata,
+        };
+
+        Ok((record, next_record_offset))
+    }
+
+    pub async fn read_<'record>(
+        &self,
+        offset: u64,
+    ) -> Result<(Record_<'record, u64, T>, u64), SegmentError<T, S>> {
         if !self.offset_within_bounds(offset) {
             return Err(SegmentError::OffsetOutOfBounds);
         }
@@ -264,14 +285,19 @@ where
             .store_position(offset)
             .ok_or(SegmentError::OffsetBeyondCapacity)?;
 
-        let (record_bytes, next_record_position) = self
+        let metadata_size = bincode::serialized_size(&(0 as u64))
+            .map_err(|_| SegmentError::SerializationError)? as usize;
+
+        let (metadata, record_bytes, next_record_position) = self
             .store
-            .read(position)
+            .read_with_metadata(position, metadata_size)
             .await
             .map_err(SegmentError::StoreError)?;
 
-        let record: Record =
-            bincode::deserialize(&record_bytes).map_err(|_x| SegmentError::SerializationError)?;
+        let metadata: u64 =
+            bincode::deserialize(&metadata).map_err(|_| SegmentError::SerializationError)?;
+
+        let record = Record_::new(metadata, record_bytes);
 
         Ok((record, self.base_offset() + next_record_position))
     }

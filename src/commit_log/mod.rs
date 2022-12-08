@@ -11,7 +11,7 @@
 //! In the context of `laminarmq` this module is intended to provide the storage for individual
 //! partitions in a topic.
 
-use std::{borrow::Cow, time::Duration};
+use std::{borrow::Cow, marker::PhantomData, ops::Deref, time::Duration};
 
 use async_trait::async_trait;
 
@@ -24,6 +24,37 @@ pub struct Record<'a> {
 
     /// Offset at which this record is stored in the log.
     pub offset: u64,
+}
+
+pub struct Record_<'a, M, T>
+where
+    M: serde::Serialize + serde::Deserialize<'a>,
+    T: Deref<Target = [u8]>,
+{
+    pub metadata: M,
+    pub value: T,
+
+    _phantom_data: PhantomData<&'a ()>,
+}
+
+impl<'a, M, T> Record_<'a, M, T>
+where
+    M: serde::Serialize + serde::Deserialize<'a>,
+    T: Deref<Target = [u8]>,
+{
+    pub fn new(metadata: M, value: T) -> Self {
+        Self {
+            metadata,
+            value,
+            _phantom_data: PhantomData,
+        }
+    }
+
+    pub fn serialized_size(&self) -> Option<usize> {
+        bincode::serialized_size(&self.metadata)
+            .ok()
+            .map(|x| x as usize + self.value.len())
+    }
 }
 
 /// Abstraction for representing all types that can asynchronously linearly scanned for items.
