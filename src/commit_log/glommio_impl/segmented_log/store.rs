@@ -2,7 +2,8 @@
 //! implementation for the [`glommio`] runtime.
 
 use std::{
-    cell::Ref, error::Error, fmt::Display, iter::Extend, marker::Unpin, path::Path, result::Result,
+    cell::Ref, error::Error, fmt::Display, io::ErrorKind, iter::Extend, marker::Unpin, ops::Deref,
+    path::Path,
 };
 
 use async_trait::async_trait;
@@ -103,6 +104,20 @@ where
     Ok(())
 }
 
+#[inline]
+fn stream_writer_with_buffer_size(writer: DmaFile, buffer_size: usize) -> DmaStreamWriter {
+    DmaStreamWriterBuilder::new(writer)
+        .with_buffer_size(buffer_size)
+        .build()
+}
+
+fn read_result_split_at(read_result: &ReadResult, at: usize) -> Option<(ReadResult, ReadResult)> {
+    let part_0 = ReadResult::slice(read_result, 0, at)?;
+    let part_1 = ReadResult::slice(read_result, at, read_result.len() - at)?;
+
+    Some((part_0, part_1))
+}
+
 /// [`crate::commit_log::store::Store`] implementation for the [`glommio`] runtime.
 ///
 /// This implementation uses directly mapped files to leverage `io_uring` powered operations. A
@@ -132,6 +147,16 @@ impl Store {
         Self::with_path_and_buffer_size(path, DEFAULT_STORE_WRITER_BUFFER_SIZE).await
     }
 
+    async fn backing_writer<P: AsRef<Path>>(path: P) -> Result<DmaFile, StoreError> {
+        OpenOptions::new()
+            .write(true)
+            .append(true)
+            .create(true)
+            .dma_open(path.as_ref())
+            .await
+            .map_err(StoreError::StorageError)
+    }
+
     /// Creates a new [`Store`] instance.
     ///
     /// The writer is opened with "write", "append" and "create" flags, while the reader is opened
@@ -141,18 +166,9 @@ impl Store {
         path: P,
         buffer_size: usize,
     ) -> Result<Self, StoreError> {
-        let writer_dma_file = OpenOptions::new()
-            .write(true)
-            .append(true)
-            .create(true)
-            .dma_open(path.as_ref())
-            .await
-            .map_err(StoreError::StorageError)?;
+        let writer = Self::backing_writer(path.as_ref()).await?;
 
-        let initial_size = writer_dma_file
-            .file_size()
-            .await
-            .map_err(StoreError::StorageError)?;
+        let initial_size = writer.file_size().await.map_err(StoreError::StorageError)?;
 
         let reader = DmaFile::open(path.as_ref())
             .await
@@ -160,9 +176,7 @@ impl Store {
 
         Ok(Self {
             reader,
-            writer: DmaStreamWriterBuilder::new(writer_dma_file)
-                .with_buffer_size(buffer_size)
-                .build(),
+            writer: stream_writer_with_buffer_size(writer, buffer_size),
             record_positions: record_positions(path).await?,
             size: initial_size,
             buffer_size,
@@ -177,6 +191,8 @@ impl Store {
 
     #[tracing::instrument]
     async fn truncate_to(&mut self, position: u64) -> Result<(), StoreError> {
+        let backing_file_path = self.reader.path().ok_or(StoreError::NoBackingFileError)?;
+
         let record_index = self.record_index(&position)?;
         self.record_positions.truncate(record_index);
 
@@ -186,38 +202,40 @@ impl Store {
             tracing::error!("error closing old writer: {:?}", error);
         }
 
-        let writer = OpenOptions::new()
-            .write(true)
-            .append(true)
-            .create(true)
-            .dma_open(
-                self.reader
-                    .path()
-                    .ok_or(StoreError::NoBackingFileError)?
-                    .to_path_buf(),
-            )
-            .await
-            .map_err(StoreError::StorageError)?;
+        let writer = Self::backing_writer(backing_file_path.deref()).await?;
 
         writer
             .truncate(position)
             .await
             .map_err(StoreError::StorageError)?;
 
-        self.writer = DmaStreamWriterBuilder::new(writer)
-            .with_buffer_size(self.buffer_size)
-            .build();
+        self.writer = stream_writer_with_buffer_size(writer, self.buffer_size);
 
         self.size = position;
         Ok(())
     }
+}
 
-    pub async fn append_multipart(
+#[async_trait(?Send)]
+impl crate::commit_log::segmented_log::store::Store<ReadResult> for Store {
+    type Error = StoreError;
+
+    /// Appends the given record bytes at the end of this store.
+    ///
+    /// ## Returns
+    /// A tuple with `(position_where_the_record_was_written, number_of_bytes_written)`
+    ///
+    /// ## Errors
+    /// - [`StoreError::SerializationError`]: if there was an error during serializing the record
+    /// header for the given record bytes to bytes
+    /// - [`StoreError::StorageError`]: if there was an error during writing to the underlying
+    /// [`DmaStreamWriter`] instance.
+    async fn append_multipart(
         &mut self,
         record_parts: &[&[u8]],
     ) -> Result<(u64, usize), StoreError> {
         let record_header = RecordHeader::from_record_parts(record_parts);
-        let record_length = *&record_header.length as usize + RECORD_HEADER_LENGTH;
+        let record_length = record_header.length as usize + RECORD_HEADER_LENGTH;
         let record_header_bytes = record_header
             .as_bytes()
             .map_err(StoreError::SerializationError)?;
@@ -236,28 +254,6 @@ impl Store {
             Ok((current_position, record_length))
         }
     }
-}
-
-#[async_trait(?Send)]
-impl crate::commit_log::segmented_log::store::Store<ReadResult> for Store {
-    type Error = StoreError;
-
-    /// Appends the given record bytes at the end of this store.
-    ///
-    /// ## Returns
-    /// A tuple with `(position_where_the_record_was_written, number_of_bytes_written)`
-    ///
-    /// ## Errors
-    /// - [`StoreError::SerializationError`]: if there was an error during serializing the record
-    /// header for the given record bytes to bytes
-    /// - [`StoreError::StorageError`]: if there was an error during writing to the underlying
-    /// [`DmaStreamWriter`] instance.
-    async fn append(&mut self, record_bytes: &[u8]) -> Result<(u64, usize), Self::Error> {
-        let record_parts: [&[u8]; 1] = [record_bytes];
-        let record_parts: &[&[u8]] = &record_parts;
-
-        self.append_multipart(record_parts).await
-    }
 
     /// Reads the record at the given position.
     ///
@@ -274,7 +270,11 @@ impl crate::commit_log::segmented_log::store::Store<ReadResult> for Store {
     /// - [`StoreError::InvalidRecordHeader`]: if the record header is invalid for the bytes in the
     /// [`ReadResult`] instance read from the underlying [`DmaFile`]. (Checksum mismatch or invalid
     /// record length).
-    async fn read(&self, position: u64) -> Result<(ReadResult, u64), Self::Error> {
+    async fn read_with_metadata(
+        &self,
+        position: u64,
+        metadata_size: usize,
+    ) -> Result<(ReadResult, ReadResult, u64), Self::Error> {
         let _index = self.record_index(&position)?;
 
         let record_header_bytes = self
@@ -300,7 +300,14 @@ impl crate::commit_log::segmented_log::store::Store<ReadResult> for Store {
 
         let bytes_read = (record_header_bytes.len() + record_bytes.len()) as u64;
 
-        Ok((record_bytes, position + bytes_read))
+        let (metadata, record_bytes) = read_result_split_at(&record_bytes, metadata_size).ok_or(
+            StoreError::SerializationError(std::io::Error::new(
+                ErrorKind::Other,
+                "Invalid metadata size.",
+            )),
+        )?;
+
+        Ok((metadata, record_bytes, position + bytes_read))
     }
 
     async fn truncate(&mut self, position: u64) -> Result<(), Self::Error> {

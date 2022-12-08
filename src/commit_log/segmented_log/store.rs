@@ -26,19 +26,40 @@ use super::super::Scanner;
 /// As such if the record header is invalidated due to checksum mismatch or record length
 /// mismatch an appropriate error is expected on the associated operation.
 #[async_trait(?Send)]
-pub trait Store<Record>
+pub trait Store<T>
 where
-    Record: Deref<Target = [u8]>,
+    T: Deref<Target = [u8]>,
 {
     /// The error type used by the methods of this trait.
     type Error: std::error::Error;
 
     /// Appends a record containing the given record bytes at the end of this store.
-    async fn append(&mut self, record_bytes: &[u8]) -> Result<(u64, usize), Self::Error>;
+    async fn append(&mut self, record_bytes: &[u8]) -> Result<(u64, usize), Self::Error> {
+        let record_parts: [&[u8]; 1] = [record_bytes];
+        let record_parts: &[&[u8]] = &record_parts;
+
+        self.append_multipart(record_parts).await
+    }
+
+    /// Appends a record split in multiple parts as a single record at the end of this store.
+    async fn append_multipart(
+        &mut self,
+        record_bytes: &[&[u8]],
+    ) -> Result<(u64, usize), Self::Error>;
 
     /// Reads the record stored at the given position in the [`Store`] along with the position
     /// of the next record.
-    async fn read(&self, position: u64) -> Result<(Record, u64), Self::Error>;
+    async fn read(&self, position: u64) -> Result<(T, u64), Self::Error> {
+        let (_, record_bytes, next_position) = self.read_with_metadata(position, 0).await?;
+
+        Ok((record_bytes, next_position))
+    }
+
+    async fn read_with_metadata(
+        &self,
+        position: u64,
+        metadata_size: usize,
+    ) -> Result<(T, T, u64), Self::Error>;
 
     /// Truncates this [`Store`] instance by removing all records after the given position
     /// and makes the given position the size of this store.
@@ -153,7 +174,7 @@ pub mod common {
     }
 
     impl RecordHeader {
-        pub fn from_record_parts<'a>(record_parts: &[&[u8]]) -> Self {
+        pub fn from_record_parts(record_parts: &[&[u8]]) -> Self {
             let mut hasher = crc32fast::Hasher::new();
             let mut length = 0;
 
