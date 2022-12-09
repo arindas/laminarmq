@@ -35,9 +35,12 @@ mod tests {
     use glommio::{LocalExecutorBuilder, Placement};
 
     use crate::commit_log::{
-        segmented_log::segment::{config::SegmentConfig, SegmentError, SegmentScanner},
-        segmented_log::store::common::{bincoded_serialized_record_size, STORE_FILE_EXTENSION},
-        Record, Scanner,
+        segmented_log::store::common::STORE_FILE_EXTENSION,
+        segmented_log::{
+            segment::{config::SegmentConfig, SegmentError, SegmentScanner},
+            store::common::RECORD_HEADER_LENGTH,
+        },
+        Scanner,
     };
 
     use super::glommio_segment;
@@ -91,11 +94,8 @@ mod tests {
         let local_ex = LocalExecutorBuilder::new(Placement::Fixed(1))
             .spawn(move || async move {
                 const RECORD_VALUE: &[u8] = b"Hello World!";
-                let record = Record {
-                    value: RECORD_VALUE.into(),
-                    offset: 0,
-                };
-                let record_representation_size = bincoded_serialized_record_size(&record).unwrap();
+                let record_representation_size = bincode::serialized_size(&(0 as u64)).unwrap()
+                    + (RECORD_VALUE.len() + RECORD_HEADER_LENGTH) as u64;
                 let expected_segment_size: u64 = 2 * record_representation_size;
 
                 let mut segment = glommio_segment(

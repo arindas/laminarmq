@@ -49,12 +49,6 @@ where
             _phantom_data: PhantomData,
         }
     }
-
-    pub fn serialized_size(&self) -> Option<usize> {
-        bincode::serialized_size(&self.metadata)
-            .ok()
-            .map(|x| x as usize + self.value.len())
-    }
 }
 
 /// Abstraction for representing all types that can asynchronously linearly scanned for items.

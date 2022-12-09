@@ -161,18 +161,6 @@ pub mod common {
         pub length: u32,
     }
 
-    /// Returns the number of bytes needed to store the given record with binary encoding in a
-    /// [`Store`](super::Store) implementation.
-    /// This method returns a `Some(record_size)` if the size could be estimated correctly. If
-    /// there is any error if ascertaining the serialized size, None is returned.
-    pub fn bincoded_serialized_record_size<Record: serde::Serialize>(
-        record: &Record,
-    ) -> Option<u64> {
-        bincode::serialized_size(record)
-            .ok()
-            .map(|x| x + RECORD_HEADER_LENGTH as u64)
-    }
-
     impl RecordHeader {
         pub fn from_record_parts(record_parts: &[&[u8]]) -> Self {
             let mut hasher = crc32fast::Hasher::new();

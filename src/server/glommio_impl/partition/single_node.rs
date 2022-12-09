@@ -60,8 +60,7 @@ pub mod commit_log {
             use crate::{
                 commit_log::{
                     prelude::{SegmentConfig, SegmentedLogConfig},
-                    segmented_log::store::common::bincoded_serialized_record_size,
-                    Record,
+                    segmented_log::store::common::RECORD_HEADER_LENGTH,
                 },
                 server::{
                     partition::{
@@ -91,17 +90,16 @@ pub mod commit_log {
                 const RECORD_BYTES: &[u8] = b"Lorem ipsum dolor sit amet.";
                 const SENTINEL: &[u8] = b"0";
 
+                let max_store_bytes = bincode::serialized_size(&(0 as u64)).unwrap()
+                    + (RECORD_BYTES.len() + RECORD_HEADER_LENGTH) as u64;
+
                 let partition_config = PartitionConfig {
                     base_storage_directory: PARTITION_BASE_DIRECTORY.into(),
                     segmented_log_config: SegmentedLogConfig {
                         initial_offset: 0,
                         segment_config: SegmentConfig {
                             store_buffer_size: None,
-                            max_store_bytes: bincoded_serialized_record_size(&Record {
-                                value: RECORD_BYTES.into(),
-                                offset: 0,
-                            })
-                            .unwrap(),
+                            max_store_bytes,
                         },
                     },
                 };

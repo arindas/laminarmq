@@ -1,17 +1,13 @@
 //! Module providing cross platform [`Segment`](Segment) abstractions for reading and writing
 //! [`Record`](super::Record) instances from [`Store`](super::store::Store) instances.
 
-use std::{fmt::Display, marker::PhantomData, mem::size_of, ops::Deref, time::Instant};
+use std::{fmt::Display, marker::PhantomData, ops::Deref, time::Instant};
 
 use async_trait::async_trait;
 
 use crate::commit_log::Record_;
 
-use super::{
-    super::Scanner,
-    store::{Store, StoreScanner},
-    Record,
-};
+use super::{super::Scanner, store::Store, Record};
 
 /// Error type used for operations on a [`Segment`].
 #[derive(Debug)]
@@ -266,6 +262,7 @@ where
         let (record_, next_record_offset) = self.read_(offset).await?;
 
         let record = Record {
+            // Invokes clone for every u8. TODO: optimize this away
             value: record_.value.to_vec().into(),
             offset: record_.metadata,
         };
@@ -376,7 +373,8 @@ where
     T: Deref<Target = [u8]>,
     S: Store<T>,
 {
-    store_scanner: StoreScanner<'a, T, S>,
+    segment: &'a Segment<T, S>,
+    offset: u64,
 }
 
 impl<'a, T, S> SegmentScanner<'a, T, S>
@@ -400,17 +398,10 @@ where
         offset: u64,
     ) -> Result<Self, SegmentError<T, S>> {
         if !segment.offset_within_bounds(offset) {
-            return Err(SegmentError::OffsetOutOfBounds);
+            Err(SegmentError::OffsetOutOfBounds)
+        } else {
+            Ok(Self { segment, offset })
         }
-
-        Ok(Self {
-            store_scanner: StoreScanner::with_position(
-                segment.store(),
-                segment
-                    .store_position(offset)
-                    .ok_or(SegmentError::OffsetBeyondCapacity)?,
-            ),
-        })
     }
 }
 
@@ -423,10 +414,14 @@ where
     type Item = super::Record<'a>;
 
     async fn next(&mut self) -> Option<Self::Item> {
-        self.store_scanner
-            .next()
+        self.segment
+            .read(self.offset)
             .await
-            .and_then(|record_bytes| bincode::deserialize(&record_bytes).ok())
+            .ok()
+            .map(|(record, next_record_offset)| {
+                self.offset = next_record_offset;
+                record
+            })
     }
 }
 pub mod config {
