@@ -7,7 +7,7 @@ use async_trait::async_trait;
 
 use crate::commit_log::Record_;
 
-use super::{super::Scanner, store::Store, Record, RecordMetadata};
+use super::{super::Scanner, store::Store, RecordMetadata};
 
 /// Error type used for operations on a [`Segment`].
 #[derive(Debug)]
@@ -202,20 +202,6 @@ where
     /// given record instance.
     /// - [`SegmentError::StoreError`] if there was an error during writing to the underlying
     /// [`Store`](super::store::Store) instance.
-    pub async fn append(
-        &mut self,
-        record_bytes: &[u8],
-    ) -> Result<(u64, usize), SegmentError<T, S>> {
-        self.append_with_metadata(
-            record_bytes,
-            RecordMetadata {
-                offset: self.next_offset(),
-                additional_metadata: (),
-            },
-        )
-        .await
-    }
-
     pub async fn append_with_metadata(
         &mut self,
         record_bytes: &[u8],
@@ -261,21 +247,6 @@ where
     /// given offset from the underlying [`Store`](super::store::Store) instance.
     /// - [`SegmentError::SerializationError`] if there is an error during deserializing the
     /// record from the bytes read from storage.
-    pub async fn read<'record>(
-        &self,
-        offset: u64,
-    ) -> Result<(Record<'record>, u64), SegmentError<T, S>> {
-        let (record_, next_record_offset) = self.read_(offset).await?;
-
-        let record = Record {
-            // Invokes clone for every u8. TODO: optimize this away
-            value: record_.value.to_vec().into(),
-            offset: record_.metadata.offset,
-        };
-
-        Ok((record, next_record_offset))
-    }
-
     pub async fn read_<'record>(
         &self,
         offset: u64,
@@ -417,11 +388,11 @@ where
     T: Deref<Target = [u8]> + Unpin,
     S: Store<T>,
 {
-    type Item = super::Record<'a>;
+    type Item = Record_<'a, RecordMetadata<()>, T>;
 
     async fn next(&mut self) -> Option<Self::Item> {
         self.segment
-            .read(self.offset)
+            .read_(self.offset)
             .await
             .ok()
             .map(|(record, next_record_offset)| {
@@ -430,6 +401,7 @@ where
             })
     }
 }
+
 pub mod config {
     //! Module providing types for configuring [`Segment`](super::Segment) instances.
     use serde::{Deserialize, Serialize};

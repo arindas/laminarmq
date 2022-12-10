@@ -30,7 +30,7 @@ pub async fn glommio_segment(
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, path::PathBuf};
+    use std::{fs, ops::Deref, path::PathBuf};
 
     use glommio::{LocalExecutorBuilder, Placement};
 
@@ -111,17 +111,26 @@ mod tests {
                 .unwrap();
 
                 assert!(matches!(
-                    segment.read(segment.next_offset()).await,
+                    segment.read_(segment.next_offset()).await,
                     Err(SegmentError::OffsetOutOfBounds)
                 ));
 
-                let (offset_1, record_1_size) = segment.append(RECORD_VALUE).await.unwrap();
+                let (offset_1, record_1_size) = segment
+                    .append_with_metadata(
+                        RECORD_VALUE,
+                        RecordMetadata {
+                            offset: segment.next_offset(),
+                            additional_metadata: (),
+                        },
+                    )
+                    .await
+                    .unwrap();
                 assert_eq!(offset_1, 0);
                 assert_eq!(record_1_size as u64, record_representation_size);
                 assert_eq!(segment.next_offset(), record_representation_size);
 
                 assert!(matches!(
-                    segment.read(segment.next_offset()).await,
+                    segment.read_(segment.next_offset()).await,
                     Err(SegmentError::OffsetOutOfBounds)
                 ));
 
@@ -130,7 +139,16 @@ mod tests {
                     Ok(_)
                 ));
 
-                let (offset_2, _) = segment.append(RECORD_VALUE).await.unwrap();
+                let (offset_2, _) = segment
+                    .append_with_metadata(
+                        RECORD_VALUE,
+                        RecordMetadata {
+                            offset: segment.next_offset(),
+                            additional_metadata: (),
+                        },
+                    )
+                    .await
+                    .unwrap();
                 assert_eq!(offset_2, record_representation_size);
 
                 assert_eq!(segment.size(), expected_segment_size);
@@ -154,28 +172,38 @@ mod tests {
                 assert!(segment.is_maxed());
 
                 assert!(matches!(
-                    segment.append(RECORD_VALUE).await,
+                    segment
+                        .append_with_metadata(
+                            RECORD_VALUE,
+                            RecordMetadata {
+                                offset: segment.next_offset(),
+                                additional_metadata: ()
+                            }
+                        )
+                        .await,
                     Err(SegmentError::SegmentMaxed)
                 ));
 
-                let (record_1, record_1_next_record_offset) = segment.read(offset_1).await.unwrap();
-                assert_eq!(record_1.offset, offset_1);
-                assert_eq!(record_1.value, RECORD_VALUE);
+                let (record_1, record_1_next_record_offset) =
+                    segment.read_(offset_1).await.unwrap();
+                assert_eq!(record_1.metadata.offset, offset_1);
+                assert_eq!(record_1.value.deref(), RECORD_VALUE);
                 assert_eq!(record_1_next_record_offset, offset_2);
 
-                let (record_2, record_2_next_record_offset) = segment.read(offset_2).await.unwrap();
-                assert_eq!(record_2.offset, offset_2);
-                assert_eq!(record_2.value, RECORD_VALUE);
+                let (record_2, record_2_next_record_offset) =
+                    segment.read_(offset_2).await.unwrap();
+                assert_eq!(record_2.metadata.offset, offset_2);
+                assert_eq!(record_2.value.deref(), RECORD_VALUE);
                 assert_eq!(record_2_next_record_offset, segment.next_offset());
 
                 // read at invalid loacation
                 assert!(matches!(
-                    segment.read(offset_2 + 1).await,
+                    segment.read_(offset_2 + 1).await,
                     Err(SegmentError::StoreError(_))
                 ));
 
                 assert!(matches!(
-                    segment.read(segment.next_offset()).await,
+                    segment.read_(segment.next_offset()).await,
                     Err(SegmentError::OffsetOutOfBounds)
                 ));
 
@@ -184,7 +212,8 @@ mod tests {
                 let mut segment_scanner = SegmentScanner::new(&segment).unwrap();
                 let mut i = 0;
                 while let Some(record) = segment_scanner.next().await {
-                    assert_eq!(record, records[i]);
+                    assert_eq!(record.metadata.offset, records[i].metadata.offset);
+                    assert_eq!(record.value.deref(), records[i].value.deref());
 
                     i += 1;
                 }
@@ -201,19 +230,20 @@ mod tests {
                 ));
 
                 assert!(matches!(
-                    segment.truncate(records[0].offset + 1).await,
+                    segment.truncate(records[0].metadata.offset + 1).await,
                     Err(SegmentError::StoreError(_))
                 ));
 
                 segment
-                    .truncate(records.last().unwrap().offset)
+                    .truncate(records.last().unwrap().metadata.offset)
                     .await
                     .unwrap();
 
                 let mut segment_scanner = SegmentScanner::new(&segment).unwrap();
                 let mut i = 0;
                 while let Some(record) = segment_scanner.next().await {
-                    assert_eq!(record, records[i]);
+                    assert_eq!(record.metadata.offset, records[i].metadata.offset);
+                    assert_eq!(record.value.deref(), records[i].value.deref());
 
                     i += 1;
                 }

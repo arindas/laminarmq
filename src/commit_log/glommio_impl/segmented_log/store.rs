@@ -104,7 +104,6 @@ where
     Ok(())
 }
 
-#[inline]
 fn stream_writer_with_buffer_size(writer: DmaFile, buffer_size: usize) -> DmaStreamWriter {
     DmaStreamWriterBuilder::new(writer)
         .with_buffer_size(buffer_size)

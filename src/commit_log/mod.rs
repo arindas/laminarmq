@@ -26,6 +26,7 @@ pub struct Record<'a> {
     pub offset: u64,
 }
 
+#[derive(Debug)]
 pub struct Record_<'a, M, T>
 where
     M: serde::Serialize + serde::Deserialize<'a>,

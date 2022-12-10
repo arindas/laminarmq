@@ -527,10 +527,18 @@ where
             self.rotate_new_write_segment().await?;
         }
 
+        let highest_offset = self.highest_offset();
+
         self.write_segment
             .as_mut()
             .ok_or(SegmentedLogError::WriteSegmentLost)?
-            .append(record_bytes)
+            .append_with_metadata(
+                record_bytes,
+                RecordMetadata {
+                    offset: highest_offset,
+                    additional_metadata: (),
+                },
+            )
             .await
             .map_err(SegmentedLogError::SegmentError)
     }
@@ -547,15 +555,31 @@ where
 
         if let Some(read_segment) = read_segment {
             read_segment
-                .read(offset)
+                .read_(offset)
                 .await
+                .map(|(record, offset)| {
+                    let record = Record {
+                        // Invokes clone for every u8. TODO: optimize this away
+                        value: record.value.to_vec().into(),
+                        offset: record.metadata.offset,
+                    };
+                    (record, offset)
+                })
                 .map_err(SegmentedLogError::SegmentError)
         } else {
             self.write_segment
                 .as_ref()
                 .ok_or(SegmentedLogError::WriteSegmentLost)?
-                .read(offset)
+                .read_(offset)
                 .await
+                .map(|(record, offset)| {
+                    let record = Record {
+                        // Invokes clone for every u8. TODO: optimize this away
+                        value: record.value.to_vec().into(),
+                        offset: record.metadata.offset,
+                    };
+                    (record, offset)
+                })
                 .map_err(SegmentedLogError::SegmentError)
         }
     }
