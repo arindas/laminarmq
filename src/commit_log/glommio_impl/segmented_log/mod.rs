@@ -45,7 +45,7 @@ mod tests {
     use crate::commit_log::{
         segmented_log::{
             common::store_file_path, config::SegmentedLogConfig as LogConfig,
-            segment::config::SegmentConfig, store::common::RECORD_HEADER_LENGTH,
+            segment::config::SegmentConfig, store::common::RECORD_HEADER_LENGTH, RecordMetadata,
             SegmentedLogError as LogError,
         },
         CommitLog, LogScanner, Record, Scanner,
@@ -107,7 +107,8 @@ mod tests {
         let local_ex = LocalExecutorBuilder::new(Placement::Unbound)
             .spawn(move || async move {
                 const RECORD_VALUE: &[u8] = b"Hello world!";
-                let record_size = bincode::serialized_size(&(0 as u64)).unwrap()
+                let record_size = bincode::serialized_size(&RecordMetadata::<()>::default())
+                    .unwrap()
                     + (RECORD_VALUE.len() + RECORD_HEADER_LENGTH) as u64;
 
                 let log_config = LogConfig {
@@ -184,7 +185,8 @@ mod tests {
         let local_ex = LocalExecutorBuilder::new(Placement::Unbound)
             .spawn(move || async move {
                 const RECORD_VALUE: &[u8] = b"Hello world!";
-                let record_size = bincode::serialized_size(&(0 as u64)).unwrap()
+                let record_size = bincode::serialized_size(&RecordMetadata::<()>::default())
+                    .unwrap()
                     + (RECORD_VALUE.len() + RECORD_HEADER_LENGTH) as u64;
 
                 let log_config = LogConfig {
@@ -253,7 +255,8 @@ mod tests {
         let local_ex = LocalExecutorBuilder::new(Placement::Unbound)
             .spawn(move || async move {
                 const RECORD_VALUE: &[u8] = b"Hello world!";
-                let record_size = bincode::serialized_size(&(0 as u64)).unwrap()
+                let record_size = bincode::serialized_size(&RecordMetadata::<()>::default())
+                    .unwrap()
                     + (RECORD_VALUE.len() + RECORD_HEADER_LENGTH) as u64;
 
                 let log_config = LogConfig {

@@ -22,6 +22,12 @@ use std::{
 use super::Record;
 use segment::Segment;
 
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct RecordMetadata<M: Default> {
+    pub offset: u64,
+    pub additional_metadata: M,
+}
+
 /// Error type for our segmented log implementation. Used as the `Error` associated type for
 /// our [`SegmentedLog`]'s [`CommitLog`](super::CommitLog) trait implementation.
 #[derive(Debug)]

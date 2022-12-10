@@ -7,7 +7,7 @@ use async_trait::async_trait;
 
 use crate::commit_log::Record_;
 
-use super::{super::Scanner, store::Store, Record};
+use super::{super::Scanner, store::Store, Record, RecordMetadata};
 
 /// Error type used for operations on a [`Segment`].
 #[derive(Debug)]
@@ -206,14 +206,20 @@ where
         &mut self,
         record_bytes: &[u8],
     ) -> Result<(u64, usize), SegmentError<T, S>> {
-        self.append_with_metadata(record_bytes, self.next_offset)
-            .await
+        self.append_with_metadata(
+            record_bytes,
+            RecordMetadata {
+                offset: self.next_offset(),
+                additional_metadata: (),
+            },
+        )
+        .await
     }
 
     pub async fn append_with_metadata(
         &mut self,
         record_bytes: &[u8],
-        metadata: u64,
+        metadata: RecordMetadata<()>,
     ) -> Result<(u64, usize), SegmentError<T, S>> {
         if self.is_maxed() {
             return Err(SegmentError::SegmentMaxed);
@@ -264,7 +270,7 @@ where
         let record = Record {
             // Invokes clone for every u8. TODO: optimize this away
             value: record_.value.to_vec().into(),
-            offset: record_.metadata,
+            offset: record_.metadata.offset,
         };
 
         Ok((record, next_record_offset))
@@ -273,7 +279,7 @@ where
     pub async fn read_<'record>(
         &self,
         offset: u64,
-    ) -> Result<(Record_<'record, u64, T>, u64), SegmentError<T, S>> {
+    ) -> Result<(Record_<'record, RecordMetadata<()>, T>, u64), SegmentError<T, S>> {
         if !self.offset_within_bounds(offset) {
             return Err(SegmentError::OffsetOutOfBounds);
         }
@@ -282,7 +288,7 @@ where
             .store_position(offset)
             .ok_or(SegmentError::OffsetBeyondCapacity)?;
 
-        let metadata_size = bincode::serialized_size(&(0 as u64))
+        let metadata_size = bincode::serialized_size(&RecordMetadata::<()>::default())
             .map_err(|_| SegmentError::SerializationError)? as usize;
 
         let (metadata, record_bytes, next_record_position) = self
@@ -291,7 +297,7 @@ where
             .await
             .map_err(SegmentError::StoreError)?;
 
-        let metadata: u64 =
+        let metadata =
             bincode::deserialize(&metadata).map_err(|_| SegmentError::SerializationError)?;
 
         let record = Record_::new(metadata, record_bytes);
