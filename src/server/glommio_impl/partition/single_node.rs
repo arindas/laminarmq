@@ -102,6 +102,7 @@ pub mod commit_log {
                             store_buffer_size: None,
                             max_store_bytes,
                         },
+                        ..Default::default()
                     },
                 };
 

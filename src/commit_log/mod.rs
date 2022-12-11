@@ -15,6 +15,8 @@ use std::{borrow::Cow, marker::PhantomData, ops::Deref, time::Duration};
 
 use async_trait::async_trait;
 
+use self::segmented_log::RecordMetadata;
+
 /// Represents a record in a [`CommitLog`].
 #[derive(serde::Deserialize, serde::Serialize, Debug, PartialEq, Eq, Clone)]
 pub struct Record<'a> {
@@ -90,7 +92,22 @@ pub trait CommitLog {
 
     /// Appends a new [`Record`] at the end of this [`CommitLog`].
     /// Returns the offset at which the record was written, along with the number of bytes written.
-    async fn append(&mut self, record_bytes: &[u8]) -> Result<(u64, usize), Self::Error>;
+    async fn append(&mut self, record_bytes: &[u8]) -> Result<(u64, usize), Self::Error> {
+        self.append_with_metadata(
+            record_bytes,
+            RecordMetadata {
+                offset: self.highest_offset(),
+                additional_metadata: (),
+            },
+        )
+        .await
+    }
+
+    async fn append_with_metadata(
+        &mut self,
+        record_bytes: &[u8],
+        metadata: RecordMetadata<()>,
+    ) -> Result<(u64, usize), Self::Error>;
 
     /// Reads the [`Record`] at the given offset, along with the offset of the next record from
     /// this [`CommitLog`].

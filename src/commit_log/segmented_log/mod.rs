@@ -11,6 +11,7 @@ pub mod store;
 use async_trait::async_trait;
 
 use std::{
+    cmp::Ordering,
     error::Error,
     fmt::Display,
     fs,
@@ -19,7 +20,9 @@ use std::{
     time::Duration,
 };
 
-use super::Record;
+use crate::common::binalt::BinAlt;
+
+use super::{CommitLog, Record, Record_};
 use segment::Segment;
 
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -463,7 +466,7 @@ where
     /// offset to advance to.
     /// - [`SegmentedLogError::SegmentError`]: if there is an error during advancing the offset
     /// ofthe write segment.
-    pub async fn advance_to_offset(
+    pub(crate) async fn _advance_to_offset(
         &mut self,
         new_highest_offset: u64,
     ) -> Result<(), SegmentedLogError<T, S>> {
@@ -485,10 +488,38 @@ where
         }
 
         write_segment_ref!(self, as_mut)?
-            .advance_to_offset(new_highest_offset)
+            ._advance_to_offset(new_highest_offset)
             .map_err(SegmentedLogError::SegmentError)?;
 
         Ok(())
+    }
+
+    async fn read_<'record>(
+        &self,
+        offset: u64,
+    ) -> Result<(Record_<'record, RecordMetadata<()>, T>, u64), SegmentedLogError<T, S>> {
+        if !self.offset_within_bounds(offset) {
+            return Err(SegmentedLogError::OffsetOutOfBounds);
+        }
+
+        let read_segment = self
+            .read_segments
+            .iter()
+            .find(|x| x.store_position(offset).is_some());
+
+        if let Some(read_segment) = read_segment {
+            read_segment
+                .read_(offset)
+                .await
+                .map_err(SegmentedLogError::SegmentError)
+        } else {
+            self.write_segment
+                .as_ref()
+                .ok_or(SegmentedLogError::WriteSegmentLost)?
+                .read_(offset)
+                .await
+                .map_err(SegmentedLogError::SegmentError)
+        }
     }
 }
 
@@ -522,64 +553,94 @@ where
 {
     type Error = SegmentedLogError<T, S>;
 
-    async fn append(&mut self, record_bytes: &[u8]) -> Result<(u64, usize), Self::Error> {
+    async fn append_with_metadata(
+        &mut self,
+        record_bytes: &[u8],
+        metadata: RecordMetadata<()>,
+    ) -> Result<(u64, usize), Self::Error> {
         while self.is_write_segment_maxed()? {
-            self.rotate_new_write_segment().await?;
+            self.rotate_new_write_segment().await?
         }
 
-        let highest_offset = self.highest_offset();
-
-        self.write_segment
-            .as_mut()
-            .ok_or(SegmentedLogError::WriteSegmentLost)?
-            .append_with_metadata(
-                record_bytes,
-                RecordMetadata {
-                    offset: highest_offset,
-                    additional_metadata: (),
-                },
-            )
-            .await
-            .map_err(SegmentedLogError::SegmentError)
+        match match metadata.offset.cmp(&self.highest_offset()) {
+            Ordering::Greater => BinAlt::B(SegmentedLogError::OffsetOutOfBounds),
+            Ordering::Equal => BinAlt::A(()),
+            Ordering::Less if self.config.truncate_on_append => {
+                self.truncate(metadata.offset).await?;
+                BinAlt::A(())
+            }
+            Ordering::Less => BinAlt::B(SegmentedLogError::OffsetOutOfBounds),
+        } {
+            BinAlt::A(_) => self
+                .write_segment
+                .as_mut()
+                .ok_or(SegmentedLogError::WriteSegmentLost)?
+                .append_with_metadata(record_bytes, metadata)
+                .await
+                .map_err(SegmentedLogError::SegmentError),
+            BinAlt::B(error) => Err(error),
+        }
     }
 
     async fn read<'record>(&self, offset: u64) -> Result<(Record<'record>, u64), Self::Error> {
-        if !self.offset_within_bounds(offset) {
-            return Err(SegmentedLogError::OffsetOutOfBounds);
-        }
+        self.read_(offset).await.map(|(record, offset)| {
+            let record = Record {
+                // Invokes clone for every u8. TODO: optimize this away
+                value: record.value.to_vec().into(),
+                offset: record.metadata.offset,
+            };
+            (record, offset)
+        })
+    }
 
-        let read_segment = self
+    async fn truncate(&mut self, offset: u64) -> Result<(), Self::Error> {
+        let segment_pos = self
             .read_segments
             .iter()
-            .find(|x| x.store_position(offset).is_some());
+            .position(|x| x.store_position(offset).is_some());
 
-        if let Some(read_segment) = read_segment {
-            read_segment
-                .read_(offset)
+        if let Some(pos) = segment_pos {
+            // safety: pos is obtained with iter().position()
+            unsafe { self.read_segments.get_unchecked_mut(pos) }
+                .truncate(offset)
                 .await
-                .map(|(record, offset)| {
-                    let record = Record {
-                        // Invokes clone for every u8. TODO: optimize this away
-                        value: record.value.to_vec().into(),
-                        offset: record.metadata.offset,
-                    };
-                    (record, offset)
-                })
-                .map_err(SegmentedLogError::SegmentError)
+                .map_err(SegmentedLogError::SegmentError)?;
+
+            if pos < self.read_segments.len() - 1 {
+                let mut segments_to_remove = self.read_segments.split_off(pos + 1);
+                segments_to_remove.push(
+                    self.write_segment
+                        .take()
+                        .ok_or(SegmentedLogError::WriteSegmentLost)?,
+                );
+                for segment in segments_to_remove.drain(..) {
+                    segment
+                        .remove()
+                        .await
+                        .map_err(SegmentedLogError::SegmentError)?;
+                }
+            }
+
+            let new_write_segment = self.read_segments.pop().unwrap_or(
+                self.segment_creator
+                    .new_segment_with_storage_dir_offset_and_config(
+                        &self.storage_directory,
+                        self.lowest_offset(),
+                        self.config.segment_config,
+                    )
+                    .await
+                    .map_err(SegmentedLogError::SegmentError)?,
+            );
+
+            self.write_segment = Some(new_write_segment);
+
+            Ok(())
         } else {
             self.write_segment
-                .as_ref()
+                .as_mut()
                 .ok_or(SegmentedLogError::WriteSegmentLost)?
-                .read_(offset)
+                .truncate(offset)
                 .await
-                .map(|(record, offset)| {
-                    let record = Record {
-                        // Invokes clone for every u8. TODO: optimize this away
-                        value: record.value.to_vec().into(),
-                        offset: record.metadata.offset,
-                    };
-                    (record, offset)
-                })
                 .map_err(SegmentedLogError::SegmentError)
         }
     }
@@ -792,10 +853,15 @@ pub mod config {
     use super::segment::config::SegmentConfig;
 
     /// Log specific configuration.
-    #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+    #[derive(Default, Debug, Clone, Copy, Serialize, Deserialize)]
     pub struct SegmentedLogConfig {
         /// Offset from which the first segment of the log starts.
         pub initial_offset: u64,
+
+        /// Truncate segmented log if record being appended has lower offset than
+        /// the current highest offset
+        pub truncate_on_append: bool,
+
         /// Config for every segment in this log.
         pub segment_config: SegmentConfig,
     }

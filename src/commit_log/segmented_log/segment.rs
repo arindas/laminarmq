@@ -282,7 +282,10 @@ where
     /// ## Errors
     /// - [`SegmentError::OffsetBeyondCapacity`] if the given offset doesn't map to a valid
     /// position on the underlying store.
-    pub fn advance_to_offset(&mut self, new_next_offset: u64) -> Result<(), SegmentError<T, S>> {
+    pub(crate) fn _advance_to_offset(
+        &mut self,
+        new_next_offset: u64,
+    ) -> Result<(), SegmentError<T, S>> {
         if new_next_offset <= self.next_offset() {
             return Ok(());
         }
@@ -407,7 +410,7 @@ pub mod config {
     use serde::{Deserialize, Serialize};
 
     /// Configuration pertaining to segment storage and buffer sizes.
-    #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+    #[derive(Serialize, Deserialize, Default, Debug, Clone, Copy)]
     pub struct SegmentConfig {
         /// Segment store's write buffer size. The write buffer is flushed to the disk when it is
         /// filled. Reads of records in a write buffer are only possible when the write buffer is

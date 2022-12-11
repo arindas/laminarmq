@@ -15,6 +15,7 @@
 //!                 store_buffer_size: None,
 //!                 max_store_bytes: 512,
 //!             },
+//!             truncate_on_append: false,
 //!         };
 //!
 //!         let storage_dir_path = "/tmp/laminarmq_commit_log_glommio_impl_segmented_log";

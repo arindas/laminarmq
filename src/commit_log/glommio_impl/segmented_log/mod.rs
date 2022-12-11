@@ -72,6 +72,7 @@ mod tests {
                         store_buffer_size: None,
                         max_store_bytes: 512,
                     },
+                    truncate_on_append: false,
                 };
 
                 let log = glommio_segmented_log(STORAGE_DIR_PATH, LOG_CONFIG)
@@ -117,6 +118,7 @@ mod tests {
                         store_buffer_size: None,
                         max_store_bytes: record_size,
                     },
+                    ..Default::default()
                 };
 
                 let mut log = glommio_segmented_log(STORAGE_DIR_PATH, log_config)
@@ -195,6 +197,7 @@ mod tests {
                         store_buffer_size: None,
                         max_store_bytes: record_size,
                     },
+                    ..Default::default()
                 };
 
                 let mut log = glommio_segmented_log(STORAGE_DIR_PATH, log_config)
@@ -265,6 +268,7 @@ mod tests {
                         store_buffer_size: None,
                         max_store_bytes: record_size,
                     },
+                    ..Default::default()
                 };
 
                 let mut log_0 = glommio_segmented_log(STORAGE_DIR_PATH, log_config)
@@ -278,7 +282,7 @@ mod tests {
                 log_0.append(RECORD_VALUE).await.unwrap(); // record written but not guranteed to be synced
 
                 assert!(matches!(
-                    log_1.advance_to_offset(log_0.highest_offset()).await,
+                    log_1._advance_to_offset(log_0.highest_offset()).await,
                     Err(LogError::OffsetNotValidToAdvanceTo)
                 ));
 
@@ -286,19 +290,22 @@ mod tests {
                 let highest_offset_2 = log_0.highest_offset();
 
                 assert!(matches!(
-                    log_1.advance_to_offset(highest_offset_2).await,
+                    log_1._advance_to_offset(highest_offset_2).await,
                     Err(LogError::OffsetNotValidToAdvanceTo)
                 ));
 
                 log_0.append(RECORD_VALUE).await.unwrap(); // second log rotation; 2nd segment synced
 
-                log_1.advance_to_offset(highest_offset_2).await.unwrap();
+                log_1._advance_to_offset(highest_offset_2).await.unwrap();
 
                 let final_highest_offset = log_0.highest_offset();
 
                 log_0.close().await.unwrap(); // all segments guranteed to be synced
 
-                log_1.advance_to_offset(final_highest_offset).await.unwrap();
+                log_1
+                    ._advance_to_offset(final_highest_offset)
+                    .await
+                    .unwrap();
 
                 log_1.close().await.unwrap();
 

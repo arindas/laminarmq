@@ -135,7 +135,7 @@ mod tests {
                 ));
 
                 assert!(matches!(
-                    segment.advance_to_offset(segment.next_offset()),
+                    segment._advance_to_offset(segment.next_offset()),
                     Ok(_)
                 ));
 
@@ -220,7 +220,7 @@ mod tests {
                 assert_eq!(i, records.len());
 
                 assert!(matches!(
-                    segment.advance_to_offset(segment.next_offset() + 1),
+                    segment._advance_to_offset(segment.next_offset() + 1),
                     Err(SegmentError::OffsetBeyondCapacity)
                 ));
 
