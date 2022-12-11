@@ -103,9 +103,10 @@ where
 /// close the write segment and reopen it as a read segment. The re-opened segment is added to
 /// the list of read segments. A new write segment is then created with `base_offset` as the
 /// `next_offset` of the previous write segment.
-pub struct Segment<T, S: Store<T>>
+pub struct Segment<T, M, S: Store<T>>
 where
     T: Deref<Target = [u8]>,
+    M: Default + serde::Serialize + serde::de::DeserializeOwned,
 {
     store: S,
     base_offset: u64,
@@ -114,7 +115,7 @@ where
 
     creation_time: Instant,
 
-    _phantom_data: PhantomData<T>,
+    _phantom_data: PhantomData<(T, M)>,
 }
 
 #[doc(hidden)]
@@ -128,9 +129,10 @@ macro_rules! consume_store_from_segment {
     };
 }
 
-impl<T, S: Store<T>> Segment<T, S>
+impl<T, M, S: Store<T>> Segment<T, M, S>
 where
     T: Deref<Target = [u8]>,
+    M: Default + serde::Serialize + serde::de::DeserializeOwned,
 {
     /// Creates a segment instance with the given config, base offset and store instance.
     pub fn with_config_base_offset_and_store(
@@ -202,10 +204,10 @@ where
     /// given record instance.
     /// - [`SegmentError::StoreError`] if there was an error during writing to the underlying
     /// [`Store`](super::store::Store) instance.
-    pub async fn append_with_metadata(
+    pub async fn append(
         &mut self,
         record_bytes: &[u8],
-        metadata: RecordMetadata<()>,
+        metadata: RecordMetadata<M>,
     ) -> Result<(u64, usize), SegmentError<T, S>> {
         if self.is_maxed() {
             return Err(SegmentError::SegmentMaxed);
@@ -247,10 +249,10 @@ where
     /// given offset from the underlying [`Store`](super::store::Store) instance.
     /// - [`SegmentError::SerializationError`] if there is an error during deserializing the
     /// record from the bytes read from storage.
-    pub async fn read_<'record>(
+    pub async fn read(
         &self,
         offset: u64,
-    ) -> Result<(Record_<'record, RecordMetadata<()>, T>, u64), SegmentError<T, S>> {
+    ) -> Result<(Record_<RecordMetadata<M>, T>, u64), SegmentError<T, S>> {
         if !self.offset_within_bounds(offset) {
             return Err(SegmentError::OffsetOutOfBounds);
         }
@@ -348,22 +350,24 @@ where
 }
 
 /// Implements [`Scanner`](super::Scanner) for [`Segment`] references.
-pub struct SegmentScanner<'a, T, S>
+pub struct SegmentScanner<'a, T, M, S>
 where
     T: Deref<Target = [u8]>,
+    M: Default + serde::Serialize + serde::de::DeserializeOwned,
     S: Store<T>,
 {
-    segment: &'a Segment<T, S>,
+    segment: &'a Segment<T, M, S>,
     offset: u64,
 }
 
-impl<'a, T, S> SegmentScanner<'a, T, S>
+impl<'a, T, M, S> SegmentScanner<'a, T, M, S>
 where
     T: Deref<Target = [u8]>,
+    M: Default + serde::Serialize + serde::de::DeserializeOwned,
     S: Store<T>,
 {
     /// Creates a new [`SegmentScanner`] that starts reading from the given segments `base_offset`.
-    pub fn new(segment: &'a Segment<T, S>) -> Result<Self, SegmentError<T, S>> {
+    pub fn new(segment: &'a Segment<T, M, S>) -> Result<Self, SegmentError<T, S>> {
         Self::with_offset(segment, segment.base_offset())
     }
 
@@ -374,7 +378,7 @@ where
     /// - [`SegmentError::OffsetBeyondCapacity`] if the given offset doesn't map to a valid
     /// location on the [`Segment`] instances underlying store.
     pub fn with_offset(
-        segment: &'a Segment<T, S>,
+        segment: &'a Segment<T, M, S>,
         offset: u64,
     ) -> Result<Self, SegmentError<T, S>> {
         if !segment.offset_within_bounds(offset) {
@@ -386,16 +390,17 @@ where
 }
 
 #[async_trait(?Send)]
-impl<'a, T, S> Scanner for SegmentScanner<'a, T, S>
+impl<'a, T, M, S> Scanner for SegmentScanner<'a, T, M, S>
 where
     T: Deref<Target = [u8]> + Unpin,
+    M: Default + serde::Serialize + serde::de::DeserializeOwned,
     S: Store<T>,
 {
-    type Item = Record_<'a, RecordMetadata<()>, T>;
+    type Item = Record_<RecordMetadata<M>, T>;
 
     async fn next(&mut self) -> Option<Self::Item> {
         self.segment
-            .read_(self.offset)
+            .read(self.offset)
             .await
             .ok()
             .map(|(record, next_record_offset)| {

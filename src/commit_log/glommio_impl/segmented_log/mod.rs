@@ -26,7 +26,7 @@ impl BaseSegmentCreator<ReadResult, Store> for SegmentCreator {
         store_file_path: P,
         base_offset: u64,
         config: SegmentConfig,
-    ) -> Result<Segment<ReadResult, Store>, SegmentError<ReadResult, Store>> {
+    ) -> Result<Segment<ReadResult, (), Store>, SegmentError<ReadResult, Store>> {
         segment::glommio_segment(store_file_path, base_offset, config).await
     }
 }

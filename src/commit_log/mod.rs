@@ -11,7 +11,7 @@
 //! In the context of `laminarmq` this module is intended to provide the storage for individual
 //! partitions in a topic.
 
-use std::{borrow::Cow, marker::PhantomData, ops::Deref, time::Duration};
+use std::{borrow::Cow, ops::Deref, time::Duration};
 
 use async_trait::async_trait;
 
@@ -29,28 +29,22 @@ pub struct Record<'a> {
 }
 
 #[derive(Debug)]
-pub struct Record_<'a, M, T>
+pub struct Record_<M, T>
 where
-    M: serde::Serialize + serde::Deserialize<'a>,
+    M: serde::Serialize + serde::de::DeserializeOwned,
     T: Deref<Target = [u8]>,
 {
     pub metadata: M,
     pub value: T,
-
-    _phantom_data: PhantomData<&'a ()>,
 }
 
-impl<'a, M, T> Record_<'a, M, T>
+impl<M, T> Record_<M, T>
 where
-    M: serde::Serialize + serde::Deserialize<'a>,
+    M: serde::Serialize + serde::de::DeserializeOwned,
     T: Deref<Target = [u8]>,
 {
     pub fn new(metadata: M, value: T) -> Self {
-        Self {
-            metadata,
-            value,
-            _phantom_data: PhantomData,
-        }
+        Self { metadata, value }
     }
 }
 

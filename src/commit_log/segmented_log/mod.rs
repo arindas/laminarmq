@@ -95,7 +95,7 @@ where
         store_file_path: P,
         base_offset: u64,
         config: segment::config::SegmentConfig,
-    ) -> Result<Segment<T, S>, segment::SegmentError<T, S>>;
+    ) -> Result<Segment<T, (), S>, segment::SegmentError<T, S>>;
 
     /// Constructs a new segment in the given storage directory with the given base offset and
     /// config.
@@ -108,7 +108,7 @@ where
         storage_dir: P,
         base_offset: u64,
         config: segment::config::SegmentConfig,
-    ) -> Result<Segment<T, S>, segment::SegmentError<T, S>> {
+    ) -> Result<Segment<T, (), S>, segment::SegmentError<T, S>> {
         self.new_segment_with_store_file_path_offset_and_config(
             common::store_file_path(storage_dir, base_offset),
             base_offset,
@@ -189,8 +189,8 @@ where
     S: store::Store<T>,
     SegC: SegmentCreator<T, S>,
 {
-    write_segment: Option<Segment<T, S>>,
-    read_segments: Vec<Segment<T, S>>,
+    write_segment: Option<Segment<T, (), S>>,
+    read_segments: Vec<Segment<T, (), S>>,
 
     storage_directory: PathBuf,
     config: config::SegmentedLogConfig,
@@ -494,10 +494,10 @@ where
         Ok(())
     }
 
-    async fn read_<'record>(
+    async fn read_(
         &self,
         offset: u64,
-    ) -> Result<(Record_<'record, RecordMetadata<()>, T>, u64), SegmentedLogError<T, S>> {
+    ) -> Result<(Record_<RecordMetadata<()>, T>, u64), SegmentedLogError<T, S>> {
         if !self.offset_within_bounds(offset) {
             return Err(SegmentedLogError::OffsetOutOfBounds);
         }
@@ -509,14 +509,14 @@ where
 
         if let Some(read_segment) = read_segment {
             read_segment
-                .read_(offset)
+                .read(offset)
                 .await
                 .map_err(SegmentedLogError::SegmentError)
         } else {
             self.write_segment
                 .as_ref()
                 .ok_or(SegmentedLogError::WriteSegmentLost)?
-                .read_(offset)
+                .read(offset)
                 .await
                 .map_err(SegmentedLogError::SegmentError)
         }
@@ -575,7 +575,7 @@ where
                 .write_segment
                 .as_mut()
                 .ok_or(SegmentedLogError::WriteSegmentLost)?
-                .append_with_metadata(record_bytes, metadata)
+                .append(record_bytes, metadata)
                 .await
                 .map_err(SegmentedLogError::SegmentError),
             BinAlt::B(error) => Err(error),
@@ -752,7 +752,7 @@ pub mod common {
         storage_dir_path: P,
         segment_creator: &SegC,
         segment_config: SegmentConfig,
-    ) -> Result<Vec<Segment<T, S>>, Error<T, S>>
+    ) -> Result<Vec<Segment<T, (), S>>, Error<T, S>>
     where
         T: Deref<Target = [u8]>,
         S: super::store::Store<T>,
@@ -802,8 +802,8 @@ pub mod common {
         storage_dir_path: P,
         segment_creator: &SegC,
         log_config: SegmentedLogConfig,
-        mut segments: Vec<Segment<T, S>>,
-    ) -> Result<(Vec<Segment<T, S>>, Segment<T, S>), Error<T, S>>
+        mut segments: Vec<Segment<T, (), S>>,
+    ) -> Result<(Vec<Segment<T, (), S>>, Segment<T, (), S>), Error<T, S>>
     where
         T: Deref<Target = [u8]>,
         S: super::store::Store<T>,
