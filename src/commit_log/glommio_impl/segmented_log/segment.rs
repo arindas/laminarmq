@@ -32,15 +32,16 @@ pub async fn glommio_segment<M: Default + serde::Serialize + serde::de::Deserial
 mod tests {
     use std::{fs, ops::Deref, path::PathBuf};
 
+    use futures_lite::StreamExt;
+    use futures_util::pin_mut;
     use glommio::{LocalExecutorBuilder, Placement};
 
     use crate::commit_log::{
         segmented_log::{
-            segment::{config::SegmentConfig, SegmentError, SegmentScanner},
+            segment::{config::SegmentConfig, segment_record_stream, SegmentError},
             store::common::RECORD_HEADER_LENGTH,
         },
         segmented_log::{store::common::STORE_FILE_EXTENSION, RecordMetadata},
-        Scanner,
     };
 
     use super::glommio_segment;
@@ -207,15 +208,18 @@ mod tests {
 
                 let records = vec![record_1, record_2];
 
-                let mut segment_scanner = SegmentScanner::new(&segment).unwrap();
-                let mut i = 0;
-                while let Some(record) = segment_scanner.next().await {
-                    assert_eq!(record.metadata.offset, records[i].metadata.offset);
-                    assert_eq!(record.value.deref(), records[i].value.deref());
+                {
+                    let record_stream = segment_record_stream(&segment, segment.base_offset());
+                    pin_mut!(record_stream);
+                    let mut i = 0;
+                    while let Some(record) = record_stream.next().await {
+                        assert_eq!(record.metadata.offset, records[i].metadata.offset);
+                        assert_eq!(record.value.deref(), records[i].value.deref());
 
-                    i += 1;
+                        i += 1;
+                    }
+                    assert_eq!(i, records.len());
                 }
-                assert_eq!(i, records.len());
 
                 assert!(matches!(
                     segment._advance_to_offset(segment.next_offset() + 1),
@@ -237,15 +241,18 @@ mod tests {
                     .await
                     .unwrap();
 
-                let mut segment_scanner = SegmentScanner::new(&segment).unwrap();
-                let mut i = 0;
-                while let Some(record) = segment_scanner.next().await {
-                    assert_eq!(record.metadata.offset, records[i].metadata.offset);
-                    assert_eq!(record.value.deref(), records[i].value.deref());
+                {
+                    let record_stream = segment_record_stream(&segment, segment.base_offset());
+                    pin_mut!(record_stream);
+                    let mut i = 0;
+                    while let Some(record) = record_stream.next().await {
+                        assert_eq!(record.metadata.offset, records[i].metadata.offset);
+                        assert_eq!(record.value.deref(), records[i].value.deref());
 
-                    i += 1;
+                        i += 1;
+                    }
+                    assert_eq!(i, records.len() - 1);
                 }
-                assert_eq!(i, records.len() - 1);
 
                 segment.truncate(segment.base_offset()).await.unwrap();
                 assert_eq!(segment.size(), 0);

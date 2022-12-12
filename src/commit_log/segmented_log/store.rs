@@ -76,19 +76,14 @@ pub fn store_record_stream<'store, T, S>(
 ) -> impl Stream<Item = T> + 'store
 where
     T: Deref<Target = [u8]> + 'store,
-    S::Error: 'store,
     S: Store<T>,
 {
     async_stream::stream! {
         let mut position = from_position;
 
-        while position < store.size() {
-            if let Ok((record, next_position)) = store.read(position).await {
-                yield record;
-                position = next_position;
-            } else {
-                break;
-            }
+        while let Ok((record, next_position)) = store.read(position).await {
+            yield record;
+            position = next_position;
         }
     }
 }

@@ -3,11 +3,11 @@
 
 use std::{fmt::Display, marker::PhantomData, ops::Deref, time::Instant};
 
-use async_trait::async_trait;
+use futures_core::Stream;
 
 use crate::{commit_log::Record_, common::split::SplitAt};
 
-use super::{super::Scanner, store::Store, RecordMetadata};
+use super::{store::Store, RecordMetadata};
 
 /// Error type used for operations on a [`Segment`].
 #[derive(Debug)]
@@ -353,64 +353,22 @@ where
     }
 }
 
-/// Implements [`Scanner`](super::Scanner) for [`Segment`] references.
-pub struct SegmentScanner<'a, T, M, S>
+pub fn segment_record_stream<'segment, T, M, S>(
+    segment: &'segment Segment<T, M, S>,
+    from_offset: u64,
+) -> impl Stream<Item = Record_<RecordMetadata<M>, T>> + 'segment
 where
-    T: Deref<Target = [u8]> + SplitAt<u8>,
+    T: Deref<Target = [u8]> + SplitAt<u8> + 'segment,
     M: Default + serde::Serialize + serde::de::DeserializeOwned,
     S: Store<T>,
 {
-    segment: &'a Segment<T, M, S>,
-    offset: u64,
-}
+    async_stream::stream! {
+        let mut offset = from_offset;
 
-impl<'a, T, M, S> SegmentScanner<'a, T, M, S>
-where
-    T: Deref<Target = [u8]> + SplitAt<u8>,
-    M: Default + serde::Serialize + serde::de::DeserializeOwned,
-    S: Store<T>,
-{
-    /// Creates a new [`SegmentScanner`] that starts reading from the given segments `base_offset`.
-    pub fn new(segment: &'a Segment<T, M, S>) -> Result<Self, SegmentError<T, S>> {
-        Self::with_offset(segment, segment.base_offset())
-    }
-
-    /// Creates a new [`SegmentScanner`] that starts reading from the given offset.
-    ///
-    /// ## Errors
-    /// - [`SegmentError::OffsetOutOfBounds`] if the given `offset >= segment.next_offset()`
-    /// - [`SegmentError::OffsetBeyondCapacity`] if the given offset doesn't map to a valid
-    /// location on the [`Segment`] instances underlying store.
-    pub fn with_offset(
-        segment: &'a Segment<T, M, S>,
-        offset: u64,
-    ) -> Result<Self, SegmentError<T, S>> {
-        if !segment.offset_within_bounds(offset) {
-            Err(SegmentError::OffsetOutOfBounds)
-        } else {
-            Ok(Self { segment, offset })
+        while let Ok((record, next_offset)) = segment.read(offset).await {
+            yield record;
+            offset = next_offset;
         }
-    }
-}
-
-#[async_trait(?Send)]
-impl<'a, T, M, S> Scanner for SegmentScanner<'a, T, M, S>
-where
-    T: Deref<Target = [u8]> + Unpin + SplitAt<u8>,
-    M: Default + serde::Serialize + serde::de::DeserializeOwned,
-    S: Store<T>,
-{
-    type Item = Record_<RecordMetadata<M>, T>;
-
-    async fn next(&mut self) -> Option<Self::Item> {
-        self.segment
-            .read(self.offset)
-            .await
-            .ok()
-            .map(|(record, next_record_offset)| {
-                self.offset = next_record_offset;
-                record
-            })
     }
 }
 
