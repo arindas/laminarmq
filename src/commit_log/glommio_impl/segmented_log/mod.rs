@@ -20,28 +20,38 @@ use store::Store;
 pub struct SegmentCreator;
 
 #[async_trait(?Send)]
-impl BaseSegmentCreator<ReadResult, Store> for SegmentCreator {
+impl<M> BaseSegmentCreator<ReadResult, M, Store> for SegmentCreator
+where
+    M: Default + serde::Serialize + serde::de::DeserializeOwned,
+{
     async fn new_segment_with_store_file_path_offset_and_config<P: AsRef<Path>>(
         &self,
         store_file_path: P,
         base_offset: u64,
         config: SegmentConfig,
-    ) -> Result<Segment<ReadResult, (), Store>, SegmentError<ReadResult, Store>> {
+    ) -> Result<Segment<ReadResult, M, Store>, SegmentError<ReadResult, Store>> {
         segment::glommio_segment(store_file_path, base_offset, config).await
     }
 }
 
 /// Creates a new [`SegmentedLog`] instance specialized for the [`glommio`] runtime.
-pub async fn glommio_segmented_log<P: AsRef<Path>>(
+pub async fn glommio_segmented_log<P, M>(
     path: P,
     config: SegmentedLogConfig,
-) -> Result<SegmentedLog<ReadResult, Store, SegmentCreator>, SegmentedLogError<ReadResult, Store>> {
+) -> Result<SegmentedLog<ReadResult, M, Store, SegmentCreator>, SegmentedLogError<ReadResult, Store>>
+where
+    P: AsRef<Path>,
+    M: Default + serde::Serialize + serde::de::DeserializeOwned,
+{
     SegmentedLog::new(path, config, SegmentCreator).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::glommio_segmented_log;
+    use super::SegmentCreator;
+    use super::SegmentedLog;
+    use super::Store;
     use crate::commit_log::{
         commit_log_record_stream,
         segmented_log::{
@@ -49,11 +59,12 @@ mod tests {
             segment::config::SegmentConfig, store::common::RECORD_HEADER_LENGTH, RecordMetadata,
             SegmentedLogError as LogError,
         },
-        CommitLog, Record,
+        CommitLog,
     };
     use futures_lite::StreamExt;
     use futures_util::pin_mut;
-    use glommio::{LocalExecutorBuilder, Placement};
+    use glommio::{io::ReadResult, LocalExecutorBuilder, Placement};
+    use std::ops::Deref;
     use std::{
         fs,
         path::{Path, PathBuf},
@@ -78,9 +89,10 @@ mod tests {
                     truncate_on_append: false,
                 };
 
-                let log = glommio_segmented_log(STORAGE_DIR_PATH, LOG_CONFIG)
-                    .await
-                    .unwrap();
+                let log: SegmentedLog<ReadResult, (), Store, SegmentCreator> =
+                    glommio_segmented_log(STORAGE_DIR_PATH, LOG_CONFIG)
+                        .await
+                        .unwrap();
 
                 log.close().await.unwrap();
 
@@ -90,9 +102,10 @@ mod tests {
                 ))
                 .exists());
 
-                let log = glommio_segmented_log(STORAGE_DIR_PATH, LOG_CONFIG)
-                    .await
-                    .unwrap();
+                let log: SegmentedLog<ReadResult, (), Store, SegmentCreator> =
+                    glommio_segmented_log(STORAGE_DIR_PATH, LOG_CONFIG)
+                        .await
+                        .unwrap();
 
                 log.remove().await.unwrap();
                 assert!(!PathBuf::from(STORAGE_DIR_PATH).exists());
@@ -128,7 +141,16 @@ mod tests {
                     .await
                     .unwrap();
 
-                let (offset_0, record_0_size) = log.append(RECORD_VALUE).await.unwrap();
+                let (offset_0, record_0_size) = log
+                    .append(
+                        RECORD_VALUE,
+                        RecordMetadata {
+                            offset: log.highest_offset(),
+                            additional_metadata: (),
+                        },
+                    )
+                    .await
+                    .unwrap();
                 assert_eq!(offset_0, log_config.initial_offset);
                 assert_eq!(record_0_size as u64, record_size);
                 // not enough bytes written to trigger sync
@@ -140,32 +162,37 @@ mod tests {
                 for _ in 1..NUM_RECORDS {
                     assert!(log.is_write_segment_maxed().unwrap());
                     // this write will trigger log rotation
-                    let (curr_offset, _) = log.append(RECORD_VALUE).await.unwrap();
+                    let (curr_offset, _) = log
+                        .append(
+                            RECORD_VALUE,
+                            RecordMetadata {
+                                offset: log.highest_offset(),
+                                additional_metadata: (),
+                            },
+                        )
+                        .await
+                        .unwrap();
 
                     let (record, next_record_offset) = log.read(prev_offset).await.unwrap();
-                    assert_eq!(
-                        record,
-                        Record {
-                            value: RECORD_VALUE.into(),
-                            offset: prev_offset
-                        }
-                    );
+                    assert_eq!(record.value.deref(), RECORD_VALUE);
+                    assert_eq!(record.metadata.offset, prev_offset);
                     assert_eq!(next_record_offset, curr_offset);
                     prev_offset = curr_offset;
                 }
 
                 log.close().await.unwrap();
 
-                let log = glommio_segmented_log(STORAGE_DIR_PATH, log_config)
-                    .await
-                    .unwrap();
+                let log: SegmentedLog<ReadResult, (), Store, SegmentCreator> =
+                    glommio_segmented_log(STORAGE_DIR_PATH, log_config)
+                        .await
+                        .unwrap();
 
                 {
                     let record_stream = commit_log_record_stream(&log, log.lowest_offset(), 0);
                     pin_mut!(record_stream);
                     let mut i = 0;
                     while let Some(record) = record_stream.next().await {
-                        assert_eq!(record.value, RECORD_VALUE);
+                        assert_eq!(record.value.deref(), RECORD_VALUE);
                         i += 1;
                     }
                     assert_eq!(i, NUM_RECORDS);
@@ -216,8 +243,16 @@ mod tests {
 
                 for _ in 0..NUM_RECORDS / 2 {
                     // this write will trigger log rotation
-                    (base_offset_of_first_non_expired_segment, _) =
-                        log.append(RECORD_VALUE).await.unwrap();
+                    (base_offset_of_first_non_expired_segment, _) = log
+                        .append(
+                            RECORD_VALUE,
+                            RecordMetadata {
+                                offset: log.highest_offset(),
+                                additional_metadata: (),
+                            },
+                        )
+                        .await
+                        .unwrap();
                 }
 
                 let expiry_duration = Duration::from_millis(200);
@@ -225,7 +260,15 @@ mod tests {
                 glommio::timer::sleep(expiry_duration).await;
 
                 for _ in NUM_RECORDS / 2..NUM_RECORDS {
-                    log.append(RECORD_VALUE).await.unwrap();
+                    log.append(
+                        RECORD_VALUE,
+                        RecordMetadata {
+                            offset: log.highest_offset(),
+                            additional_metadata: (),
+                        },
+                    )
+                    .await
+                    .unwrap();
                 }
 
                 log.remove_expired_segments(expiry_duration).await.unwrap();
@@ -281,18 +324,37 @@ mod tests {
                     .await
                     .unwrap();
 
-                let mut log_1 = glommio_segmented_log(STORAGE_DIR_PATH, log_config)
-                    .await
-                    .unwrap();
+                let mut log_1: SegmentedLog<ReadResult, (), Store, SegmentCreator> =
+                    glommio_segmented_log(STORAGE_DIR_PATH, log_config)
+                        .await
+                        .unwrap();
 
-                log_0.append(RECORD_VALUE).await.unwrap(); // record written but not guranteed to be synced
+                log_0
+                    .append(
+                        RECORD_VALUE,
+                        RecordMetadata {
+                            offset: log_0.highest_offset(),
+                            additional_metadata: (),
+                        },
+                    )
+                    .await
+                    .unwrap(); // record written but not guranteed to be synced
 
                 assert!(matches!(
                     log_1._advance_to_offset(log_0.highest_offset()).await,
                     Err(LogError::OffsetNotValidToAdvanceTo)
                 ));
 
-                log_0.append(RECORD_VALUE).await.unwrap(); // first segment rotation
+                log_0
+                    .append(
+                        RECORD_VALUE,
+                        RecordMetadata {
+                            offset: log_0.highest_offset(),
+                            additional_metadata: (),
+                        },
+                    )
+                    .await
+                    .unwrap(); // first segment rotation
                 let highest_offset_2 = log_0.highest_offset();
 
                 assert!(matches!(
@@ -300,7 +362,16 @@ mod tests {
                     Err(LogError::OffsetNotValidToAdvanceTo)
                 ));
 
-                log_0.append(RECORD_VALUE).await.unwrap(); // second log rotation; 2nd segment synced
+                log_0
+                    .append(
+                        RECORD_VALUE,
+                        RecordMetadata {
+                            offset: log_0.highest_offset(),
+                            additional_metadata: (),
+                        },
+                    )
+                    .await
+                    .unwrap(); // second log rotation; 2nd segment synced
 
                 log_1._advance_to_offset(highest_offset_2).await.unwrap();
 
@@ -315,9 +386,10 @@ mod tests {
 
                 log_1.close().await.unwrap();
 
-                let log = glommio_segmented_log(STORAGE_DIR_PATH, log_config)
-                    .await
-                    .unwrap();
+                let log: SegmentedLog<ReadResult, (), Store, SegmentCreator> =
+                    glommio_segmented_log(STORAGE_DIR_PATH, log_config)
+                        .await
+                        .unwrap();
                 log.remove().await.unwrap();
                 assert!(!PathBuf::from(STORAGE_DIR_PATH).exists());
             })

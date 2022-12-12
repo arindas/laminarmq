@@ -1,10 +1,12 @@
+use crate::commit_log::{segmented_log::RecordMetadata, Record_};
+
 use super::super::{
-    super::{super::common::borrow::BytesCow, single_node::Response, Record},
+    super::{super::common::borrow::BytesCow, single_node::Response},
     single_node::PartitionRequest,
     PartitionId,
 };
 use async_trait::async_trait;
-use std::{collections::HashMap, error::Error, fmt::Display};
+use std::{borrow::Cow, collections::HashMap, error::Error, fmt::Display};
 
 #[derive(Debug)]
 pub struct Partition {
@@ -47,10 +49,13 @@ impl Error for PartitionError {}
 #[async_trait(?Send)]
 impl super::super::Partition for Partition {
     type Error = PartitionError;
-    type Request = PartitionRequest;
-    type Response = Response;
+    type Request = PartitionRequest<Cow<'static, [u8]>>;
+    type Response = Response<Cow<'static, [u8]>>;
 
-    async fn serve_idempotent(&self, request: PartitionRequest) -> Result<Response, Self::Error> {
+    async fn serve_idempotent(
+        &self,
+        request: Self::Request,
+    ) -> Result<Self::Response, Self::Error> {
         match request {
             PartitionRequest::LowestOffset => Ok(Response::LowestOffset(0)),
             PartitionRequest::HighestOffset => Ok(Response::HighestOffset(self.size as u64)),
@@ -60,9 +65,12 @@ impl super::super::Partition for Partition {
                 .map(|x| {
                     let next_offset = offset + x.len() as u64;
                     Response::Read {
-                        record: Record {
+                        record: Record_ {
+                            metadata: RecordMetadata {
+                                offset,
+                                additional_metadata: (),
+                            },
                             value: x.clone().into(),
-                            offset,
                         },
                         next_offset,
                     }
@@ -72,7 +80,7 @@ impl super::super::Partition for Partition {
         }
     }
 
-    async fn serve(&mut self, request: PartitionRequest) -> Result<Response, Self::Error> {
+    async fn serve(&mut self, request: Self::Request) -> Result<Self::Response, Self::Error> {
         match request {
             PartitionRequest::Append { record_bytes } => {
                 let current_offset = self.size as u64;

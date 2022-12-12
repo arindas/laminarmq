@@ -106,6 +106,8 @@ where
 }
 
 pub mod single_node {
+    use std::ops::Deref;
+
     use super::super::{
         partition::{single_node::PartitionRequest, PartitionId},
         single_node::Request,
@@ -117,16 +119,16 @@ pub mod single_node {
         PartitionHierarchy,
     }
 
-    pub enum WorkerRequest {
+    pub enum WorkerRequest<T: Deref<Target = [u8]>> {
         Partition {
             partition: PartitionId,
-            request: PartitionRequest,
+            request: PartitionRequest<T>,
         },
         Processor(ProcessorRequest),
     }
 
-    impl From<Request> for WorkerRequest {
-        fn from(request: Request) -> Self {
+    impl<T: Deref<Target = [u8]>> From<Request<T>> for WorkerRequest<T> {
+        fn from(request: Request<T>) -> Self {
             match request {
                 Request::RemoveExpired {
                     partition,
@@ -166,8 +168,8 @@ pub mod single_node {
         }
     }
 
-    impl From<WorkerRequest> for Request {
-        fn from(worker_request: WorkerRequest) -> Self {
+    impl<T: Deref<Target = [u8]>> From<WorkerRequest<T>> for Request<T> {
+        fn from(worker_request: WorkerRequest<T>) -> Self {
             match worker_request {
                 WorkerRequest::Partition { partition, request } => match request {
                     PartitionRequest::RemoveExpired { expiry_duration } => Self::RemoveExpired {

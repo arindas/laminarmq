@@ -14,13 +14,13 @@ pub mod channel {
     }
 }
 
-pub type Record = crate::commit_log::Record<'static>;
-
 pub mod single_node {
-    use super::{partition::PartitionId, Record};
-    use std::{borrow::Cow, collections::HashMap, time::Duration};
+    use crate::commit_log::{segmented_log::RecordMetadata, Record_};
 
-    pub enum Request {
+    use super::partition::PartitionId;
+    use std::{borrow::Cow, collections::HashMap, ops::Deref, time::Duration};
+
+    pub enum Request<T: Deref<Target = [u8]>> {
         PartitionHierachy,
 
         RemoveExpired {
@@ -37,7 +37,7 @@ pub mod single_node {
         },
         Append {
             partition: PartitionId,
-            record_bytes: Cow<'static, [u8]>,
+            record_bytes: T,
         },
 
         LowestOffset {
@@ -48,14 +48,20 @@ pub mod single_node {
         },
     }
 
-    pub enum Response {
+    pub enum Response<T: Deref<Target = [u8]>> {
         PartitionHierachy(HashMap<Cow<'static, str>, Vec<u64>>),
 
-        Read { record: Record, next_offset: u64 },
+        Read {
+            record: Record_<RecordMetadata<()>, T>,
+            next_offset: u64,
+        },
         LowestOffset(u64),
         HighestOffset(u64),
 
-        Append { write_offset: u64, bytes_written: usize, },
+        Append {
+            write_offset: u64,
+            bytes_written: usize,
+        },
 
         ExpiredRemoved,
         PartitionCreated,

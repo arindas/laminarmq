@@ -11,24 +11,12 @@
 //! In the context of `laminarmq` this module is intended to provide the storage for individual
 //! partitions in a topic.
 
-use std::{borrow::Cow, ops::Deref, time::Duration};
+use std::{ops::Deref, time::Duration};
 
 use async_trait::async_trait;
 use futures_core::Stream;
 
-use self::segmented_log::RecordMetadata;
-
 /// Represents a record in a [`CommitLog`].
-#[derive(serde::Deserialize, serde::Serialize, Debug, PartialEq, Eq, Clone)]
-pub struct Record<'a> {
-    /// Value stored in this record entry. The value itself might be serialized bytes of some other
-    /// form of record.
-    pub value: Cow<'a, [u8]>,
-
-    /// Offset at which this record is stored in the log.
-    pub offset: u64,
-}
-
 #[derive(Debug)]
 pub struct Record_<M, T>
 where
@@ -58,7 +46,11 @@ where
 /// This is useful for storing a sequence of events or operations, which may be used to restore a
 /// system to it's previous or current state.
 #[async_trait(?Send)]
-pub trait CommitLog {
+pub trait CommitLog<M, T>
+where
+    M: serde::Serialize + serde::de::DeserializeOwned,
+    T: Deref<Target = [u8]>,
+{
     /// Error type used by the methods of this trait.
     type Error;
 
@@ -76,26 +68,15 @@ pub trait CommitLog {
 
     /// Appends a new [`Record`] at the end of this [`CommitLog`].
     /// Returns the offset at which the record was written, along with the number of bytes written.
-    async fn append(&mut self, record_bytes: &[u8]) -> Result<(u64, usize), Self::Error> {
-        self.append_with_metadata(
-            record_bytes,
-            RecordMetadata {
-                offset: self.highest_offset(),
-                additional_metadata: (),
-            },
-        )
-        .await
-    }
-
-    async fn append_with_metadata(
+    async fn append(
         &mut self,
         record_bytes: &[u8],
-        metadata: RecordMetadata<()>,
+        metadata: M,
     ) -> Result<(u64, usize), Self::Error>;
 
     /// Reads the [`Record`] at the given offset, along with the offset of the next record from
     /// this [`CommitLog`].
-    async fn read<'record>(&self, offset: u64) -> Result<(Record<'record>, u64), Self::Error>;
+    async fn read(&self, offset: u64) -> Result<(Record_<M, T>, u64), Self::Error>;
 
     /// Remove expired storage used, if any. Default implementation simply returns with [`Ok(())`]
     async fn remove_expired(&mut self, _expiry_duration: Duration) -> Result<(), Self::Error> {
@@ -118,11 +99,15 @@ pub trait CommitLog {
     async fn close(self) -> Result<(), Self::Error>;
 }
 
-pub fn commit_log_record_stream<'log, CL: CommitLog>(
+pub fn commit_log_record_stream<'log, M, T, CL: CommitLog<M, T>>(
     commit_log: &'log CL,
     from_offset: u64,
     scan_seek_bytes: u64,
-) -> impl Stream<Item = Record<'log>> + 'log {
+) -> impl Stream<Item = Record_<M, T>> + 'log
+where
+    M: serde::Serialize + serde::de::DeserializeOwned + 'log,
+    T: Deref<Target = [u8]> + 'log,
+{
     async_stream::stream! {
         let mut offset = from_offset;
 
@@ -156,6 +141,6 @@ pub mod prelude {
             store::Store,
             SegmentCreator, SegmentedLog, SegmentedLogError,
         },
-        CommitLog, Record,
+        CommitLog, Record_,
     };
 }

@@ -1,19 +1,31 @@
+use crate::commit_log::segmented_log::RecordMetadata;
+
 use super::super::{
     super::{super::commit_log::CommitLog, single_node::Response},
     single_node::PartitionRequest,
 };
 use async_trait::async_trait;
-use std::fmt::{Debug, Display};
+use std::{
+    fmt::{Debug, Display},
+    marker::PhantomData,
+    ops::Deref,
+};
 
-pub enum PartitionError<CL: CommitLog> {
+pub enum PartitionError<M, T, CL: CommitLog<M, T>>
+where
+    M: serde::Serialize + serde::de::DeserializeOwned,
+    T: Deref<Target = [u8]>,
+{
     CommitLog(CL::Error),
     NotSupported,
 }
 
-impl<CL> Display for PartitionError<CL>
+impl<M, T, CL> Display for PartitionError<M, T, CL>
 where
+    M: serde::Serialize + serde::de::DeserializeOwned,
+    T: Deref<Target = [u8]>,
     CL::Error: std::error::Error,
-    CL: CommitLog,
+    CL: CommitLog<M, T>,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self {
@@ -23,9 +35,11 @@ where
     }
 }
 
-impl<CL> Debug for PartitionError<CL>
+impl<M, T, CL> Debug for PartitionError<M, T, CL>
 where
-    CL: CommitLog,
+    M: serde::Serialize + serde::de::DeserializeOwned,
+    T: Deref<Target = [u8]>,
+    CL: CommitLog<M, T>,
     CL::Error: std::error::Error,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -36,24 +50,45 @@ where
     }
 }
 
-impl<CL> std::error::Error for PartitionError<CL>
+impl<M, T, CL> std::error::Error for PartitionError<M, T, CL>
 where
-    CL: CommitLog,
+    M: serde::Serialize + serde::de::DeserializeOwned,
+    T: Deref<Target = [u8]>,
+    CL: CommitLog<M, T>,
     CL::Error: std::error::Error,
 {
 }
 
-pub struct Partition<CL: CommitLog>(pub CL);
+pub struct Partition<M, X, T, CL>(pub CL, PhantomData<(M, X, T)>)
+where
+    M: serde::Serialize + serde::de::DeserializeOwned,
+    X: Deref<Target = [u8]>,
+    T: Deref<Target = [u8]>,
+    CL: CommitLog<M, T>;
+
+impl<M, X, T, CL> Partition<M, X, T, CL>
+where
+    M: serde::Serialize + serde::de::DeserializeOwned,
+    X: Deref<Target = [u8]>,
+    T: Deref<Target = [u8]>,
+    CL: CommitLog<M, T>,
+{
+    pub fn new(commit_log: CL) -> Self {
+        Self(commit_log, PhantomData)
+    }
+}
 
 #[async_trait(?Send)]
-impl<CL> super::super::Partition for Partition<CL>
+impl<X, T, CL> super::super::Partition for Partition<RecordMetadata<()>, X, T, CL>
 where
-    CL: CommitLog,
+    X: Deref<Target = [u8]>,
+    T: Deref<Target = [u8]>,
+    CL: CommitLog<RecordMetadata<()>, T>,
     CL::Error: std::error::Error,
 {
-    type Error = PartitionError<CL>;
-    type Request = PartitionRequest;
-    type Response = Response;
+    type Error = PartitionError<RecordMetadata<()>, T, CL>;
+    type Request = PartitionRequest<X>;
+    type Response = Response<T>;
 
     async fn serve_idempotent(
         &self,
@@ -85,7 +120,13 @@ where
                 .map_err(PartitionError::CommitLog),
             PartitionRequest::Append { record_bytes } => self
                 .0
-                .append(&record_bytes)
+                .append(
+                    &record_bytes,
+                    RecordMetadata {
+                        offset: self.0.highest_offset(),
+                        additional_metadata: (),
+                    },
+                )
                 .await
                 .map(|(write_offset, bytes_written)| Response::Append {
                     write_offset,

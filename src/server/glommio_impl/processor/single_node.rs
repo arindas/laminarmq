@@ -14,7 +14,7 @@ use super::{
     partition_consumer,
 };
 use glommio::{sync::RwLock, TaskQueueHandle};
-use std::{borrow::Cow, collections::HashMap, rc::Rc};
+use std::{borrow::Cow, collections::HashMap, ops::Deref, rc::Rc};
 use tracing::{error, error_span, instrument, Instrument};
 
 #[derive(Clone)]
@@ -43,13 +43,16 @@ where
     }
 }
 
-async fn handle_idempotent_requests<
-    P: Partition<Request = PartitionRequest, Response = Response>,
->(
+async fn handle_idempotent_requests<X, T, P>(
     partitions: Rc<RwLock<HashMap<PartitionId, Rc<RwLock<P>>>>>,
     partition_id: PartitionId,
-    request: PartitionRequest,
-) -> TaskResult<Response, P> {
+    request: PartitionRequest<X>,
+) -> TaskResult<Response<T>, P>
+where
+    X: Deref<Target = [u8]>,
+    T: Deref<Target = [u8]>,
+    P: Partition<Request = PartitionRequest<X>, Response = Response<T>>,
+{
     partitions
         .read()
         .await
@@ -64,11 +67,16 @@ async fn handle_idempotent_requests<
         .map_err(TaskError::PartitionError)
 }
 
-async fn handle_requests<P: Partition<Request = PartitionRequest, Response = Response>>(
+async fn handle_requests<X, T, P>(
     partitions: Rc<RwLock<HashMap<PartitionId, Rc<RwLock<P>>>>>,
     partition_id: PartitionId,
-    request: PartitionRequest,
-) -> TaskResult<Response, P> {
+    request: PartitionRequest<X>,
+) -> TaskResult<Response<T>, P>
+where
+    X: Deref<Target = [u8]>,
+    T: Deref<Target = [u8]>,
+    P: Partition<Request = PartitionRequest<X>, Response = Response<T>>,
+{
     partitions
         .read()
         .await
@@ -84,13 +92,15 @@ async fn handle_requests<P: Partition<Request = PartitionRequest, Response = Res
 }
 
 async fn handle_create_partition<
-    P: Partition<Request = PartitionRequest, Response = Response>,
+    X: Deref<Target = [u8]>,
+    T: Deref<Target = [u8]>,
+    P: Partition<Request = PartitionRequest<X>, Response = Response<T>>,
     PC: PartitionCreator<P>,
 >(
     partitions: Rc<RwLock<HashMap<PartitionId, Rc<RwLock<P>>>>>,
     partition_id: PartitionId,
     partition_creator: PC,
-) -> TaskResult<Response, P> {
+) -> TaskResult<Response<T>, P> {
     if partitions
         .read()
         .await
@@ -113,14 +123,17 @@ async fn handle_create_partition<
     Ok(Response::PartitionCreated)
 }
 
-async fn handle_remove_partition<
-    P: Partition<Request = PartitionRequest, Response = Response>,
-    PC: PartitionCreator<P>,
->(
+async fn handle_remove_partition<X, T, P, PC>(
     partitions: Rc<RwLock<HashMap<PartitionId, Rc<RwLock<P>>>>>,
     partition_id: PartitionId,
     partition_creator: PC,
-) -> TaskResult<Response, P> {
+) -> TaskResult<Response<T>, P>
+where
+    X: Deref<Target = [u8]>,
+    T: Deref<Target = [u8]>,
+    P: Partition<Request = PartitionRequest<X>, Response = Response<T>>,
+    PC: PartitionCreator<P>,
+{
     let partition = partitions
         .write()
         .await
@@ -139,9 +152,13 @@ async fn handle_remove_partition<
     .map(|_| Response::PartitionRemoved)
 }
 
-async fn partition_hierachy<P: Partition<Request = PartitionRequest, Response = Response>>(
+async fn partition_hierachy<
+    X: Deref<Target = [u8]>,
+    T: Deref<Target = [u8]>,
+    P: Partition<Request = PartitionRequest<X>, Response = Response<T>>,
+>(
     partitions: Rc<RwLock<HashMap<PartitionId, Rc<RwLock<P>>>>>,
-) -> TaskResult<Response, P> {
+) -> TaskResult<Response<T>, P> {
     let mut topic_to_partitions = HashMap::<Cow<'static, str>, Vec<u64>>::new();
 
     for key in partitions
@@ -160,15 +177,21 @@ async fn partition_hierachy<P: Partition<Request = PartitionRequest, Response = 
     Ok(Response::PartitionHierachy(topic_to_partitions))
 }
 
-impl<P, PC>
-    super::super::super::worker::Processor<P, Request, Response, ResponseSender<Response, P>>
-    for Processor<P, PC>
+impl<X, T, P, PC>
+    super::super::super::worker::Processor<
+        P,
+        Request<X>,
+        Response<T>,
+        ResponseSender<Response<T>, P>,
+    > for Processor<P, PC>
 where
-    P: Partition<Request = PartitionRequest, Response = Response> + 'static,
+    X: Deref<Target = [u8]> + 'static,
+    T: Deref<Target = [u8]> + 'static,
+    P: Partition<Request = PartitionRequest<X>, Response = Response<T>> + 'static,
     PC: PartitionCreator<P> + Clone + 'static,
 {
     #[instrument(skip(self, task))]
-    fn process(&self, task: Task<P, Request, Response, ResponseSender<Response, P>>) {
+    fn process(&self, task: Task<P, Request<X>, Response<T>, ResponseSender<Response<T>, P>>) {
         let (partitions, partition_creator) =
             (self.partitions.clone(), self.partition_creator.clone());
 
@@ -250,6 +273,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::{borrow::Cow, ops::Deref};
+
     use super::{
         super::super::{
             super::super::server::{
@@ -274,13 +299,20 @@ mod tests {
     };
     use glommio::{executor, Latency, LocalExecutorBuilder, Placement, Shares};
 
-    fn new_single_node_task(
-        worker_request: WorkerRequest,
+    fn new_single_node_in_memory_partition_task(
+        worker_request: WorkerRequest<Cow<'static, [u8]>>,
     ) -> (
-        Task<Partition, Request, Response, ResponseSender<Response, Partition>>,
-        ResponseReceiver<Response, Partition>,
+        Task<
+            Partition,
+            Request<Cow<'static, [u8]>>,
+            Response<Cow<'static, [u8]>>,
+            ResponseSender<Response<Cow<'static, [u8]>>, Partition>,
+        >,
+        ResponseReceiver<Response<Cow<'static, [u8]>>, Partition>,
     ) {
-        new_task::<Partition, Request, Response>(worker_request.into())
+        new_task::<Partition, Request<Cow<'static, [u8]>>, Response<Cow<'static, [u8]>>>(
+            worker_request.into(),
+        )
     }
 
     #[test]
@@ -304,10 +336,11 @@ mod tests {
                     partition_number: 2,
                 };
 
-                let (lowest_offset_task, recv) = new_single_node_task(WorkerRequest::Partition {
-                    partition: partition_id_1.clone(),
-                    request: PartitionRequest::LowestOffset,
-                });
+                let (lowest_offset_task, recv) =
+                    new_single_node_in_memory_partition_task(WorkerRequest::Partition {
+                        partition: partition_id_1.clone(),
+                        request: PartitionRequest::LowestOffset,
+                    });
 
                 processor.process(lowest_offset_task);
 
@@ -321,12 +354,12 @@ mod tests {
                 }
 
                 let (create_partition_task_1, recv_1) =
-                    new_single_node_task(WorkerRequest::Processor(
+                    new_single_node_in_memory_partition_task(WorkerRequest::Processor(
                         ProcessorRequest::CreatePartition(partition_id_1.clone()),
                     ));
 
                 let (create_partition_task_2, recv_2) =
-                    new_single_node_task(WorkerRequest::Processor(
+                    new_single_node_in_memory_partition_task(WorkerRequest::Processor(
                         ProcessorRequest::CreatePartition(partition_id_2.clone()),
                     ));
 
@@ -341,7 +374,7 @@ mod tests {
                 let sample_record_bytes: &[u8] = b"Lorem ipsum dolor sit amet.";
 
                 let (append_record_task_1, recv_1) =
-                    new_single_node_task(WorkerRequest::Partition {
+                    new_single_node_in_memory_partition_task(WorkerRequest::Partition {
                         partition: partition_id_1.clone(),
                         request: PartitionRequest::Append {
                             record_bytes: sample_record_bytes.into(),
@@ -362,13 +395,13 @@ mod tests {
                 }
 
                 let (highest_offset_task_1, recv_1) =
-                    new_single_node_task(WorkerRequest::Partition {
+                    new_single_node_in_memory_partition_task(WorkerRequest::Partition {
                         partition: partition_id_1.clone(),
                         request: PartitionRequest::HighestOffset,
                     });
 
                 let (highest_offset_task_2, recv_2) =
-                    new_single_node_task(WorkerRequest::Partition {
+                    new_single_node_in_memory_partition_task(WorkerRequest::Partition {
                         partition: partition_id_2.clone(),
                         request: PartitionRequest::HighestOffset,
                     });
@@ -388,10 +421,11 @@ mod tests {
                     assert!(false, "Wrong response type for HighestOffset request");
                 }
 
-                let (read_record_task_1, recv_1) = new_single_node_task(WorkerRequest::Partition {
-                    partition: partition_id_1.clone(),
-                    request: PartitionRequest::Read { offset: 0 },
-                });
+                let (read_record_task_1, recv_1) =
+                    new_single_node_in_memory_partition_task(WorkerRequest::Partition {
+                        partition: partition_id_1.clone(),
+                        request: PartitionRequest::Read { offset: 0 },
+                    });
 
                 processor.process(read_record_task_1);
 
@@ -400,12 +434,12 @@ mod tests {
                     next_offset: _,
                 })) = recv_1.recv().await
                 {
-                    assert_eq!(record.value, sample_record_bytes);
+                    assert_eq!(record.value.deref(), sample_record_bytes);
                 } else {
                     assert!(false, "Wrong response type for Read request");
                 }
 
-                let (partition_hierachy_task, recv) = new_single_node_task(
+                let (partition_hierachy_task, recv) = new_single_node_in_memory_partition_task(
                     WorkerRequest::Processor(ProcessorRequest::PartitionHierarchy),
                 );
 
@@ -421,12 +455,12 @@ mod tests {
                 }
 
                 let (remove_partition_task_1, recv_1) =
-                    new_single_node_task(WorkerRequest::Processor(
+                    new_single_node_in_memory_partition_task(WorkerRequest::Processor(
                         ProcessorRequest::RemovePartition(partition_id_1.clone()),
                     ));
 
                 let (remove_partition_task_2, recv_2) =
-                    new_single_node_task(WorkerRequest::Processor(
+                    new_single_node_in_memory_partition_task(WorkerRequest::Processor(
                         ProcessorRequest::RemovePartition(partition_id_2.clone()),
                     ));
                 processor.process(remove_partition_task_1);
@@ -437,12 +471,12 @@ mod tests {
 
                 // test drop
                 let (create_partition_task_1, recv_1) =
-                    new_single_node_task(WorkerRequest::Processor(
+                    new_single_node_in_memory_partition_task(WorkerRequest::Processor(
                         ProcessorRequest::CreatePartition(partition_id_1.clone()),
                     ));
 
                 let (create_partition_task_2, recv_2) =
-                    new_single_node_task(WorkerRequest::Processor(
+                    new_single_node_in_memory_partition_task(WorkerRequest::Processor(
                         ProcessorRequest::CreatePartition(partition_id_2.clone()),
                     ));
 

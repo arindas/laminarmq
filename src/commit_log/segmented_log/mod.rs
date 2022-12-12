@@ -22,7 +22,7 @@ use std::{
 
 use crate::common::{binalt::BinAlt, split::SplitAt};
 
-use super::{CommitLog, Record, Record_};
+use super::Record_;
 use segment::Segment;
 
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -83,9 +83,10 @@ where
 
 /// Strategy pattern trait for constructing [`Segment`] instances for [`SegmentedLog`].
 #[async_trait(?Send)]
-pub trait SegmentCreator<T, S>
+pub trait SegmentCreator<T, M, S>
 where
     T: Deref<Target = [u8]> + SplitAt<u8>,
+    M: Default + serde::Serialize + serde::de::DeserializeOwned,
     S: store::Store<T>,
 {
     /// Constructs a new segment with it's store at the given store path, base_offset and
@@ -95,7 +96,7 @@ where
         store_file_path: P,
         base_offset: u64,
         config: segment::config::SegmentConfig,
-    ) -> Result<Segment<T, (), S>, segment::SegmentError<T, S>>;
+    ) -> Result<Segment<T, M, S>, segment::SegmentError<T, S>>;
 
     /// Constructs a new segment in the given storage directory with the given base offset and
     /// config.
@@ -108,7 +109,7 @@ where
         storage_dir: P,
         base_offset: u64,
         config: segment::config::SegmentConfig,
-    ) -> Result<Segment<T, (), S>, segment::SegmentError<T, S>> {
+    ) -> Result<Segment<T, M, S>, segment::SegmentError<T, S>> {
         self.new_segment_with_store_file_path_offset_and_config(
             common::store_file_path(storage_dir, base_offset),
             base_offset,
@@ -183,14 +184,15 @@ where
 /// - If the offset is out of bounds of even the write segment, we return an "out of bounds"
 /// error.
 
-pub struct SegmentedLog<T, S, SegC>
+pub struct SegmentedLog<T, M, S, SegC>
 where
     T: Deref<Target = [u8]> + SplitAt<u8>,
+    M: Default + serde::Serialize + serde::de::DeserializeOwned,
     S: store::Store<T>,
-    SegC: SegmentCreator<T, S>,
+    SegC: SegmentCreator<T, M, S>,
 {
-    write_segment: Option<Segment<T, (), S>>,
-    read_segments: Vec<Segment<T, (), S>>,
+    write_segment: Option<Segment<T, M, S>>,
+    read_segments: Vec<Segment<T, M, S>>,
 
     storage_directory: PathBuf,
     config: config::SegmentedLogConfig,
@@ -208,11 +210,12 @@ macro_rules! write_segment_ref {
     };
 }
 
-impl<T, S, SegC> SegmentedLog<T, S, SegC>
+impl<T, M, S, SegC> SegmentedLog<T, M, S, SegC>
 where
     T: Deref<Target = [u8]> + SplitAt<u8>,
+    M: Default + serde::Serialize + serde::de::DeserializeOwned,
     S: store::Store<T>,
-    SegC: SegmentCreator<T, S>,
+    SegC: SegmentCreator<T, M, S>,
 {
     /// "Moves" the current write segment to the vector of read segments and in its place, a new
     /// write segment is created.
@@ -493,34 +496,6 @@ where
 
         Ok(())
     }
-
-    async fn read_(
-        &self,
-        offset: u64,
-    ) -> Result<(Record_<RecordMetadata<()>, T>, u64), SegmentedLogError<T, S>> {
-        if !self.offset_within_bounds(offset) {
-            return Err(SegmentedLogError::OffsetOutOfBounds);
-        }
-
-        let read_segment = self
-            .read_segments
-            .iter()
-            .find(|x| x.store_position(offset).is_some());
-
-        if let Some(read_segment) = read_segment {
-            read_segment
-                .read(offset)
-                .await
-                .map_err(SegmentedLogError::SegmentError)
-        } else {
-            self.write_segment
-                .as_ref()
-                .ok_or(SegmentedLogError::WriteSegmentLost)?
-                .read(offset)
-                .await
-                .map_err(SegmentedLogError::SegmentError)
-        }
-    }
 }
 
 #[doc(hidden)]
@@ -545,18 +520,44 @@ macro_rules! consume_segments_from_segmented_log_with_method {
 }
 
 #[async_trait(?Send)]
-impl<T, S, SegC> super::CommitLog for SegmentedLog<T, S, SegC>
+impl<T, M, S, SegC> super::CommitLog<RecordMetadata<M>, T> for SegmentedLog<T, M, S, SegC>
 where
     T: Deref<Target = [u8]> + SplitAt<u8>,
+    M: Default + serde::Serialize + serde::de::DeserializeOwned,
     S: store::Store<T>,
-    SegC: SegmentCreator<T, S>,
+    SegC: SegmentCreator<T, M, S>,
 {
     type Error = SegmentedLogError<T, S>;
 
-    async fn append_with_metadata(
+    async fn read(&self, offset: u64) -> Result<(Record_<RecordMetadata<M>, T>, u64), Self::Error> {
+        if !self.offset_within_bounds(offset) {
+            return Err(SegmentedLogError::OffsetOutOfBounds);
+        }
+
+        let read_segment = self
+            .read_segments
+            .iter()
+            .find(|x| x.store_position(offset).is_some());
+
+        if let Some(read_segment) = read_segment {
+            read_segment
+                .read(offset)
+                .await
+                .map_err(SegmentedLogError::SegmentError)
+        } else {
+            self.write_segment
+                .as_ref()
+                .ok_or(SegmentedLogError::WriteSegmentLost)?
+                .read(offset)
+                .await
+                .map_err(SegmentedLogError::SegmentError)
+        }
+    }
+
+    async fn append(
         &mut self,
         record_bytes: &[u8],
-        metadata: RecordMetadata<()>,
+        metadata: RecordMetadata<M>,
     ) -> Result<(u64, usize), Self::Error> {
         while self.is_write_segment_maxed()? {
             self.rotate_new_write_segment().await?
@@ -580,17 +581,6 @@ where
                 .map_err(SegmentedLogError::SegmentError),
             BinAlt::B(error) => Err(error),
         }
-    }
-
-    async fn read<'record>(&self, offset: u64) -> Result<(Record<'record>, u64), Self::Error> {
-        self.read_(offset).await.map(|(record, offset)| {
-            let record = Record {
-                // Invokes clone for every u8. TODO: optimize this away
-                value: record.value.to_vec().into(),
-                offset: record.metadata.offset,
-            };
-            (record, offset)
-        })
     }
 
     async fn truncate(&mut self, offset: u64) -> Result<(), Self::Error> {
@@ -750,15 +740,16 @@ pub mod common {
     /// - [`SegmentedLogError::IoError`]: if there was an error in locating segment files in
     /// the given directory.
     /// - [`SegmentedLogError::SegmentError`]: if there was an error in opening a segment.
-    pub async fn segments_in_directory<T, S, SegC, P: AsRef<Path>>(
+    pub async fn segments_in_directory<T, M, S, SegC, P: AsRef<Path>>(
         storage_dir_path: P,
         segment_creator: &SegC,
         segment_config: SegmentConfig,
-    ) -> Result<Vec<Segment<T, (), S>>, Error<T, S>>
+    ) -> Result<Vec<Segment<T, M, S>>, Error<T, S>>
     where
         T: Deref<Target = [u8]> + SplitAt<u8>,
+        M: Default + serde::Serialize + serde::de::DeserializeOwned,
         S: super::store::Store<T>,
-        SegC: SegmentCreator<T, S>,
+        SegC: SegmentCreator<T, M, S>,
     {
         let segment_args = store_paths_sorted_by_offset(
             obtain_store_files_in_directory(storage_dir_path)
@@ -800,16 +791,17 @@ pub mod common {
     /// (When creating the write segment)
     /// - [SegmentedLogError::WriteSegmentLost]: if the popped last segments from the given
     /// list of segments is `None` when `segments.last()` returned a [`Some(_)`].
-    pub async fn read_and_write_segments<T, S, SegC, P: AsRef<Path>>(
+    pub async fn read_and_write_segments<T, M, S, SegC, P: AsRef<Path>>(
         storage_dir_path: P,
         segment_creator: &SegC,
         log_config: SegmentedLogConfig,
-        mut segments: Vec<Segment<T, (), S>>,
-    ) -> Result<(Vec<Segment<T, (), S>>, Segment<T, (), S>), Error<T, S>>
+        mut segments: Vec<Segment<T, M, S>>,
+    ) -> Result<(Vec<Segment<T, M, S>>, Segment<T, M, S>), Error<T, S>>
     where
         T: Deref<Target = [u8]> + SplitAt<u8>,
+        M: Default + serde::Serialize + serde::de::DeserializeOwned,
         S: super::store::Store<T>,
-        SegC: SegmentCreator<T, S>,
+        SegC: SegmentCreator<T, M, S>,
     {
         Ok(match segments.last() {
             Some(last_segment) if last_segment.is_maxed() => {

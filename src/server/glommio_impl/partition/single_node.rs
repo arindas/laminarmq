@@ -7,6 +7,7 @@ pub mod commit_log {
                     segmented_log::{store::Store, SegmentCreator},
                 },
                 prelude::{glommio_segmented_log, SegmentedLog},
+                segmented_log::RecordMetadata,
             },
             server::partition::{
                 single_node::commit_log::{
@@ -32,15 +33,29 @@ pub mod commit_log {
         #[async_trait(?Send)]
         impl
             crate::server::partition::PartitionCreator<
-                Partition<SegmentedLog<ReadResult, Store, SegmentCreator>>,
+                Partition<
+                    RecordMetadata<()>,
+                    bytes::Bytes,
+                    ReadResult,
+                    SegmentedLog<ReadResult, (), Store, SegmentCreator>,
+                >,
             > for PartitionCreator
         {
             async fn new_partition(
                 &self,
                 partition_id: &PartitionId,
             ) -> Result<
-                Partition<SegmentedLog<ReadResult, Store, SegmentCreator>>,
-                PartitionError<SegmentedLog<ReadResult, Store, SegmentCreator>>,
+                Partition<
+                    RecordMetadata<()>,
+                    bytes::Bytes,
+                    ReadResult,
+                    SegmentedLog<ReadResult, (), Store, SegmentCreator>,
+                >,
+                PartitionError<
+                    RecordMetadata<()>,
+                    ReadResult,
+                    SegmentedLog<ReadResult, (), Store, SegmentCreator>,
+                >,
             > {
                 glommio_segmented_log(
                     partition_storage_path(
@@ -50,7 +65,7 @@ pub mod commit_log {
                     self.partition_config.segmented_log_config,
                 )
                 .await
-                .map(Partition)
+                .map(Partition::new)
                 .map_err(PartitionError::CommitLog)
             }
         }
@@ -76,7 +91,7 @@ pub mod commit_log {
 
             use glommio::{LocalExecutorBuilder, Placement};
 
-            use std::{fs, path::Path, time::Duration};
+            use std::{fs, ops::Deref, path::Path, time::Duration};
 
             #[test]
             fn test_partition() {
@@ -181,7 +196,7 @@ pub mod commit_log {
                             .serve_idempotent(PartitionRequest::Read { offset: 0 })
                             .await
                         {
-                            assert_eq!(record.value, RECORD_BYTES);
+                            assert_eq!(record.value.deref(), RECORD_BYTES);
                         } else {
                             assert!(false, "Wrong response type!");
                         }
@@ -202,7 +217,7 @@ pub mod commit_log {
                                 .serve_idempotent(PartitionRequest::Read { offset })
                                 .await
                             {
-                                assert_eq!(record.value, record_value);
+                                assert_eq!(record.value.deref(), record_value);
                                 offset = next_offset;
                             } else {
                                 assert!(false, "Wrong response type!");

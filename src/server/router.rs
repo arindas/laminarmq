@@ -75,8 +75,11 @@ pub mod single_node {
     pub struct Router(pub HashMap<Method, UriRouter>);
 
     #[async_trait::async_trait(?Send)]
-    impl super::Router<Request> for Router {
-        async fn route(&self, mut req: hyper::Request<hyper::Body>) -> Option<Request> {
+    impl super::Router<Request<bytes::Bytes>> for Router {
+        async fn route(
+            &self,
+            mut req: hyper::Request<hyper::Body>,
+        ) -> Option<Request<bytes::Bytes>> {
             let route_match = self
                 .0
                 .get(req.method())
@@ -106,10 +109,7 @@ pub mod single_node {
                 }),
                 (&Method::POST, &&RequestKind::Append) => Some(Request::Append {
                     partition: partition_id!(topic_id, partition_number),
-                    record_bytes: Into::<Vec<u8>>::into(
-                        hyper::body::to_bytes(req.body_mut()).await.ok()?,
-                    )
-                    .into(),
+                    record_bytes: hyper::body::to_bytes(req.body_mut()).await.ok()?,
                 }),
                 (&Method::GET, &&RequestKind::LowestOffset) => Some(Request::LowestOffset {
                     partition: partition_id!(topic_id, partition_number),
