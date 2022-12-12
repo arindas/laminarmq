@@ -49,17 +49,7 @@ where
 
     /// Reads the record stored at the given position in the [`Store`] along with the position
     /// of the next record.
-    async fn read(&self, position: u64) -> Result<(T, u64), Self::Error> {
-        let (_, record_bytes, next_position) = self.read_with_metadata(position, 0).await?;
-
-        Ok((record_bytes, next_position))
-    }
-
-    async fn read_with_metadata(
-        &self,
-        position: u64,
-        metadata_size: usize,
-    ) -> Result<(T, T, u64), Self::Error>;
+    async fn read(&self, position: u64) -> Result<(T, u64), Self::Error>;
 
     /// Truncates this [`Store`] instance by removing all records after the given position
     /// and makes the given position the size of this store.

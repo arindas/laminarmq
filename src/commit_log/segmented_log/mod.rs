@@ -20,7 +20,7 @@ use std::{
     time::Duration,
 };
 
-use crate::common::binalt::BinAlt;
+use crate::common::{binalt::BinAlt, split::SplitAt};
 
 use super::{CommitLog, Record, Record_};
 use segment::Segment;
@@ -85,7 +85,7 @@ where
 #[async_trait(?Send)]
 pub trait SegmentCreator<T, S>
 where
-    T: Deref<Target = [u8]>,
+    T: Deref<Target = [u8]> + SplitAt<u8>,
     S: store::Store<T>,
 {
     /// Constructs a new segment with it's store at the given store path, base_offset and
@@ -185,7 +185,7 @@ where
 
 pub struct SegmentedLog<T, S, SegC>
 where
-    T: Deref<Target = [u8]>,
+    T: Deref<Target = [u8]> + SplitAt<u8>,
     S: store::Store<T>,
     SegC: SegmentCreator<T, S>,
 {
@@ -210,7 +210,7 @@ macro_rules! write_segment_ref {
 
 impl<T, S, SegC> SegmentedLog<T, S, SegC>
 where
-    T: Deref<Target = [u8]>,
+    T: Deref<Target = [u8]> + SplitAt<u8>,
     S: store::Store<T>,
     SegC: SegmentCreator<T, S>,
 {
@@ -547,7 +547,7 @@ macro_rules! consume_segments_from_segmented_log_with_method {
 #[async_trait(?Send)]
 impl<T, S, SegC> super::CommitLog for SegmentedLog<T, S, SegC>
 where
-    T: Deref<Target = [u8]>,
+    T: Deref<Target = [u8]> + SplitAt<u8>,
     S: store::Store<T>,
     SegC: SegmentCreator<T, S>,
 {
@@ -679,6 +679,8 @@ where
 pub mod common {
     //! Module providing utilities used by [`SegmentedLog`](super::SegmentedLog).
 
+    use crate::common::split::SplitAt;
+
     use super::{
         config::SegmentedLogConfig, segment::config::SegmentConfig,
         store::common::STORE_FILE_EXTENSION, Segment, SegmentCreator, SegmentedLogError,
@@ -754,7 +756,7 @@ pub mod common {
         segment_config: SegmentConfig,
     ) -> Result<Vec<Segment<T, (), S>>, Error<T, S>>
     where
-        T: Deref<Target = [u8]>,
+        T: Deref<Target = [u8]> + SplitAt<u8>,
         S: super::store::Store<T>,
         SegC: SegmentCreator<T, S>,
     {
@@ -805,7 +807,7 @@ pub mod common {
         mut segments: Vec<Segment<T, (), S>>,
     ) -> Result<(Vec<Segment<T, (), S>>, Segment<T, (), S>), Error<T, S>>
     where
-        T: Deref<Target = [u8]>,
+        T: Deref<Target = [u8]> + SplitAt<u8>,
         S: super::store::Store<T>,
         SegC: SegmentCreator<T, S>,
     {

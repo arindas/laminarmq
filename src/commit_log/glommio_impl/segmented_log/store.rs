@@ -2,8 +2,7 @@
 //! implementation for the [`glommio`] runtime.
 
 use std::{
-    cell::Ref, error::Error, fmt::Display, io::ErrorKind, iter::Extend, marker::Unpin, ops::Deref,
-    path::Path,
+    cell::Ref, error::Error, fmt::Display, iter::Extend, marker::Unpin, ops::Deref, path::Path,
 };
 
 use async_trait::async_trait;
@@ -108,13 +107,6 @@ fn stream_writer_with_buffer_size(writer: DmaFile, buffer_size: usize) -> DmaStr
     DmaStreamWriterBuilder::new(writer)
         .with_buffer_size(buffer_size)
         .build()
-}
-
-fn read_result_split_at(read_result: &ReadResult, at: usize) -> Option<(ReadResult, ReadResult)> {
-    let part_0 = ReadResult::slice(read_result, 0, at)?;
-    let part_1 = ReadResult::slice(read_result, at, read_result.len() - at)?;
-
-    Some((part_0, part_1))
 }
 
 /// [`crate::commit_log::store::Store`] implementation for the [`glommio`] runtime.
@@ -269,11 +261,8 @@ impl crate::commit_log::segmented_log::store::Store<ReadResult> for Store {
     /// - [`StoreError::InvalidRecordHeader`]: if the record header is invalid for the bytes in the
     /// [`ReadResult`] instance read from the underlying [`DmaFile`]. (Checksum mismatch or invalid
     /// record length).
-    async fn read_with_metadata(
-        &self,
-        position: u64,
-        metadata_size: usize,
-    ) -> Result<(ReadResult, ReadResult, u64), Self::Error> {
+
+    async fn read(&self, position: u64) -> Result<(ReadResult, u64), Self::Error> {
         let _index = self.record_index(&position)?;
 
         let record_header_bytes = self
@@ -299,14 +288,7 @@ impl crate::commit_log::segmented_log::store::Store<ReadResult> for Store {
 
         let bytes_read = (record_header_bytes.len() + record_bytes.len()) as u64;
 
-        let (metadata, record_bytes) = read_result_split_at(&record_bytes, metadata_size).ok_or(
-            StoreError::SerializationError(std::io::Error::new(
-                ErrorKind::Other,
-                "Invalid metadata size.",
-            )),
-        )?;
-
-        Ok((metadata, record_bytes, position + bytes_read))
+        Ok((record_bytes, position + bytes_read))
     }
 
     async fn truncate(&mut self, position: u64) -> Result<(), Self::Error> {

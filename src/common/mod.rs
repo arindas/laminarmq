@@ -1,5 +1,40 @@
 pub mod cache;
 
+pub mod split {
+    use std::ops::Deref;
+
+    pub trait SplitAt<T>: Deref<Target = [T]> + Sized {
+        fn split_at(self, at: usize) -> Option<(Self, Self)>;
+    }
+
+    impl<T> SplitAt<T> for Vec<T> {
+        fn split_at(mut self, at: usize) -> Option<(Self, Self)> {
+            if at > self.len() {
+                None
+            } else {
+                let other = self.split_off(at);
+                Some((self, other))
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    pub mod glommio_impl {
+        use glommio::io::ReadResult;
+
+        use super::SplitAt;
+
+        impl SplitAt<u8> for ReadResult {
+            fn split_at(self, at: usize) -> Option<(Self, Self)> {
+                Some((
+                    ReadResult::slice(&self, 0, at)?,
+                    ReadResult::slice(&self, at, self.len() - at)?,
+                ))
+            }
+        }
+    }
+}
+
 pub mod borrow {
     use bytes::Bytes;
     use std::{borrow::Cow, ops::Deref};

@@ -5,7 +5,7 @@ use std::{fmt::Display, marker::PhantomData, ops::Deref, time::Instant};
 
 use async_trait::async_trait;
 
-use crate::commit_log::Record_;
+use crate::{commit_log::Record_, common::split::SplitAt};
 
 use super::{super::Scanner, store::Store, RecordMetadata};
 
@@ -105,7 +105,7 @@ where
 /// `next_offset` of the previous write segment.
 pub struct Segment<T, M, S: Store<T>>
 where
-    T: Deref<Target = [u8]>,
+    T: Deref<Target = [u8]> + SplitAt<u8>,
     M: Default + serde::Serialize + serde::de::DeserializeOwned,
 {
     store: S,
@@ -131,7 +131,7 @@ macro_rules! consume_store_from_segment {
 
 impl<T, M, S: Store<T>> Segment<T, M, S>
 where
-    T: Deref<Target = [u8]>,
+    T: Deref<Target = [u8]> + SplitAt<u8>,
     M: Default + serde::Serialize + serde::de::DeserializeOwned,
 {
     /// Creates a segment instance with the given config, base offset and store instance.
@@ -264,11 +264,15 @@ where
         let metadata_size = bincode::serialized_size(&RecordMetadata::<()>::default())
             .map_err(|_| SegmentError::SerializationError)? as usize;
 
-        let (metadata, record_bytes, next_record_position) = self
+        let (record_bytes, next_record_position) = self
             .store
-            .read_with_metadata(position, metadata_size)
+            .read(position)
             .await
             .map_err(SegmentError::StoreError)?;
+
+        let (metadata, record_bytes) = record_bytes
+            .split_at(metadata_size)
+            .ok_or(SegmentError::SerializationError)?;
 
         let metadata =
             bincode::deserialize(&metadata).map_err(|_| SegmentError::SerializationError)?;
@@ -352,7 +356,7 @@ where
 /// Implements [`Scanner`](super::Scanner) for [`Segment`] references.
 pub struct SegmentScanner<'a, T, M, S>
 where
-    T: Deref<Target = [u8]>,
+    T: Deref<Target = [u8]> + SplitAt<u8>,
     M: Default + serde::Serialize + serde::de::DeserializeOwned,
     S: Store<T>,
 {
@@ -362,7 +366,7 @@ where
 
 impl<'a, T, M, S> SegmentScanner<'a, T, M, S>
 where
-    T: Deref<Target = [u8]>,
+    T: Deref<Target = [u8]> + SplitAt<u8>,
     M: Default + serde::Serialize + serde::de::DeserializeOwned,
     S: Store<T>,
 {
@@ -392,7 +396,7 @@ where
 #[async_trait(?Send)]
 impl<'a, T, M, S> Scanner for SegmentScanner<'a, T, M, S>
 where
-    T: Deref<Target = [u8]> + Unpin,
+    T: Deref<Target = [u8]> + Unpin + SplitAt<u8>,
     M: Default + serde::Serialize + serde::de::DeserializeOwned,
     S: Store<T>,
 {
