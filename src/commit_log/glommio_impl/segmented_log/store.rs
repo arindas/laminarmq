@@ -343,15 +343,13 @@ impl crate::commit_log::segmented_log::store::Store<ReadResult> for Store {
 mod tests {
     use std::{ops::Deref, path::PathBuf};
 
+    use futures_util::{pin_mut, StreamExt};
     use glommio::{LocalExecutorBuilder, Placement};
 
     use super::{Store, StoreError};
-    use crate::commit_log::{
-        segmented_log::store::{
-            common::{RECORD_HEADER_LENGTH, STORE_FILE_EXTENSION},
-            Store as BaseStore, StoreScanner,
-        },
-        Scanner,
+    use crate::commit_log::segmented_log::store::{
+        common::{RECORD_HEADER_LENGTH, STORE_FILE_EXTENSION},
+        store_record_stream, Store as BaseStore,
     };
 
     #[inline]
@@ -471,16 +469,20 @@ mod tests {
                     assert_eq!(records_read_before_sync[i].deref(), RECORDS[i]);
                 }
 
-                let mut i = 0;
+                {
+                    let mut i = 0;
 
-                let mut scanner = StoreScanner::new(&store);
-                while let Some(record) = scanner.next().await {
-                    if i == 0 {
-                        assert_eq!(record.deref(), first_record_bytes)
-                    } else {
-                        assert_eq!(record.deref(), RECORDS[i - 1]);
+                    let record_stream = store_record_stream(&store, 0);
+                    pin_mut!(record_stream);
+
+                    while let Some(record) = record_stream.next().await {
+                        if i == 0 {
+                            assert_eq!(record.deref(), first_record_bytes)
+                        } else {
+                            assert_eq!(record.deref(), RECORDS[i - 1]);
+                        }
+                        i += 1;
                     }
-                    i += 1;
                 }
 
                 assert_eq!(store.size() as usize, EXPECTED_STORAGE_SIZE);
@@ -501,18 +503,22 @@ mod tests {
                     Err(StoreError::InvalidReadPosition(_))
                 ));
 
-                let mut i = 0;
+                {
+                    let mut i = 0;
 
-                let mut scanner = StoreScanner::new(&store);
-                while let Some(record) = scanner.next().await {
-                    if i == 0 {
-                        assert_eq!(record.deref(), first_record_bytes)
-                    } else {
-                        assert_eq!(record.deref(), RECORDS[i - 1]);
+                    let record_stream = store_record_stream(&store, 0);
+                    pin_mut!(record_stream);
+
+                    while let Some(record) = record_stream.next().await {
+                        if i == 0 {
+                            assert_eq!(record.deref(), first_record_bytes)
+                        } else {
+                            assert_eq!(record.deref(), RECORDS[i - 1]);
+                        }
+                        i += 1;
                     }
-                    i += 1;
+                    assert_eq!(i, RECORDS.len() + 1);
                 }
-                assert_eq!(i, RECORDS.len() + 1);
 
                 let trunate_index = record_positions_and_sizes.len() / 2;
 
@@ -532,19 +538,22 @@ mod tests {
                     Err(StoreError::InvalidReadPosition(_))
                 ));
 
-                let mut i = 0;
+                {
+                    let mut i = 0;
 
-                let mut scanner = StoreScanner::new(&store);
-                while let Some(record) = scanner.next().await {
-                    if i == 0 {
-                        assert_eq!(record.deref(), first_record_bytes)
-                    } else {
-                        assert_eq!(record.deref(), RECORDS[i - 1]);
+                    let record_stream = store_record_stream(&store, 0);
+                    pin_mut!(record_stream);
+
+                    while let Some(record) = record_stream.next().await {
+                        if i == 0 {
+                            assert_eq!(record.deref(), first_record_bytes)
+                        } else {
+                            assert_eq!(record.deref(), RECORDS[i - 1]);
+                        }
+                        i += 1;
                     }
-                    i += 1;
+                    assert_eq!(i, trunate_index + 1); // account for the first "Hello World!" record.
                 }
-
-                assert_eq!(i, trunate_index + 1); // account for the first "Hello World!" record.
 
                 store.remove().await.unwrap();
             })

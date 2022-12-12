@@ -6,9 +6,8 @@
 //! async runtime and storage media.
 
 use async_trait::async_trait;
-use std::{cell::Ref, marker::PhantomData, ops::Deref, path::Path, result::Result};
-
-use super::super::Scanner;
+use futures_core::Stream;
+use std::{cell::Ref, ops::Deref, path::Path, result::Result};
 
 /// Trait representing a collection of record backed by some form of persistent storage.
 ///
@@ -71,55 +70,26 @@ where
     fn path(&self) -> Result<Ref<Path>, Self::Error>;
 }
 
-/// [`Scanner`](super::Scanner) implementation for a [`Store`].
-pub struct StoreScanner<'a, Record, S>
+pub fn store_record_stream<'store, T, S>(
+    store: &'store S,
+    from_position: u64,
+) -> impl Stream<Item = T> + 'store
 where
-    Record: Deref<Target = [u8]>,
-    S: Store<Record>,
+    T: Deref<Target = [u8]> + 'store,
+    S::Error: 'store,
+    S: Store<T>,
 {
-    store: &'a S,
-    position: u64,
+    async_stream::stream! {
+        let mut position = from_position;
 
-    _phantom_data: PhantomData<Record>,
-}
-
-impl<'a, Record, S> StoreScanner<'a, Record, S>
-where
-    Record: Deref<Target = [u8]>,
-    S: Store<Record>,
-{
-    /// Creates a store scanner instance which reads records starting from the given position.
-    pub fn with_position(store: &'a S, position: u64) -> Self {
-        Self {
-            store,
-            position,
-            _phantom_data: PhantomData,
+        while position < store.size() {
+            if let Ok((record, next_position)) = store.read(position).await {
+                yield record;
+                position = next_position;
+            } else {
+                break;
+            }
         }
-    }
-
-    /// Creates a store scanner instance which reads records from the start.
-    pub fn new(store: &'a S) -> Self {
-        Self::with_position(store, 0)
-    }
-}
-
-#[async_trait(?Send)]
-impl<'a, Record, S> Scanner for StoreScanner<'a, Record, S>
-where
-    Record: Deref<Target = [u8]> + Unpin,
-    S: Store<Record>,
-{
-    type Item = Record;
-
-    async fn next(&mut self) -> Option<Self::Item> {
-        self.store
-            .read(self.position)
-            .await
-            .ok()
-            .map(|(record, next_position)| {
-                self.position = next_position;
-                record
-            })
     }
 }
 
