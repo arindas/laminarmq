@@ -5,7 +5,7 @@ use std::{fmt::Display, marker::PhantomData, ops::Deref, time::Instant};
 
 use futures_core::Stream;
 
-use crate::{commit_log::Record_, common::split::SplitAt};
+use crate::{commit_log::Record, common::split::SplitAt};
 
 use super::{store::Store, RecordMetadata};
 
@@ -252,7 +252,7 @@ where
     pub async fn read(
         &self,
         offset: u64,
-    ) -> Result<(Record_<RecordMetadata<M>, T>, u64), SegmentError<T, S>> {
+    ) -> Result<(Record<RecordMetadata<M>, T>, u64), SegmentError<T, S>> {
         if !self.offset_within_bounds(offset) {
             return Err(SegmentError::OffsetOutOfBounds);
         }
@@ -277,7 +277,7 @@ where
         let metadata =
             bincode::deserialize(&metadata).map_err(|_| SegmentError::SerializationError)?;
 
-        let record = Record_::new(metadata, record_bytes);
+        let record = Record::new(metadata, record_bytes);
 
         Ok((record, self.base_offset() + next_record_position))
     }
@@ -356,7 +356,7 @@ where
 pub fn segment_record_stream<'segment, T, M, S>(
     segment: &'segment Segment<T, M, S>,
     from_offset: u64,
-) -> impl Stream<Item = Record_<RecordMetadata<M>, T>> + 'segment
+) -> impl Stream<Item = Record<RecordMetadata<M>, T>> + 'segment
 where
     T: Deref<Target = [u8]> + SplitAt<u8> + 'segment,
     M: Default + serde::Serialize + serde::de::DeserializeOwned,

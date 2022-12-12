@@ -1,4 +1,4 @@
-use crate::commit_log::{segmented_log::RecordMetadata, Record_};
+use crate::commit_log::{segmented_log::RecordMetadata, Record};
 
 use super::super::{
     super::{super::common::borrow::BytesCow, single_node::Response},
@@ -65,7 +65,7 @@ impl super::super::Partition for Partition {
                 .map(|x| {
                     let next_offset = offset + x.len() as u64;
                     Response::Read {
-                        record: Record_ {
+                        record: Record {
                             metadata: RecordMetadata {
                                 offset,
                                 additional_metadata: (),

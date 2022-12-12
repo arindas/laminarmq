@@ -15,7 +15,7 @@ pub mod channel {
 }
 
 pub mod single_node {
-    use crate::commit_log::{segmented_log::RecordMetadata, Record_};
+    use crate::commit_log::{segmented_log::RecordMetadata, Record};
 
     use super::partition::PartitionId;
     use std::{borrow::Cow, collections::HashMap, ops::Deref, time::Duration};
@@ -52,7 +52,7 @@ pub mod single_node {
         PartitionHierachy(HashMap<Cow<'static, str>, Vec<u64>>),
 
         Read {
-            record: Record_<RecordMetadata<()>, T>,
+            record: Record<RecordMetadata<()>, T>,
             next_offset: u64,
         },
         LowestOffset(u64),

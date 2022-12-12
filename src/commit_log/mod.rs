@@ -18,7 +18,7 @@ use futures_core::Stream;
 
 /// Represents a record in a [`CommitLog`].
 #[derive(Debug)]
-pub struct Record_<M, T>
+pub struct Record<M, T>
 where
     M: serde::Serialize + serde::de::DeserializeOwned,
     T: Deref<Target = [u8]>,
@@ -27,7 +27,7 @@ where
     pub value: T,
 }
 
-impl<M, T> Record_<M, T>
+impl<M, T> Record<M, T>
 where
     M: serde::Serialize + serde::de::DeserializeOwned,
     T: Deref<Target = [u8]>,
@@ -76,7 +76,7 @@ where
 
     /// Reads the [`Record`] at the given offset, along with the offset of the next record from
     /// this [`CommitLog`].
-    async fn read(&self, offset: u64) -> Result<(Record_<M, T>, u64), Self::Error>;
+    async fn read(&self, offset: u64) -> Result<(Record<M, T>, u64), Self::Error>;
 
     /// Remove expired storage used, if any. Default implementation simply returns with [`Ok(())`]
     async fn remove_expired(&mut self, _expiry_duration: Duration) -> Result<(), Self::Error> {
@@ -85,9 +85,7 @@ where
 
     /// Truncates this [`CommitLog`] instance by removing all records starting from the given
     /// offset.
-    async fn truncate(&mut self, _offset: u64) -> Result<(), Self::Error> {
-        Ok(())
-    }
+    async fn truncate(&mut self, _offset: u64) -> Result<(), Self::Error>;
 
     /// Removes all underlying storage files associated. Consumes this [`CommitLog`] instance to
     /// prevent further operations on this instance.
@@ -103,7 +101,7 @@ pub fn commit_log_record_stream<'log, M, T, CL: CommitLog<M, T>>(
     commit_log: &'log CL,
     from_offset: u64,
     scan_seek_bytes: u64,
-) -> impl Stream<Item = Record_<M, T>> + 'log
+) -> impl Stream<Item = Record<M, T>> + 'log
 where
     M: serde::Serialize + serde::de::DeserializeOwned + 'log,
     T: Deref<Target = [u8]> + 'log,
@@ -141,6 +139,6 @@ pub mod prelude {
             store::Store,
             SegmentCreator, SegmentedLog, SegmentedLogError,
         },
-        CommitLog, Record_,
+        CommitLog, Record,
     };
 }

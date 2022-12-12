@@ -20,9 +20,11 @@ use std::{
     time::Duration,
 };
 
-use crate::common::{binalt::BinAlt, split::SplitAt};
+use crate::{
+    commit_log::Record,
+    common::{binalt::BinAlt, split::SplitAt},
+};
 
-use super::Record_;
 use segment::Segment;
 
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -529,7 +531,7 @@ where
 {
     type Error = SegmentedLogError<T, S>;
 
-    async fn read(&self, offset: u64) -> Result<(Record_<RecordMetadata<M>, T>, u64), Self::Error> {
+    async fn read(&self, offset: u64) -> Result<(Record<RecordMetadata<M>, T>, u64), Self::Error> {
         if !self.offset_within_bounds(offset) {
             return Err(SegmentedLogError::OffsetOutOfBounds);
         }
