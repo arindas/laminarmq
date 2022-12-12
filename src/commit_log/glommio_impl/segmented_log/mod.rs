@@ -43,13 +43,16 @@ pub async fn glommio_segmented_log<P: AsRef<Path>>(
 mod tests {
     use super::glommio_segmented_log;
     use crate::commit_log::{
+        commit_log_record_stream,
         segmented_log::{
             common::store_file_path, config::SegmentedLogConfig as LogConfig,
             segment::config::SegmentConfig, store::common::RECORD_HEADER_LENGTH, RecordMetadata,
             SegmentedLogError as LogError,
         },
-        CommitLog, LogScanner, Record, Scanner,
+        CommitLog, Record,
     };
+    use futures_lite::StreamExt;
+    use futures_util::pin_mut;
     use glommio::{LocalExecutorBuilder, Placement};
     use std::{
         fs,
@@ -157,13 +160,16 @@ mod tests {
                     .await
                     .unwrap();
 
-                let mut log_scanner = LogScanner::new(&log).unwrap();
-                let mut i = 0;
-                while let Some(record) = log_scanner.next().await {
-                    assert_eq!(record.value, RECORD_VALUE);
-                    i += 1;
+                {
+                    let record_stream = commit_log_record_stream(&log, log.lowest_offset(), 0);
+                    pin_mut!(record_stream);
+                    let mut i = 0;
+                    while let Some(record) = record_stream.next().await {
+                        assert_eq!(record.value, RECORD_VALUE);
+                        i += 1;
+                    }
+                    assert_eq!(i, NUM_RECORDS);
                 }
-                assert_eq!(i, NUM_RECORDS);
 
                 assert!(matches!(
                     log.read(log.highest_offset()).await,

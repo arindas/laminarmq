@@ -14,6 +14,7 @@
 use std::{borrow::Cow, ops::Deref, time::Duration};
 
 use async_trait::async_trait;
+use futures_core::Stream;
 
 use self::segmented_log::RecordMetadata;
 
@@ -46,17 +47,6 @@ where
     pub fn new(metadata: M, value: T) -> Self {
         Self { metadata, value }
     }
-}
-
-/// Abstraction for representing all types that can asynchronously linearly scanned for items.
-#[async_trait(?Send)]
-pub trait Scanner {
-    /// The items scanned out by this scanner.
-    type Item;
-
-    /// Returns the next item in this scanner asynchronously. A `None` value indicates that no items
-    /// are left to be scanned.
-    async fn next(&mut self) -> Option<Self::Item>;
 }
 
 /// An ordered sequential collection of [`Record`] instances.
@@ -128,71 +118,22 @@ pub trait CommitLog {
     async fn close(self) -> Result<(), Self::Error>;
 }
 
-/// [`Scanner`] implementation for a [`CommitLog`] implementation.
-pub struct LogScanner<'a, Log: CommitLog> {
-    log: &'a Log,
-    offset: u64,
+pub fn commit_log_record_stream<'log, CL: CommitLog>(
+    commit_log: &'log CL,
+    from_offset: u64,
     scan_seek_bytes: u64,
-}
+) -> impl Stream<Item = Record<'log>> + 'log {
+    async_stream::stream! {
+        let mut offset = from_offset;
 
-impl<'a, Log: CommitLog> LogScanner<'a, Log> {
-    /// Creates a new [`LogScanner`] from the given [`CommitLog`] implementation immutable reference.
-    ///
-    /// ## Default parameters values used
-    /// - `offset`: `log.lowest_offset()`
-    /// - `scan_seek_bytes`: `8`
-    pub fn new(log: &'a Log) -> Option<Self> {
-        Self::with_offset_and_scan_seek_bytes(log, log.lowest_offset(), 8)
-    }
-
-    /// Creates a new [`LogScanner`] scanner instance with the given parameters.
-    ///
-    /// ## Parameters
-    /// - `log`: an immutable reference to a [`CommitLog`] implementation instance.
-    /// - `offset`: offset from which to start reading from.
-    /// - `scan_seek_bytes`: number of bytes to seek at a time to search for next record, if a read
-    /// operation fails in the middle.
-    pub fn with_offset_and_scan_seek_bytes(
-        log: &'a Log,
-        offset: u64,
-        scan_seek_bytes: u64,
-    ) -> Option<Self> {
-        if !log.offset_within_bounds(offset) {
-            None
-        } else {
-            Some(LogScanner {
-                log,
-                offset,
-                scan_seek_bytes,
-            })
-        }
-    }
-}
-
-#[async_trait(?Send)]
-impl<'a, Log: CommitLog> Scanner for LogScanner<'a, Log> {
-    type Item = Record<'a>;
-
-    /// Linearly scans and reads the next record in the [`CommitLog`] instance asynchronously. If
-    /// the read operation fails, it searches for the next readable offset by seeking with the
-    /// configured `scan_seek_bytes`.
-    ///
-    /// It stops when the internal offset of this scanner reaches the commit log's highest offset.
-    ///
-    /// ## Returns
-    /// - [`Some(Record)`]: if a record is there to be read.
-    /// - None: to indicate that are there are no more records to read.
-    async fn next(&mut self) -> Option<Self::Item> {
-        while self.offset < self.log.highest_offset() {
-            if let Ok((record, next_record_offset)) = self.log.read(self.offset).await {
-                self.offset = next_record_offset;
-                return Some(record);
+        while offset < commit_log.highest_offset() {
+            if let Ok((record, next_record_offset)) = commit_log.read(offset).await {
+                offset = next_record_offset;
+                yield record;
             } else {
-                self.offset += self.scan_seek_bytes;
+                offset += scan_seek_bytes;
             }
         }
-
-        None
     }
 }
 
@@ -215,6 +156,6 @@ pub mod prelude {
             store::Store,
             SegmentCreator, SegmentedLog, SegmentedLogError,
         },
-        CommitLog, LogScanner, Record, Scanner,
+        CommitLog, Record,
     };
 }
