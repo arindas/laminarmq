@@ -261,7 +261,7 @@ where
             .store_position(offset)
             .ok_or(SegmentError::OffsetBeyondCapacity)?;
 
-        let metadata_size = bincode::serialized_size(&RecordMetadata::<()>::default())
+        let metadata_size = bincode::serialized_size(&RecordMetadata::<M>::default())
             .map_err(|_| SegmentError::SerializationError)? as usize;
 
         let (record_bytes, next_record_position) = self
