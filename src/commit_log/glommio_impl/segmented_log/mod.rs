@@ -48,10 +48,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::glommio_segmented_log;
-    use super::SegmentCreator;
-    use super::SegmentedLog;
-    use super::Store;
+    use super::{glommio_segmented_log, SegmentCreator, SegmentedLog, SegmentedLogError, Store};
     use crate::commit_log::{
         commit_log_record_stream,
         segmented_log::{
@@ -140,6 +137,18 @@ mod tests {
                 let mut log = glommio_segmented_log(STORAGE_DIR_PATH, log_config)
                     .await
                     .unwrap();
+
+                assert!(matches!(
+                    log.append(
+                        RECORD_VALUE,
+                        RecordMetadata {
+                            offset: log.highest_offset() + 1,
+                            additional_metadata: ()
+                        }
+                    )
+                    .await,
+                    Err(SegmentedLogError::OffsetOutOfBounds)
+                ));
 
                 let (offset_0, record_0_size) = log
                     .append(
@@ -394,6 +403,106 @@ mod tests {
                 assert!(!PathBuf::from(STORAGE_DIR_PATH).exists());
             })
             .unwrap();
+        local_ex.join().unwrap();
+    }
+
+    #[test]
+    fn test_log_truncate_and_truncate_on_append() {
+        const STORAGE_DIR_PATH: &str =
+            "/tmp/laminarmq_log_test_log_truncate_and_truncate_on_append";
+        if Path::new(STORAGE_DIR_PATH).exists() {
+            fs::remove_dir_all(STORAGE_DIR_PATH).unwrap();
+        }
+
+        let local_ex = LocalExecutorBuilder::new(Placement::Unbound)
+            .spawn(move || async move {
+                const RECORD_VALUE: &[u8] = b"Hello world!";
+                let record_size = bincode::serialized_size(&RecordMetadata::<()>::default())
+                    .unwrap()
+                    + (RECORD_VALUE.len() + RECORD_HEADER_LENGTH) as u64;
+
+                const INITIAL_OFFSET: u64 = 457;
+
+                let log_config = LogConfig {
+                    initial_offset: INITIAL_OFFSET,
+                    segment_config: SegmentConfig {
+                        store_buffer_size: None,
+                        max_store_bytes: record_size,
+                    },
+                    truncate_on_append: true,
+                };
+
+                let mut log = glommio_segmented_log::<&str, ()>(STORAGE_DIR_PATH, log_config)
+                    .await
+                    .unwrap();
+
+                const NUM_RECORDS: usize = 11;
+                let mut record_offsets: [u64; NUM_RECORDS] = [0; NUM_RECORDS];
+
+                let mut i = 0;
+                while i < NUM_RECORDS {
+                    let (offset, _) = log
+                        .append(
+                            RECORD_VALUE,
+                            RecordMetadata {
+                                offset: log.highest_offset(),
+                                additional_metadata: (),
+                            },
+                        )
+                        .await
+                        .unwrap();
+                    record_offsets[i] = offset;
+                    i += 1;
+                }
+
+                assert!(record_offsets[NUM_RECORDS - 1] > 0);
+
+                const RECORD_INDEX_TO_REAPPEND: usize = NUM_RECORDS * 2 / 3;
+
+                let (new_record_offset, new_highest_offset) = (
+                    record_offsets[RECORD_INDEX_TO_REAPPEND],
+                    record_offsets[RECORD_INDEX_TO_REAPPEND + 1],
+                );
+
+                log.append(
+                    RECORD_VALUE,
+                    RecordMetadata {
+                        offset: new_record_offset,
+                        additional_metadata: (),
+                    },
+                )
+                .await
+                .unwrap();
+
+                assert_eq!(log.highest_offset(), new_highest_offset);
+
+                log.close().await.unwrap();
+
+                let mut log = glommio_segmented_log::<&str, ()>(STORAGE_DIR_PATH, log_config)
+                    .await
+                    .unwrap();
+
+                assert_eq!(log.highest_offset(), new_highest_offset);
+
+                log.truncate(log.lowest_offset()).await.unwrap();
+
+                assert_eq!(log.lowest_offset(), INITIAL_OFFSET);
+                assert_eq!(log.highest_offset(), INITIAL_OFFSET);
+
+                log.append(
+                    RECORD_VALUE,
+                    RecordMetadata {
+                        offset: log.highest_offset(),
+                        additional_metadata: (),
+                    },
+                )
+                .await
+                .unwrap();
+
+                log.remove().await.unwrap();
+            })
+            .unwrap();
+
         local_ex.join().unwrap();
     }
 }
