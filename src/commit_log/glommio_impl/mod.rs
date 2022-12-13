@@ -20,7 +20,7 @@
 //!
 //!         let storage_dir_path = "/tmp/laminarmq_commit_log_glommio_impl_segmented_log";
 //!
-//!         let log = glommio_segmented_log::<&'static str, ()>(storage_dir_path, LOG_CONFIG)
+//!         let log = glommio_segmented_log::<&str, ()>(storage_dir_path, LOG_CONFIG)
 //!             .await
 //!             .unwrap();
 //!
@@ -32,7 +32,7 @@
 //!         ))
 //!         .exists());
 //!
-//!         let log = glommio_segmented_log::<&'static str, ()>(storage_dir_path, LOG_CONFIG)
+//!         let log = glommio_segmented_log::<&str, ()>(storage_dir_path, LOG_CONFIG)
 //!             .await
 //!             .unwrap();
 //!
