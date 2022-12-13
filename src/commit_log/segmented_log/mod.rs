@@ -20,10 +20,7 @@ use std::{
     time::Duration,
 };
 
-use crate::{
-    commit_log::Record,
-    common::{binalt::BinAlt, split::SplitAt},
-};
+use crate::{commit_log::Record, common::split::SplitAt};
 
 use segment::Segment;
 
@@ -566,22 +563,22 @@ where
         }
 
         match match metadata.offset.cmp(&self.highest_offset()) {
-            Ordering::Greater => BinAlt::B(SegmentedLogError::OffsetOutOfBounds),
-            Ordering::Equal => BinAlt::A(()),
+            Ordering::Greater => Err(SegmentedLogError::OffsetOutOfBounds),
+            Ordering::Equal => Ok(()),
             Ordering::Less if self.config.truncate_on_append => {
                 self.truncate(metadata.offset).await?;
-                BinAlt::A(())
+                Ok(())
             }
-            Ordering::Less => BinAlt::B(SegmentedLogError::OffsetOutOfBounds),
+            Ordering::Less => Err(SegmentedLogError::OffsetOutOfBounds),
         } {
-            BinAlt::A(_) => self
+            Ok(_) => self
                 .write_segment
                 .as_mut()
                 .ok_or(SegmentedLogError::WriteSegmentLost)?
                 .append(record_bytes, metadata)
                 .await
                 .map_err(SegmentedLogError::SegmentError),
-            BinAlt::B(error) => Err(error),
+            Err(error) => Err(error),
         }
     }
 
