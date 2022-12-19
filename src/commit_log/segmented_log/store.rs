@@ -70,6 +70,8 @@ where
     fn path(&self) -> Result<Ref<Path>, Self::Error>;
 }
 
+/// Returns [`Stream`] of "record"(s) stored in this [`Store`] starting from the given position
+/// in FIFO order.
 pub fn store_record_stream<'store, T, S>(
     store: &'store S,
     from_position: u64,
@@ -117,6 +119,9 @@ pub mod common {
     }
 
     impl RecordHeader {
+        /// Creates a new [`RecordHeader`] instances from a multi-part record.
+        /// The length is obtained from the sum of the length of all the parts, while the checksum
+        /// is obtained by updating the hasher with one part at a time.
         pub fn from_record_parts(record_parts: &[&[u8]]) -> Self {
             let mut hasher = crc32fast::Hasher::new();
             let mut length = 0;

@@ -277,9 +277,13 @@ where
         let metadata =
             bincode::deserialize(&metadata).map_err(|_| SegmentError::SerializationError)?;
 
-        let record = Record::new(metadata, record_bytes);
-
-        Ok((record, self.base_offset() + next_record_position))
+        Ok((
+            Record {
+                metadata,
+                value: record_bytes,
+            },
+            self.base_offset() + next_record_position,
+        ))
     }
 
     /// Advances this [`Segment`] instance's `next_offset` value to the given value.
@@ -353,6 +357,8 @@ where
     }
 }
 
+/// Returns a [`Stream`] of [`Record`](s) in the given [`Segment`] starting from the given
+/// offset in FIFO order.
 pub fn segment_record_stream<'segment, T, M, S>(
     segment: &'segment Segment<T, M, S>,
     from_offset: u64,

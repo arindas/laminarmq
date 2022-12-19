@@ -27,16 +27,6 @@ where
     pub value: T,
 }
 
-impl<M, T> Record<M, T>
-where
-    M: serde::Serialize + serde::de::DeserializeOwned,
-    T: Deref<Target = [u8]>,
-{
-    pub fn new(metadata: M, value: T) -> Self {
-        Self { metadata, value }
-    }
-}
-
 /// An ordered sequential collection of [`Record`] instances.
 ///
 /// A [`Record`] in an [`CommitLog`] is addressed with an unique [`u64`] offset, which denotes it
@@ -66,8 +56,16 @@ where
         offset >= self.lowest_offset() && offset < self.highest_offset()
     }
 
-    /// Appends a new [`Record`] at the end of this [`CommitLog`].
-    /// Returns the offset at which the record was written, along with the number of bytes written.
+    /// Appends a new [`Record`], containing the given record bytes and with the given metadata at
+    /// the end of this [`CommitLog`].
+    ///
+    /// ### Returns:
+    /// The offset at which the record was written, along with the number of bytes written.
+    ///
+    /// ### Errors
+    /// Possible errors arising in implementations could include:
+    /// - Invalid record metadata
+    /// - Errors from underlying storage media
     async fn append(
         &mut self,
         record_bytes: &[u8],
@@ -76,27 +74,63 @@ where
 
     /// Reads the [`Record`] at the given offset, along with the offset of the next record from
     /// this [`CommitLog`].
+    ///
+    /// ### Returns:
+    /// A tuple containing the [`Record`] instance along with the [u64] offset.
+    ///
+    /// ### Errors:
+    /// Possible errors arising in implementations could include:
+    /// - Invalid read offset
+    /// - Errors from underlying storage media
     async fn read(&self, offset: u64) -> Result<(Record<M, T>, u64), Self::Error>;
 
     /// Remove expired storage used, if any. Default implementation simply returns with [`Ok(())`]
+    ///
+    /// ### Errors:
+    /// Possible errors arising in implementations could include errors during remooval of files.
     async fn remove_expired(&mut self, _expiry_duration: Duration) -> Result<(), Self::Error> {
         Ok(())
     }
 
     /// Truncates this [`CommitLog`] instance by removing all records starting from the given
-    /// offset.
+    /// offset. The offset is expected to be at the start or end of a record.
+    ///
+    /// ### Errors:
+    /// Possible errors arising in implementations could include:
+    /// - Invalid truncateion offset (offset out of bounds or in the middle of a record)
+    /// - Errors from underlying storage media during remooval of backing files.
     async fn truncate(&mut self, _offset: u64) -> Result<(), Self::Error>;
 
     /// Removes all underlying storage files associated. Consumes this [`CommitLog`] instance to
     /// prevent further operations on this instance.
+    ///
+    /// ### Errors:
+    /// Possible errors arising in implementations could include:
+    /// - Errors from underlying storage media during removal of backing files.
     async fn remove(self) -> Result<(), Self::Error>;
 
     /// Closes the files associated with this [`CommitLog`] instances and syncs them to storage
     /// media. Consumes this [`CommitLog`] instance to  prevent further operations on this
     /// instance.
+    ///
+    /// ### Errors:
+    /// Possible errors arising in implementations could include:
+    /// - Errors from underlying storage media when syncing and closing files.
     async fn close(self) -> Result<(), Self::Error>;
 }
 
+/// Returns a [`Stream`] of [`Record`] instances from the records stored in this [`CommitLog`]
+/// implementation instance. This function reads records starting from the given offset linearly
+/// upto the [`CommitLog::highest_offset`] of this commit log.
+///
+/// ### Params:
+/// `commit_log`: The [`CommitLog`] implementation instance to read records from.
+/// `from_offset`: The offset from which to start reading records.
+/// `scan_seek_bytes`: The number of bytes to seek forward and scan for valid records when an
+/// error occurs.
+///
+/// ### Returns:
+/// A [`Stream`] containing the [`Record`](s) in this commit log in FIFO order.
 pub fn commit_log_record_stream<'log, M, T, CL: CommitLog<M, T>>(
     commit_log: &'log CL,
     from_offset: u64,
