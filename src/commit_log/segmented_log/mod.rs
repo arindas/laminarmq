@@ -682,7 +682,7 @@ pub mod common {
 
     type Error<T, S> = SegmentedLogError<T, S>;
 
-    /// Returns the backing [`Store`](crate::commit_log::store::Store) file path, with the
+    /// Returns the backing [`Store`](super::store::Store) file path, with the
     /// given Log storage directory and the given segment base offset.
     #[inline]
     pub fn store_file_path<P: AsRef<Path>>(storage_dir_path: P, offset: u64) -> PathBuf {
@@ -693,7 +693,7 @@ pub mod common {
         ))
     }
 
-    /// Returns an iterator of the paths of all the [`crate::commit_log::store::Store`] backing
+    /// Returns an iterator of the paths of all the [`super::store::Store`] backing
     /// files in the given directory.
     ///
     /// ## Errors

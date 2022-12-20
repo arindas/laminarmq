@@ -64,7 +64,7 @@ where
 
 /// Cross platform storage abstraction used for reading and writing [`Record`](super::Record) instances
 /// from [`Store`](super::store::Store) implementations. It also acts the unit of storage in a
-/// [`SegmentedLog`](super::segmented_log::SegmentedLog).
+/// [`SegmentedLog`](super::SegmentedLog).
 ///
 /// [`Segment`] uses binary encoding with [`bincode`] for serializing [`Record`](super::Record)s.
 ///
@@ -357,7 +357,7 @@ where
     }
 }
 
-/// Returns a [`Stream`] of [`Record`](s) in the given [`Segment`] starting from the given
+/// Returns a [`Stream`] of [`Record`]`s` in the given [`Segment`] starting from the given
 /// offset in FIFO order.
 pub fn segment_record_stream<'segment, T, M, S>(
     segment: &'segment Segment<T, M, S>,

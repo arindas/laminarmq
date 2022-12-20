@@ -109,7 +109,7 @@ fn stream_writer_with_buffer_size(writer: DmaFile, buffer_size: usize) -> DmaStr
         .build()
 }
 
-/// [`crate::commit_log::store::Store`] implementation for the [`glommio`] runtime.
+/// [`crate::commit_log::segmented_log::store::Store`] implementation for the [`glommio`] runtime.
 ///
 /// This implementation uses directly mapped files to leverage `io_uring` powered operations. A
 /// [`Store`] consists of a [`DmaFile`] reader and [`DmaStreamWriter`], both of which point to the

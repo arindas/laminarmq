@@ -1,10 +1,10 @@
 //! <p align="center">
-//!   <img src="https://github.com/arindas/laminarmq/raw/main/assets/logo.png" alt="laminarmq">
+//!   <img src="https://i.imgur.com/6YqsbMq.png" alt="laminarmq">
 //! </p>
 //!
 //! <p align="center">
-//!   <a href="https://github.com/arindas/generational-lru/actions/workflows/ci.yml">
-//!   <img src="https://github.com/arindas/generational-lru/actions/workflows/ci.yml/badge.svg" />
+//!   <a href="https://github.com/arindas/laminarmq/actions/workflows/ci.yml">
+//!   <img src="https://github.com/arindas/laminarmq/actions/workflows/ci.yml/badge.svg" />
 //!   </a>
 //!   <a href="https://codecov.io/gh/arindas/laminarmq" >
 //!   <img src="https://codecov.io/gh/arindas/laminarmq/branch/main/graph/badge.svg?token=6VLETF5REC"/>
@@ -12,8 +12,8 @@
 //!   <a href="https://crates.io/crates/laminarmq">
 //!   <img src="https://img.shields.io/crates/v/laminarmq" />
 //!   </a>
-//!   <a href="https://github.com/arindas/generational-lru/actions/workflows/rustdoc.yml">
-//!   <img src="https://github.com/arindas/generational-lru/actions/workflows/rustdoc.yml/badge.svg" />
+//!   <a href="https://github.com/arindas/laminarmq/actions/workflows/rustdoc.yml">
+//!   <img src="https://github.com/arindas/laminarmq/actions/workflows/rustdoc.yml/badge.svg" />
 //!   </a>
 //! </p>
 //!
@@ -31,31 +31,28 @@
 //! ```
 //!
 //! The current implementation based on [`glommio`](https://docs.rs/glommio) runs only on linux. `glommio` requires
-//! `io_uring` support in the linux kernel.
-//! >Glommio requires a kernel with a recent enough `io_uring` support, at least current enough to run discovery probes. The
-//! >minimum version at this time is 5.8.
-//! >
-//! >Please also note Glommio requires at least 512 KiB of locked memory for `io_uring` to work. You can increase the
-//! >`memlock` resource limit (rlimit) as follows:
-//! >
-//! >```sh
-//! >$ vi /etc/security/limits.conf
-//! >*    hard    memlock        512
-//! >*    soft    memlock        512
-//! >```
-//! >
-//! >> Please note that 512 KiB is the minimum needed to spawn a single executor. Spawning multiple executors may require you
-//! >> to raise the limit accordingly.
-//! >To make the new limits effective, you need to log in to the machine again. You can verify that the limits are updated by
-//! >running the following:
-//! >
-//! >```sh
-//! >$ ulimit -l
-//! >512
-//! >```
+//! `io_uring` support in the linux kernel. `glommio` requires a kernel with a recent enough `io_uring` support, at
+//! least current enough to run discovery probes. The minimum version at this time is 5.8.
 //!
-//! Refer to latest git [API Documentation](https://arindas.github.io/laminarmq/laminarmq/)
-//! or [Crate Documentation](https://docs.rs/laminarmq) for more details.
+//! Please also note Glommio requires at least 512 KiB of locked memory for `io_uring` to work. You can increase
+//! the `memlock` resource limit (rlimit) as follows:
+//!
+//! ```text
+//! $ vi /etc/security/limits.conf
+//! *    hard    memlock        512
+//! *    soft    memlock        512
+//! ```
+//!
+//! Please note that 512 KiB is the minimum needed to spawn a single executor. Spawning multiple executors may
+//! require you to raise the limit accordingly.
+//!
+//! To make the new limits effective, you need to log in to the machine again. You can verify that the limits
+//! are updated by running the following:
+//!
+//! ```text
+//! $ ulimit -l
+//! 512
+//! ```
 //!
 //! `laminarmq` presents an elementary commit-log abstraction (a series of records ordered by offsets), on top of which
 //! several message queue semantics such as publish subscribe or even full blown protocols like MQTT could be implemented.
@@ -63,7 +60,7 @@
 //!
 //! ## Execution Model
 //!
-//! ![execution-model](https://github.com/arindas/laminarmq/raw/feature/server/assets/diagrams/laminarmq-execution-model.png)
+//! ![execution-model](https://i.imgur.com/8QrCjD2.png)
 //!
 //! `laminarmq` uses the thread-per-core execution model where individual processor cores are limited to single threads.
 //! This model encourages design that minimizes inter-thread contention and locks, thereby improving tail latencies in
@@ -98,12 +95,12 @@
 //! can then freely read the results from the completion-queue. This entire process after setting up the queues
 //! doesn't require any additional context switch.
 //!
-//! Read more: https://man.archlinux.org/man/io_uring.7.en
+//! Read more: <https://man.archlinux.org/man/io_uring.7.en>
 //!
 //! `glommio` presents additional abstractions on top of `io_uring` in the form of an async runtime, with support
 //! for networking, disk IO, channels, single threaded locks and more.
 //!
-//! Read more: https://www.datadoghq.com/blog/engineering/introducing-glommio/
+//! Read more: <https://www.datadoghq.com/blog/engineering/introducing-glommio/>
 //!
 //! ## Architecture
 //! This section describes the planned architecture for making our message queue distributed across multiple nodes.
@@ -134,6 +131,8 @@
 //! The segmented-log based file organisation for storing records is inspired from
 //! [Apache Kafka](https://www.microsoft.com/en-us/research/wp-content/uploads/2017/09/Kafka.pdf).
 //!
+//! Learn more about `laminarmq`'s segmented log implementation [here](commit_log::segmented_log).
+//!
 //! ### Replication and Partitioning (or redundancy and horizontal scaling)
 //! A particular "node" contains some or all "partition"(s) of a "topic". Hence a "topic" is both partitioned and
 //! replicated within the nodes. The data is partitioned with the dividing of the data among the "partition"(s),
@@ -156,8 +155,8 @@
 //! Raft groups for different data buckets on the same node as MultiRaft.
 //!
 //! Read more here:
-//! - https://tikv.org/deep-dive/scalability/multi-raft/
-//! - https://www.cockroachlabs.com/blog/scaling-raft/
+//! - <https://tikv.org/deep-dive/scalability/multi-raft/>
+//! - <https://www.cockroachlabs.com/blog/scaling-raft/>
 //!
 //! ### Service Discovery
 //! Now we maintain a "member-list" abstraction of all "node"(s) which states which nodes are online in real time.
