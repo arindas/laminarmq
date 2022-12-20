@@ -1,3 +1,5 @@
+//! Module providing abstractions for commit-log based message queue RPC server.
+
 pub mod channel {
     use async_trait::async_trait;
     use std::error::Error;
