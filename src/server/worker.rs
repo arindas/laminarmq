@@ -1,3 +1,22 @@
+//! Module providing abstraction for processing requests with a thread pre core architecture.
+//!
+//! ![execution-model](https://i.imgur.com/8QrCjD2.png)
+//!
+//! `laminarmq` uses the thread-per-core execution model where individual processor cores are limited to single threads.
+//! This model encourages design that minimizes inter-thread contention and locks, thereby improving tail latencies in
+//! software services. Read: [The Impact of Thread per Core Architecture on Application Tail Latency.](
+//! https://helda.helsinki.fi//bitstream/handle/10138/313642/tpc_ancs19.pdf?sequence=1)
+//!
+//! In our case, each thread is responsible for servicing only a subset of the partitions. Requests pertaining to a specific
+//! partition are always routed to the same thread. This greatly increases locality of requests. The routing mechanism
+//! could be implemented in a several ways:
+//! - Each thread listens on a unique port. We have a reverse proxy of sorts to forward requests to specific ports.
+//! - We use eBPF to route request packets to threads
+//!
+//! Since each processor core is limited to a single thread, tasks in a thread need to be scheduled efficiently. Hence each
+//! worker thread runs their own task scheduler. Tasks can be scheduled on different task queues and different task queues
+//! can be provisioned with specific fractions of CPU time shares.
+
 use std::{error::Error, fmt::Display, marker::PhantomData};
 
 use super::{

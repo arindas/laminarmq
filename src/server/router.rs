@@ -1,9 +1,16 @@
+//! Module providing abstractions for routing HTTP requests to concrete RPC Request types.
+
+/// Generic trait representing a router capable of routing HTTP requests to the given Request type.
 #[async_trait::async_trait(?Send)]
 pub trait Router<Request> {
+    /// Routes a [`hyper::Request`] to [`Request`]. A None value indicates that no corresponding
+    /// RPC Request type was found for the given HTTP request.
     async fn route(&self, req: hyper::Request<hyper::Body>) -> Option<Request>;
 }
 
 pub mod single_node {
+    //! Module responsible for routing single node HTTP requests to concrete single node RPC
+    //! requests.
     use super::super::{
         partition::{single_node::DEFAULT_EXPIRY_DURATION, PartitionId},
         single_node::{Request, RequestKind},
@@ -11,6 +18,7 @@ pub mod single_node {
     use hyper::Method;
     use std::collections::HashMap;
 
+    /// Application HTTP routes.
     pub const ROUTES: &[(&str, Method, RequestKind)] = &[
         (
             "/api/v1/topics/:topic_id/partitions/:partition_id/records/:offset",
@@ -54,9 +62,11 @@ pub mod single_node {
         ),
     ];
 
+    /// Alias for representing single node router.
     pub type UriRouter = route_recognizer::Router<RequestKind>;
 
-    pub fn route_map(routes: &[(&str, Method, RequestKind)]) -> HashMap<Method, UriRouter> {
+    #[doc(hidden)]
+    fn route_map(routes: &[(&str, Method, RequestKind)]) -> HashMap<Method, UriRouter> {
         let mut map = HashMap::new();
 
         for (path, method, req_kind) in routes {
@@ -72,7 +82,15 @@ pub mod single_node {
         map
     }
 
-    pub struct Router(pub HashMap<Method, UriRouter>);
+    /// Single node HTTP tp RPC Request router.
+    pub struct Router(HashMap<Method, UriRouter>);
+
+    impl Router {
+        /// Creates a new single node HTTP router from [`ROUTES`]
+        pub fn new() -> Self {
+            Self(route_map(ROUTES))
+        }
+    }
 
     #[async_trait::async_trait(?Send)]
     impl super::Router<Request<bytes::Bytes>> for Router {
