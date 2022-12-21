@@ -156,10 +156,10 @@ or delete records from the middle of the log.
 - "segmented", since it is composed of segments, where each segment services records from a particular range
 of offsets.
 
-All writes go to the write segment. When we max out the capacity of the write segment, we
-close the write segment and reopen it as a read segment. The re-opened segment is added to
-the list of read segments. A new write segment is then created with `base_offset` as the
-`next_offset` of the previous write segment.
+All writes go to the write segment. A new record is written at `offset = write_segment.next_offset` in the write 
+segment. When we max out the capacity of the write segment, we close the write segment and reopen it as a read 
+segment. The re-opened segment is added to the list of read segments. A new write segment is then created with 
+`base_offset` equal to the `next_offset` of the previous write segment.
 
 When reading from a particular offset, we linearly check which segment contains the given
 read segment. If a segment capable of servicing a read from the given offset is found, we
