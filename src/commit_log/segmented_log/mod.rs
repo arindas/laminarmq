@@ -125,10 +125,13 @@ where
 ///
 /// A segmented log is a collection of read segments and a single write segment. It consists of
 /// a [`Vec<Segment>`] for storing read segments and a single [`Option<Segment>`] for storing
-/// the write segment. The log is immutable since, only append and read operations are
-/// available. There are no record update and delete operations. The log is segmented, since it
-/// is composed of segments, where each segment services records from a particular range of
-/// offsets.
+/// the write segment.
+///
+/// The log is:
+/// - "immutable", since only "append", "read" and "truncate" operations are allowed. It is not
+/// possible to update or delete records from the middle of the log.
+/// - "segmented", since it is composed of segments, where each segment services records from a
+/// particular range of offsets.
 ///
 /// ```text
 /// [segmented_log]

@@ -112,16 +112,16 @@
 //! [cluster]
 //! ├── node#001
 //! │   ├── (topic#001 -> partition#001) [L]
-//! │   │   └── log{[segment#001, segment#002, ...]}
+//! │   │   └── segmented_log{[segment#001, segment#002, ...]}
 //! │   ├── (topic#001 -> partition#002) [L]
-//! │   │   └── log{[segment#001, segment#002, ...]}
+//! │   │   └── segmented_log{[segment#001, segment#002, ...]}
 //! │   └── (topic#002 -> partition#001) [F]
-//! │       └── log{[segment#001, segment#002, ...]}
+//! │       └── segmented_log{[segment#001, segment#002, ...]}
 //! ├── node#002
 //! │   ├── (topic#001 -> partition#002) [F]
-//! │   │   └── log{[segment#001, segment#002, ...]}
+//! │   │   └── segmented_log{[segment#001, segment#002, ...]}
 //! │   └── (topic#002 -> partition#001) [L]
-//! │       └── log{[segment#001, segment#002, ...]}
+//! │       └── segmented_log{[segment#001, segment#002, ...]}
 //! └── ...other nodes
 //! ```
 //!
