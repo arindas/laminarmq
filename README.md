@@ -141,7 +141,7 @@ Data is persisted in `laminarmq` with the following hierarchy:
 Every "partition" is backed by a persistent, segmented log. A log is an append only collection of "message"(s).
 Messages in a "partition" are accessed using their "offset" i.e. location of the "message"'s bytes in the log.
 
-#### `segmented_log`: Persistent data structure for storing records in partition
+#### `segmented_log`: Persistent data structure for storing records in a partition
 The segmented-log data structure for storing records is inspired from
 [Apache Kafka](https://www.microsoft.com/en-us/research/wp-content/uploads/2017/09/Kafka.pdf).
 
@@ -215,24 +215,40 @@ At regular intervals, segments with age greater than the specified "segment_age"
 stored in these segments are lost. A good value for "segment_age" could be `7 days`.
 
 ## Testing
-After cloning the repository, simply run cargo's test subcommand at the repository root:
+`laminarmq` is currently implemented with the `glommio` async runtime which requires an updated linux kernel
+(at least 5.8) with `io_uring` support. `glommio` also requires at least 512 KiB of locked memory for
+`io_uring` to work. (Note: 512 KiB is the minimum needed to spawn a single executor. Spawning multiple
+executors may require you to raise the limit accordingly. I recommend 8192 KiB on a 8 GiB RAM machine.)
 
-Increase memlock limit as described above:
+First check the current `memlock` limit:
 ```sh
-$ vi /etc/security/limits.conf
+ulimit -l
+
+# 512; sample output
+```
+
+You can increase the `memlock` resource limit (rlimit) as follows:
+
+```sh
+sudo vi /etc/security/limits.conf
 *    hard    memlock        512
 *    soft    memlock        512
 ```
 
-On old WSL2 versions, you might need to spawn a new login shell for the limits to be reflected:
+To make the new limits effective, you need to log in to the machine again. Verify whether the limits have
+been reflected with `ulimit` as described above.
+
+
+On old WSL versions, you might need to spawn a login shell every time for the limits to be reflected:
 ```sh
-$ su ${USER} -l
+su ${USER} -l
 ```
+The limits persist once inside the login shell.
 
 Then simply clone the repository and run the tests.
 
 ```sh
-git clone git@github.com:arindas/laminarmq.git
+git clone https://github.com/arindas/laminarmq.git
 cd laminarmq/
 cargo test
 ```
