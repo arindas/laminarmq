@@ -3,7 +3,7 @@
 /// Generic trait representing a router capable of routing HTTP requests to the given Request type.
 #[async_trait::async_trait(?Send)]
 pub trait Router<Request> {
-    /// Routes a [`hyper::Request`] to [`Request`]. A None value indicates that no corresponding
+    /// Routes a [`hyper::Request`] to a `Request`. A None value indicates that no corresponding
     /// RPC Request type was found for the given HTTP request.
     async fn route(&self, req: hyper::Request<hyper::Body>) -> Option<Request>;
 }

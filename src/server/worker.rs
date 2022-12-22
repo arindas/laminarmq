@@ -79,7 +79,7 @@ where
     P: Partition,
     S: Sender<TaskResult<Response, P>>,
 {
-    /// Creates a new [`Task`] from the given [`Request`] and `Response` [`Sender`].
+    /// Creates a new [`Task`] from the given `Request` and `Response` [`Sender`].
     pub fn new(request: Request, response_sender: S) -> Self {
         Self {
             request,
@@ -147,8 +147,8 @@ pub mod single_node {
         single_node::Request,
     };
 
-    /// Adminstrative requests specific to a [`Processor`](super::Processor)
-    /// and not a specific [`Partition`] instance.
+    /// Adminstrative requests specific to a [`Processor`](super::Processor) and not a
+    /// specific [`Partition`](crate::server::partition::Partition) instance.
     pub enum ProcessorRequest {
         CreatePartition(PartitionId),
         RemovePartition(PartitionId),

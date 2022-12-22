@@ -60,10 +60,10 @@ pub mod worker {
     pub type ResponseSender<Response, P> = channel::Sender<TaskResult<Response, P>>;
 
     /// [`Task`] specialization for [`glommio`] with [`ResponseSender`].
-    type GlommioTask<P, Request, Response> =
+    pub type GlommioTask<P, Request, Response> =
         Task<P, Request, Response, ResponseSender<Response, P>>;
 
-    /// Creates a new [`GlommioTask`] for servicing the given [`Request`].
+    /// Creates a new [`GlommioTask`] for servicing the given `Request`.
     ///
     /// ## Returns:
     /// - [`GlommioTask`]: [`Task`] to be executed by processor.
