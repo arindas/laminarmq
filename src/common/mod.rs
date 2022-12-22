@@ -1,9 +1,16 @@
+//! Module containing common utilities used throughout `laminarmq`.
+
+#[doc(hidden)]
 pub mod cache;
 
 pub mod split {
+    //! Module providing a splittable slice abstraction.
     use std::ops::Deref;
 
+    /// Trait respresenting a slice that can be split at a given position.
     pub trait SplitAt<T>: Deref<Target = [T]> + Sized {
+        /// Splits this slice at the given position. The left half contains elements in the `[0, at)`
+        /// index range while the right half contains elements in the `[at, self.len())` index range.
         fn split_at(self, at: usize) -> Option<(Self, Self)>;
     }
 
@@ -20,6 +27,7 @@ pub mod split {
 
     #[cfg(target_os = "linux")]
     pub mod glommio_impl {
+        //! Module containing [`super::SplitAt`] implementations for [`glommio`] specific types.
         use glommio::io::ReadResult;
 
         use super::SplitAt;
@@ -36,9 +44,11 @@ pub mod split {
 }
 
 pub mod borrow {
+    //! Module providing types making borrowed values easier to work with.
     use bytes::Bytes;
     use std::{borrow::Cow, ops::Deref};
 
+    /// Enumeration to generalize over [`bytes::Bytes`] and [`Cow<[u8]>`]
     #[derive(Debug, Clone)]
     pub enum BytesCow<'a> {
         Owned(Bytes),
