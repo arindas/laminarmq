@@ -1,3 +1,4 @@
+//! Module providing an in-memory partition implementation that stores records in a hash map.
 use crate::commit_log::{segmented_log::RecordMetadata, Record};
 
 use super::super::{
@@ -8,6 +9,7 @@ use super::super::{
 use async_trait::async_trait;
 use std::{borrow::Cow, collections::HashMap, error::Error, fmt::Display};
 
+/// In-memory partition implementation based off of a [`HashMap`]
 #[derive(Debug)]
 pub struct Partition {
     records: HashMap<u64, BytesCow<'static>>,
@@ -29,6 +31,7 @@ impl Default for Partition {
     }
 }
 
+/// Error type for [`Partition`]
 #[derive(Debug)]
 pub enum PartitionError {
     NotSupported,
@@ -108,6 +111,7 @@ impl super::super::Partition for Partition {
     }
 }
 
+/// Creates [`Partition`] instances.
 #[derive(Clone, Copy)]
 pub struct PartitionCreator;
 

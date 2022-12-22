@@ -1,5 +1,11 @@
+//! Module providing single-node specific partition implementations.
+
 pub mod commit_log {
+    //! Module providing specializations for `commit_log` based partition implementations specific
+    //! to the [`glommio`] runtime.
     pub mod segmented_log {
+        //! Module providing specializations for `segmented_log` based partition implementations
+        //! specific to the [`glommio`] runtime.
         use crate::{
             commit_log::{
                 glommio_impl::{
@@ -19,12 +25,15 @@ pub mod commit_log {
         };
         use async_trait::async_trait;
 
+        /// Creates [`Partition`] instances.
         #[derive(Debug, Clone)]
         pub struct PartitionCreator {
             partition_config: PartitionConfig,
         }
 
         impl PartitionCreator {
+            /// Creates a new [`PartitionCreator`] instance from the given [`PartitionConfig`]. All
+            /// partitions creates by this [`PartitionCreator`] use this configuration.
             pub fn new(partition_config: PartitionConfig) -> Self {
                 Self { partition_config }
             }

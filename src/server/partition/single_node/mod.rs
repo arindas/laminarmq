@@ -12,6 +12,8 @@ pub enum PartitionRequest<T: Deref<Target = [u8]>> {
     HighestOffset,
 }
 
+#[doc(hidden)]
 pub mod cached;
+
 pub mod commit_log;
 pub mod in_memory;

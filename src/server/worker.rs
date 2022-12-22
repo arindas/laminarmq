@@ -24,6 +24,7 @@ use super::{
     partition::{Partition, PartitionId},
 };
 
+/// Error type associated with a [`TaskResult`].
 #[derive(Debug)]
 pub enum TaskError<P: Partition> {
     PartitionError(P::Error),
@@ -55,14 +56,19 @@ impl<P: Partition> Display for TaskError<P> {
 
 impl<P: Partition + std::fmt::Debug> Error for TaskError<P> {}
 
+/// Type alias for representing the [`Result`] of a processed [`Task`].
 pub type TaskResult<Response, P> = Result<Response, TaskError<P>>;
 
+/// [`Task`] is used to schedule a message queue RPC server `Request` for processing.
 pub struct Task<P, Request, Response, S>
 where
     P: Partition,
     S: Sender<TaskResult<Response, P>>,
 {
+    /// `Request to be processed.
     pub request: Request,
+
+    /// Send end of the channel to send back response
     pub response_sender: S,
 
     _phantom_data: PhantomData<(P, Response)>,
@@ -73,6 +79,7 @@ where
     P: Partition,
     S: Sender<TaskResult<Response, P>>,
 {
+    /// Creates a new [`Task`] from the given [`Request`] and `Response` [`Sender`].
     pub fn new(request: Request, response_sender: S) -> Self {
         Self {
             request,
@@ -82,14 +89,19 @@ where
     }
 }
 
+/// Trait reprsenting a mechanism for processing [`Task`] instances.
 pub trait Processor<P, Request, Response, S>
 where
     P: Partition,
     S: Sender<TaskResult<Response, P>>,
 {
+    /// Processes the given [`Task`] and sends back the response on
+    /// the given task's response send channel end.
     fn process(&self, task: Task<P, Request, Response, S>);
 }
 
+/// [`Worker`] receives [`Task`] instances from a source and processes then with
+/// an underlying [`Processor`] instance.
 pub struct Worker<P, Request, Response, S, Proc>
 where
     P: Partition,
@@ -107,6 +119,7 @@ where
     S: Sender<TaskResult<Response, P>>,
     Proc: Processor<P, Request, Response, S>,
 {
+    /// Creates a new [`Worker`] instance from the given [`Processor`].
     pub fn new(processor: Proc) -> Self {
         Self {
             processor,
@@ -114,6 +127,8 @@ where
         }
     }
 
+    /// Drains the given [`Task`] channel and processes each of them
+    /// with the underlying [`Processor`].
     pub async fn process_tasks<R>(&self, task_receiver: R)
     where
         R: Receiver<Task<P, Request, Response, S>>,
@@ -132,12 +147,16 @@ pub mod single_node {
         single_node::Request,
     };
 
+    /// Adminstrative requests specific to a [`Processor`](super::Processor)
+    /// and not a specific [`Partition`] instance.
     pub enum ProcessorRequest {
         CreatePartition(PartitionId),
         RemovePartition(PartitionId),
         PartitionHierarchy,
     }
 
+    /// Request enumeration to generalize over [`ProcessorRequest`] and
+    /// [`PartitionRequest`].
     pub enum WorkerRequest<T: Deref<Target = [u8]>> {
         Partition {
             partition: PartitionId,

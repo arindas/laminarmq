@@ -1,3 +1,4 @@
+//! Module providing abstractions necessary for a "partition" implementation backed by a "commit_log".
 use crate::commit_log::segmented_log::RecordMetadata;
 
 use super::super::{
@@ -11,6 +12,7 @@ use std::{
     ops::Deref,
 };
 
+/// Error type for [`Partition`]
 pub enum PartitionError<M, T, CL: CommitLog<M, T>>
 where
     M: serde::Serialize + serde::de::DeserializeOwned,
@@ -59,6 +61,7 @@ where
 {
 }
 
+/// [`Partition`] backed by a [`CommitLog`] instance for storage.
 pub struct Partition<M, X, T, CL>(pub CL, PhantomData<(M, X, T)>)
 where
     M: serde::Serialize + serde::de::DeserializeOwned,
@@ -147,18 +150,22 @@ where
 }
 
 pub mod segmented_log {
+    //! Module providing entities and utilities exclusive to `segmented_log`.
     use crate::{commit_log::prelude::SegmentedLogConfig, server::partition::PartitionId};
     use std::{
         borrow::Cow,
         path::{Path, PathBuf},
     };
 
+    /// Configuration for a [`Partition`](super::Partition) using a `segmented_log`.
     #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
     pub struct PartitionConfig {
         pub base_storage_directory: Cow<'static, str>,
         pub segmented_log_config: SegmentedLogConfig,
     }
 
+    /// Obtain partition base storage directory for a specific partition from a given
+    /// base directory and it's partition id.
     #[inline]
     pub fn partition_storage_path<P: AsRef<Path>>(
         base_directory: P,

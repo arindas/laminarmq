@@ -1,3 +1,5 @@
+//! Module providing utilities for setting up a [`hyper`] server using [`glommio`].
+
 use crate::server::tokio_compat::TokioIO;
 use futures_lite::Future;
 use glommio::{enclose, net::TcpListener, sync::Semaphore, TaskQueueHandle};
@@ -5,6 +7,8 @@ use hyper::{rt::Executor, server::conn::Http, service::service_fn, Body, Request
 use std::{io, net::SocketAddr, rc::Rc};
 use tracing::{error, error_span, instrument, Instrument};
 
+/// [`hyper::rt::Executor`] implementation that executes futures by spawning them on a
+/// [`glommio::TaskQueueHandle`].
 #[derive(Clone)]
 struct HyperExecutor {
     task_queue_handle: TaskQueueHandle,
@@ -26,6 +30,8 @@ where
     }
 }
 
+/// Serves HTTP requests at the given address using the given parameters. All request handling
+/// futures are spawned on the given [`TaskQueueHandle`].
 pub async fn serve_http<S, F, R, A>(
     addr: A,
     service: S,

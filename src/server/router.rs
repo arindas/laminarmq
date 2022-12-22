@@ -62,11 +62,21 @@ pub mod single_node {
         ),
     ];
 
-    /// Alias for representing single node router.
+    /// Alias for representing a single node router.
+    /// Routes from HTTP URI paths to [`RequestKind`] instances.
     pub type UriRouter = route_recognizer::Router<RequestKind>;
 
-    #[doc(hidden)]
-    fn route_map(routes: &[(&str, Method, RequestKind)]) -> HashMap<Method, UriRouter> {
+    /// Collects given routes into a [`HashMap<Method, UriRouter>`].
+    /// This function groups all routes by method. For each method, the route paths and their
+    /// corresponding request kinds are aggregated into an [`UriRouter`]. Finally the methods
+    /// and their corresponding [`UriRouter`] are collected into a [`HashMap`].
+    ///
+    /// ## Returns
+    /// - [`HashMap<Method, UriRouter>`]: A mapping from HTTP methods to their corresponding
+    /// router for routing http uri paths to [`RequestKind`] instances.
+    pub fn route_map<'a, I: Iterator<Item = &'a (&'a str, Method, RequestKind)>>(
+        routes: I,
+    ) -> HashMap<Method, UriRouter> {
         let mut map = HashMap::new();
 
         for (path, method, req_kind) in routes {
@@ -86,9 +96,14 @@ pub mod single_node {
     pub struct Router(HashMap<Method, UriRouter>);
 
     impl Router {
+        /// Creates a new router from the given [`HashMap<Method, UriRouter>`].
+        pub fn with_route_map(route_map: HashMap<Method, UriRouter>) -> Self {
+            Self(route_map)
+        }
+
         /// Creates a new single node HTTP router from [`ROUTES`]
         pub fn new() -> Self {
-            Self(route_map(ROUTES))
+            Self::with_route_map(route_map(ROUTES.iter()))
         }
     }
 
