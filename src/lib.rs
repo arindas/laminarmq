@@ -1,5 +1,5 @@
 //! <p align="center">
-//!   <img src="https://i.imgur.com/6YqsbMq.png" alt="laminarmq">
+//!   <img src="https://i.imgur.com/pCnE0eQ.png" alt="laminarmq">
 //! </p>
 //!
 //! <p align="center">
@@ -58,9 +58,12 @@
 //! several message queue semantics such as publish subscribe or even full blown protocols like MQTT could be implemented.
 //! Users are free to read the messages with offsets in any order they need.
 //!
-//! ## Execution Model
+//! ## Design
+//! This section describes the internal design of `laminarmq`.
 //!
-//! ![execution-model](https://i.imgur.com/8QrCjD2.png)
+//! ### Execution Model
+//!
+//! ![execution-model](https://i.imgur.com/jQOcNR0.png)
 //!
 //! `laminarmq` uses the thread-per-core execution model where individual processor cores are limited to single threads.
 //! This model encourages design that minimizes inter-thread contention and locks, thereby improving tail latencies in
@@ -71,7 +74,8 @@
 //! partition are always routed to the same thread. This greatly increases locality of requests. The routing mechanism
 //! could be implemented in a several ways:
 //! - Each thread listens on a unique port. We have a reverse proxy of sorts to forward requests to specific ports.
-//! - We use eBPF to route request packets to threads
+//! - An eBPF based packet filter is used to route packets to appropriate threads based on the topic and partition of
+//! the request to which the packet belongs to.
 //!
 //! Since each processor core is limited to a single thread, tasks in a thread need to be scheduled efficiently. Hence each
 //! worker thread runs their own task scheduler. Tasks can be scheduled on different task queues and different task queues
@@ -102,10 +106,10 @@
 //!
 //! Read more: <https://www.datadoghq.com/blog/engineering/introducing-glommio/>
 //!
-//! ## Architecture
+//! ### Architecture
 //! This section describes the planned architecture for making our message queue distributed across multiple nodes.
 //!
-//! ### Storage Hierarchy
+//! #### Storage Hierarchy
 //! Data is persisted in `laminarmq` with the following hierarchy:
 //!
 //! ```text
@@ -128,12 +132,42 @@
 //! Every "partition" is backed by a persistent, segmented log. A log is an append only collection of "message"(s).
 //! Messages in a "partition" are accessed using their "offset" i.e. location of the "message"'s bytes in the log.
 //!
-//! The segmented-log based file organisation for storing records is inspired from
+//! #### `segmented_log`: Persistent data structure for storing records in a partition
+//! The segmented-log data structure for storing records is inspired from
 //! [Apache Kafka](https://www.microsoft.com/en-us/research/wp-content/uploads/2017/09/Kafka.pdf).
 //!
-//! Learn more about `laminarmq`'s segmented log implementation [here](commit_log::segmented_log).
+//! ![segmented_log](https://i.imgur.com/JiLVcHi.png)
 //!
-//! ### Replication and Partitioning (or redundancy and horizontal scaling)
+//! A segmented log is a collection of read segments and a single write segment. Each "segment" is backed by a
+//! storage file on disk called "store".
+//!
+//! The log is:
+//! - "immutable", since only "append", "read" and "truncate" operations are allowed. It is not possible to update
+//! or delete records from the middle of the log.
+//! - "segmented", since it is composed of segments, where each segment services records from a particular range
+//! of offsets.
+//!
+//! All writes go to the write segment. A new record is written at `offset = write_segment.next_offset` in the write
+//! segment. When we max out the capacity of the write segment, we close the write segment and reopen it as a read
+//! segment. The re-opened segment is added to the list of read segments. A new write segment is then created with
+//! `base_offset` equal to the `next_offset` of the previous write segment.
+//!
+//! When reading from a particular offset, we linearly check which segment contains the given
+//! read segment. If a segment capable of servicing a read from the given offset is found, we
+//! read from that segment. If no such segment is found among the read segments, we default to
+//! the write segment. The following scenarios may occur when reading from the write segment in
+//! this case:
+//! - The write segment has synced the messages including the message at the given offset. In
+//! this case the record is read successfully and returned.
+//! - The write segment hasn't synced the data at the given offset. In this case the read fails
+//! with a segment I/O error.
+//! - If the offset is out of bounds of even the write segment, we return an "out of bounds"
+//! error.
+//!
+//! Checkout `laminarmq`'s `segmented_log` implementation [here](crate::commit_log::segmented_log).
+//!
+//!
+//! #### Replication and Partitioning (or redundancy and horizontal scaling)
 //! A particular "node" contains some or all "partition"(s) of a "topic". Hence a "topic" is both partitioned and
 //! replicated within the nodes. The data is partitioned with the dividing of the data among the "partition"(s),
 //! and replicated by replicating these "partition"(s) among the other "node"(s).
@@ -158,7 +192,7 @@
 //! - <https://tikv.org/deep-dive/scalability/multi-raft/>
 //! - <https://www.cockroachlabs.com/blog/scaling-raft/>
 //!
-//! ### Service Discovery
+//! #### Service Discovery
 //! Now we maintain a "member-list" abstraction of all "node"(s) which states which nodes are online in real time.
 //! This "member-list" abstraction is able to respond to events such as a new node joining or leaving the cluster.
 //! (It internally uses a gossip protocol for membership information dissemination.) This abstraction can also
@@ -167,7 +201,7 @@
 //! - Identify which node holds which partition in real time. This information can be used for client side load
 //! balancing when reading or writing to a particular partition.
 //!
-//! ### Data Retention SLA
+//! #### Data Retention SLA
 //! A "segment_age" configuration is made available to configure the maximum allowed age of segments. Since all
 //! partitions maintain consistency using Raft consensus, they have completely identical message-segment distribution.
 //! At regular intervals, segments with age greater than the specified "segment_age" are removed and the messages
