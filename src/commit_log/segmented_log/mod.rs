@@ -24,9 +24,13 @@ use crate::{commit_log::Record, common::split::SplitAt};
 
 use segment::Segment;
 
+/// Metadata for records in a [`SegmentedLog`].
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct RecordMetadata<M: Default> {
+    /// offset at which the record is stored.
     pub offset: u64,
+
+    /// generic serializable metadata
     pub additional_metadata: M,
 }
 
