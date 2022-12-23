@@ -62,6 +62,12 @@ where
 }
 
 /// [`Partition`] backed by a [`CommitLog`] instance for storage.
+///
+/// ## Generic parameters:
+/// - `M`: [`crate::commit_log::Record`] metadata
+/// - `X`: partition request bytes container
+/// - `T`: [`crate::commit_log::Record`] value and partition response bytes container
+/// - `CL`: concrete [`CommitLog`] implementation
 pub struct Partition<M, X, T, CL>(pub CL, PhantomData<(M, X, T)>)
 where
     M: serde::Serialize + serde::de::DeserializeOwned,
@@ -76,6 +82,7 @@ where
     T: Deref<Target = [u8]>,
     CL: CommitLog<M, T>,
 {
+    /// Creates a new [`Partition`] from the given [`CommitLog`] instance.
     pub fn new(commit_log: CL) -> Self {
         Self(commit_log, PhantomData)
     }
