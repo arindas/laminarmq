@@ -37,10 +37,10 @@ pub trait PartitionCreator<P: Partition> {
 
 #[derive(Eq, Hash, PartialEq, Debug, Clone)]
 pub struct PartitionId {
-    /// topic id string    
+    /// topic id string
     pub topic: std::borrow::Cow<'static, str>,
 
-    /// partition number under topic   
+    /// partition number under topic
     pub partition_number: u64,
 }
 
