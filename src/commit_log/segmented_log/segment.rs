@@ -26,7 +26,7 @@ where
     SerializationError,
 
     /// Offset used for reading or writing to a segment is beyond that store's allowed capacity
-    /// by the [`config::SegmentConfig::max_store_bytes] limit.
+    /// by the [`config::SegmentConfig::max_store_bytes`] limit.
     OffsetBeyondCapacity,
 
     /// Offset is out of bounds of the written region in this segment.

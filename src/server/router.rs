@@ -92,7 +92,7 @@ pub mod single_node {
         map
     }
 
-    /// Single node HTTP tp RPC Request router.
+    /// Single node HTTP to RPC Request router.
     pub struct Router(HashMap<Method, UriRouter>);
 
     impl Router {

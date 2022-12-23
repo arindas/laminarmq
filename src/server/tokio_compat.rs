@@ -1,4 +1,4 @@
-//! Module providing a compatiability layer between [tokio] and [futures_lite] IO.
+//! Module providing a compatiability layer between [`tokio`] and [`futures_lite`] IO.
 
 use futures_lite::{AsyncRead, AsyncWrite};
 use std::{

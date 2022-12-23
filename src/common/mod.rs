@@ -48,7 +48,7 @@ pub mod borrow {
     use bytes::Bytes;
     use std::{borrow::Cow, ops::Deref};
 
-    /// Enumeration to generalize over [`bytes::Bytes`] and [`Cow<[u8]>`]
+    /// Enumeration to generalize over [`bytes::Bytes`] and [`Cow`]`<[u8]>`.
     #[derive(Debug, Clone)]
     pub enum BytesCow<'a> {
         Owned(Bytes),

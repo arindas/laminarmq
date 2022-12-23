@@ -140,6 +140,7 @@ where
 }
 
 pub mod single_node {
+    //! Module providing single node specific request and response types.
     use std::ops::Deref;
 
     use super::super::{
@@ -152,6 +153,9 @@ pub mod single_node {
     pub enum ProcessorRequest {
         CreatePartition(PartitionId),
         RemovePartition(PartitionId),
+
+        /// Requests a map containing a mapping from topic ids
+        /// to lists of partition numbers under them.
         PartitionHierarchy,
     }
 

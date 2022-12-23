@@ -9,6 +9,7 @@ use crate::commit_log::segmented_log::segment::{config::SegmentConfig, Segment, 
 
 use super::store::{Store, DEFAULT_STORE_WRITER_BUFFER_SIZE};
 
+/// Creates a new [`Segment`] instance specialized to the [`glommio`] runtime.
 pub async fn glommio_segment<M: Default + serde::Serialize + serde::de::DeserializeOwned>(
     path: impl AsRef<Path>,
     base_offset: u64,

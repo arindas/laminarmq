@@ -39,9 +39,15 @@ pub mod single_node {
     use std::{borrow::Cow, collections::HashMap, ops::Deref, time::Duration};
 
     /// Single node request schema.
+    ///
+    /// ## Generic parameters
+    /// `T`: container for request data bytes
     pub enum Request<T: Deref<Target = [u8]>> {
+        /// Requests a map containing a mapping from topic ids
+        /// to lists of partition numbers under them.
         PartitionHierachy,
 
+        /// Remove expired records in the given partition.
         RemoveExpired {
             partition: PartitionId,
             expiry_duration: Duration,
@@ -68,7 +74,12 @@ pub mod single_node {
     }
 
     /// Single node response schema.
+    ///
+    /// ## Generic parameters
+    /// `T`: container for response data bytes
     pub enum Response<T: Deref<Target = [u8]>> {
+        /// Response containing a mapping from topic ids to lists
+        /// of partition numbers under them.
         PartitionHierachy(HashMap<Cow<'static, str>, Vec<u64>>),
 
         Read {
@@ -83,6 +94,7 @@ pub mod single_node {
             bytes_written: usize,
         },
 
+        /// Response for [`Request::RemoveExpired`]
         ExpiredRemoved,
         PartitionCreated,
         PartitionRemoved,
@@ -96,8 +108,12 @@ pub mod single_node {
 
         LowestOffset,
         HighestOffset,
+
+        /// Remove expired records in partition.
         RemoveExpired,
 
+        /// Requests a map containing a mapping from topic ids
+        /// to lists of partition numbers under them.
         PartitionHierachy,
         CreatePartition,
         RemovePartition,
