@@ -1,3 +1,5 @@
+//! Module providing [`glommio`] specific single-node processor implementation.
+
 use super::{
     super::{
         super::{
@@ -17,6 +19,8 @@ use glommio::{sync::RwLock, TaskQueueHandle};
 use std::{borrow::Cow, collections::HashMap, ops::Deref, rc::Rc};
 use tracing::{error, error_span, instrument, Instrument};
 
+/// Single-node [`glommio`] specific processor implementation that schedules [`Task`] processing
+/// futures on a dedicated [`glommio::TaskQueueHandle`]
 #[derive(Clone)]
 pub struct Processor<P, PC>
 where
@@ -34,6 +38,8 @@ where
     P: Partition + 'static,
     PC: PartitionCreator<P> + Clone + 'static,
 {
+    /// Creates a new [`Processor`] instance from the given [`TaskQueueHandle`] and
+    /// [`PartitionCreator`] implementation.
     pub fn new(task_queue: TaskQueueHandle, partition_creator: PC) -> Self {
         Self {
             partitions: Rc::new(RwLock::new(HashMap::new())),

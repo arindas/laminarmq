@@ -1,4 +1,8 @@
+//! Module providing implementations of traits under [`crate::server`] specific to the [`glommio`]
+//! runtime.
+
 pub mod channel {
+    //! Module providing [`glommio`] specific channel implementation.
     use crate::server::channel::{Receiver as BaseReceiver, Sender as BaseSender};
     use async_trait::async_trait;
     use glommio::{
@@ -6,6 +10,7 @@ pub mod channel {
         GlommioError,
     };
 
+    /// Wraps a [`LocalSender`]
     pub struct Sender<T>(LocalSender<T>);
 
     impl<T> BaseSender<T> for Sender<T> {
@@ -16,6 +21,7 @@ pub mod channel {
         }
     }
 
+    /// Wraps a [`LocalReceiver`]
     pub struct Receiver<T>(LocalReceiver<T>);
 
     #[async_trait(?Send)]
@@ -25,11 +31,13 @@ pub mod channel {
         }
     }
 
+    /// Creates a new bounded channel using [`glommio::channels::local_channel::new_bounded`].
     pub fn new_bounded<T>(size: usize) -> (Sender<T>, Receiver<T>) {
         let (send, recv) = glommio::channels::local_channel::new_bounded(size);
         (Sender(send), Receiver(recv))
     }
 
+    /// Creates a new unbounded channel using [`glommio::channels::local_channel::new_unbounded`].
     pub fn new_unbounded<T>() -> (Sender<T>, Receiver<T>) {
         let (send, recv) = glommio::channels::local_channel::new_unbounded();
         (Sender(send), Receiver(recv))
@@ -37,6 +45,7 @@ pub mod channel {
 }
 
 pub mod worker {
+    //! Module providing type specialization specific to the [`glommio`] runtime.
     use super::{
         super::{
             partition::Partition,
@@ -45,12 +54,21 @@ pub mod worker {
         channel,
     };
 
+    /// Type alias for Response channel receiving end.
     pub type ResponseReceiver<Response, P> = channel::Receiver<TaskResult<Response, P>>;
+    /// Type alias for Response channel sending end.
     pub type ResponseSender<Response, P> = channel::Sender<TaskResult<Response, P>>;
 
-    type GlommioTask<P, Request, Response> =
+    /// [`Task`] specialization for [`glommio`] with [`ResponseSender`].
+    pub type GlommioTask<P, Request, Response> =
         Task<P, Request, Response, ResponseSender<Response, P>>;
 
+    /// Creates a new [`GlommioTask`] for servicing the given `Request`.
+    ///
+    /// ## Returns:
+    /// - [`GlommioTask`]: [`Task`] to be executed by processor.
+    /// - [`ResponseReceiver`]: receiving end of the response channel where the response
+    /// will be received after the request is processed.
     pub fn new_task<P: Partition, Request, Response>(
         request: Request,
     ) -> (

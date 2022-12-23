@@ -130,7 +130,7 @@ where
 /// error occurs.
 ///
 /// ### Returns:
-/// A [`Stream`] containing the [`Record`](s) in this commit log in FIFO order.
+/// A [`Stream`] containing the [`Record`]`s` in this commit log in FIFO order.
 pub fn commit_log_record_stream<'log, M, T, CL: CommitLog<M, T>>(
     commit_log: &'log CL,
     from_offset: u64,

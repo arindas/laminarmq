@@ -1,3 +1,22 @@
+//! Module providing abstraction for processing requests with a thread pre core architecture.
+//!
+//! ![execution-model](https://i.imgur.com/8QrCjD2.png)
+//!
+//! `laminarmq` uses the thread-per-core execution model where individual processor cores are limited to single threads.
+//! This model encourages design that minimizes inter-thread contention and locks, thereby improving tail latencies in
+//! software services. Read: [The Impact of Thread per Core Architecture on Application Tail Latency.](
+//! https://helda.helsinki.fi//bitstream/handle/10138/313642/tpc_ancs19.pdf?sequence=1)
+//!
+//! In our case, each thread is responsible for servicing only a subset of the partitions. Requests pertaining to a specific
+//! partition are always routed to the same thread. This greatly increases locality of requests. The routing mechanism
+//! could be implemented in a several ways:
+//! - Each thread listens on a unique port. We have a reverse proxy of sorts to forward requests to specific ports.
+//! - We use eBPF to route request packets to threads
+//!
+//! Since each processor core is limited to a single thread, tasks in a thread need to be scheduled efficiently. Hence each
+//! worker thread runs their own task scheduler. Tasks can be scheduled on different task queues and different task queues
+//! can be provisioned with specific fractions of CPU time shares.
+
 use std::{error::Error, fmt::Display, marker::PhantomData};
 
 use super::{
@@ -5,6 +24,7 @@ use super::{
     partition::{Partition, PartitionId},
 };
 
+/// Error type associated with a [`TaskResult`].
 #[derive(Debug)]
 pub enum TaskError<P: Partition> {
     PartitionError(P::Error),
@@ -36,14 +56,19 @@ impl<P: Partition> Display for TaskError<P> {
 
 impl<P: Partition + std::fmt::Debug> Error for TaskError<P> {}
 
+/// Type alias for representing the [`Result`] of a processed [`Task`].
 pub type TaskResult<Response, P> = Result<Response, TaskError<P>>;
 
+/// [`Task`] is used to schedule a message queue RPC server `Request` for processing.
 pub struct Task<P, Request, Response, S>
 where
     P: Partition,
     S: Sender<TaskResult<Response, P>>,
 {
+    /// `Request to be processed.
     pub request: Request,
+
+    /// Send end of the channel to send back response
     pub response_sender: S,
 
     _phantom_data: PhantomData<(P, Response)>,
@@ -54,6 +79,7 @@ where
     P: Partition,
     S: Sender<TaskResult<Response, P>>,
 {
+    /// Creates a new [`Task`] from the given `Request` and `Response` [`Sender`].
     pub fn new(request: Request, response_sender: S) -> Self {
         Self {
             request,
@@ -63,14 +89,19 @@ where
     }
 }
 
+/// Trait reprsenting a mechanism for processing [`Task`] instances.
 pub trait Processor<P, Request, Response, S>
 where
     P: Partition,
     S: Sender<TaskResult<Response, P>>,
 {
+    /// Processes the given [`Task`] and sends back the response on
+    /// the given task's response send channel end.
     fn process(&self, task: Task<P, Request, Response, S>);
 }
 
+/// [`Worker`] receives [`Task`] instances from a source and processes then with
+/// an underlying [`Processor`] instance.
 pub struct Worker<P, Request, Response, S, Proc>
 where
     P: Partition,
@@ -88,6 +119,7 @@ where
     S: Sender<TaskResult<Response, P>>,
     Proc: Processor<P, Request, Response, S>,
 {
+    /// Creates a new [`Worker`] instance from the given [`Processor`].
     pub fn new(processor: Proc) -> Self {
         Self {
             processor,
@@ -95,6 +127,8 @@ where
         }
     }
 
+    /// Drains the given [`Task`] channel and processes each of them
+    /// with the underlying [`Processor`].
     pub async fn process_tasks<R>(&self, task_receiver: R)
     where
         R: Receiver<Task<P, Request, Response, S>>,
@@ -106,6 +140,7 @@ where
 }
 
 pub mod single_node {
+    //! Module providing single node specific request and response types.
     use std::ops::Deref;
 
     use super::super::{
@@ -113,12 +148,19 @@ pub mod single_node {
         single_node::Request,
     };
 
+    /// Adminstrative requests specific to a [`Processor`](super::Processor) and not a
+    /// specific [`Partition`](crate::server::partition::Partition) instance.
     pub enum ProcessorRequest {
         CreatePartition(PartitionId),
         RemovePartition(PartitionId),
+
+        /// Requests a map containing a mapping from topic ids
+        /// to lists of partition numbers under them.
         PartitionHierarchy,
     }
 
+    /// Request enumeration to generalize over [`ProcessorRequest`] and
+    /// [`PartitionRequest`].
     pub enum WorkerRequest<T: Deref<Target = [u8]>> {
         Partition {
             partition: PartitionId,

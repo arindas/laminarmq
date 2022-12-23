@@ -1,9 +1,16 @@
+//! Module providing abstractions for routing HTTP requests to concrete RPC Request types.
+
+/// Generic trait representing a router capable of routing HTTP requests to the given Request type.
 #[async_trait::async_trait(?Send)]
 pub trait Router<Request> {
+    /// Routes a [`hyper::Request`] to a `Request`. A None value indicates that no corresponding
+    /// RPC Request type was found for the given HTTP request.
     async fn route(&self, req: hyper::Request<hyper::Body>) -> Option<Request>;
 }
 
 pub mod single_node {
+    //! Module responsible for routing single node HTTP requests to concrete single node RPC
+    //! requests.
     use super::super::{
         partition::{single_node::DEFAULT_EXPIRY_DURATION, PartitionId},
         single_node::{Request, RequestKind},
@@ -11,6 +18,7 @@ pub mod single_node {
     use hyper::Method;
     use std::collections::HashMap;
 
+    /// Application HTTP routes.
     pub const ROUTES: &[(&str, Method, RequestKind)] = &[
         (
             "/api/v1/topics/:topic_id/partitions/:partition_id/records/:offset",
@@ -54,9 +62,21 @@ pub mod single_node {
         ),
     ];
 
+    /// Alias for representing a single node router.
+    /// Routes from HTTP URI paths to [`RequestKind`] instances.
     pub type UriRouter = route_recognizer::Router<RequestKind>;
 
-    pub fn route_map(routes: &[(&str, Method, RequestKind)]) -> HashMap<Method, UriRouter> {
+    /// Collects given routes into a [`HashMap<Method, UriRouter>`].
+    /// This function groups all routes by method. For each method, the route paths and their
+    /// corresponding request kinds are aggregated into an [`UriRouter`]. Finally the methods
+    /// and their corresponding [`UriRouter`] are collected into a [`HashMap`].
+    ///
+    /// ## Returns
+    /// - [`HashMap<Method, UriRouter>`]: A mapping from HTTP methods to their corresponding
+    /// router for routing http uri paths to [`RequestKind`] instances.
+    pub fn route_map<'a, I: Iterator<Item = &'a (&'a str, Method, RequestKind)>>(
+        routes: I,
+    ) -> HashMap<Method, UriRouter> {
         let mut map = HashMap::new();
 
         for (path, method, req_kind) in routes {
@@ -72,7 +92,20 @@ pub mod single_node {
         map
     }
 
-    pub struct Router(pub HashMap<Method, UriRouter>);
+    /// Single node HTTP to RPC Request router.
+    pub struct Router(HashMap<Method, UriRouter>);
+
+    impl Router {
+        /// Creates a new router from the given [`HashMap<Method, UriRouter>`].
+        pub fn with_route_map(route_map: HashMap<Method, UriRouter>) -> Self {
+            Self(route_map)
+        }
+
+        /// Creates a new single node HTTP router from [`ROUTES`]
+        pub fn new() -> Self {
+            Self::with_route_map(route_map(ROUTES.iter()))
+        }
+    }
 
     #[async_trait::async_trait(?Send)]
     impl super::Router<Request<bytes::Bytes>> for Router {

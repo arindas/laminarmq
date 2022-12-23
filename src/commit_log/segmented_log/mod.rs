@@ -24,9 +24,13 @@ use crate::{commit_log::Record, common::split::SplitAt};
 
 use segment::Segment;
 
+/// Metadata for records in a [`SegmentedLog`].
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct RecordMetadata<M: Default> {
+    /// offset at which the record is stored.
     pub offset: u64,
+
+    /// generic serializable metadata
     pub additional_metadata: M,
 }
 
@@ -125,10 +129,13 @@ where
 ///
 /// A segmented log is a collection of read segments and a single write segment. It consists of
 /// a [`Vec<Segment>`] for storing read segments and a single [`Option<Segment>`] for storing
-/// the write segment. The log is immutable since, only append and read operations are
-/// available. There are no record update and delete operations. The log is segmented, since it
-/// is composed of segments, where each segment services records from a particular range of
-/// offsets.
+/// the write segment.
+///
+/// The log is:
+/// - "immutable", since only "append", "read" and "truncate" operations are allowed. It is not
+/// possible to update or delete records from the middle of the log.
+/// - "segmented", since it is composed of segments, where each segment services records from a
+/// particular range of offsets.
 ///
 /// ```text
 /// [segmented_log]
@@ -682,7 +689,7 @@ pub mod common {
 
     type Error<T, S> = SegmentedLogError<T, S>;
 
-    /// Returns the backing [`Store`](crate::commit_log::store::Store) file path, with the
+    /// Returns the backing [`Store`](super::store::Store) file path, with the
     /// given Log storage directory and the given segment base offset.
     #[inline]
     pub fn store_file_path<P: AsRef<Path>>(storage_dir_path: P, offset: u64) -> PathBuf {
@@ -693,7 +700,7 @@ pub mod common {
         ))
     }
 
-    /// Returns an iterator of the paths of all the [`crate::commit_log::store::Store`] backing
+    /// Returns an iterator of the paths of all the [`super::store::Store`] backing
     /// files in the given directory.
     ///
     /// ## Errors

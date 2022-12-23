@@ -1,3 +1,5 @@
+//! Module providing abstractions to safely clean up i.e. consume a partition.
+
 use super::super::super::{
     partition::{Partition, PartitionCreator, PartitionId},
     worker::{TaskError, TaskResult},
@@ -5,6 +7,9 @@ use super::super::super::{
 use glommio::sync::RwLock;
 use std::{rc::Rc, time::Duration};
 
+/// [`PartitionRemainder`] represents the various states a partition can be in
+/// the process of being consumed. It represents what is left of the partition
+/// i.e the remainder.
 pub(crate) enum PartitionRemainder<P: Partition> {
     Rc(Rc<RwLock<P>>),
     RwLock(RwLock<P>),
@@ -12,11 +17,16 @@ pub(crate) enum PartitionRemainder<P: Partition> {
     PartitionConsumed,
 }
 
+/// Method of consuming a partition.
 pub(crate) enum ConsumeMethod {
+    /// Closes the partition.
     Close,
+
+    /// Removes the partition.
     Remove,
 }
 
+/// Entity for managing the consumption of a [`Partition`].
 pub(crate) struct PartitionConsumer<P, PC>
 where
     P: Partition,
@@ -55,6 +65,8 @@ where
         }
     }
 
+    /// Invokes [`Self::with_retries_and_wait_duration`] with `retries = 5` and
+    /// `wait_duration = 100ms`
     pub(crate) fn new(
         partition_remainder: PartitionRemainder<P>,
         partition_id: PartitionId,
@@ -71,6 +83,13 @@ where
         )
     }
 
+    /// Maps the given [`PartitionRemainder`] to a more consumed state. If the given
+    /// `partition_remainder` could be sucessfully mapped, an [`Ok`] value with
+    /// mapped [`PartitionRemainder`] instance is returned. Otherwise an [`Err`]
+    /// value with the corresponding error mapping is returned.
+    ///
+    /// An [`Ok(None)`] return value denotes that the [`PartitionRemainder`] could
+    /// be completely consumed.
     async fn remove_remainder(
         &self,
         partition_remainder: PartitionRemainder<P>,
@@ -104,6 +123,16 @@ where
         }
     }
 
+    /// Consumes the underlying [`PartitionRemainder`]. This method starts with the initial
+    /// [`PartitionRemainder`] value and iteratively calls [`Self::remove_remainder`] on it
+    /// until an [`Ok(None)`] is obtained.
+    ///
+    /// This method uses an exponential back-off method in the iteration with the provided
+    /// `retries` and initial `wait_duration`. Every time an error occurs, we wait for
+    /// `wait_duration` duration. The `wait_duration` is doubled after every error.
+    ///
+    /// Returns an error containing the `partition_id` if the partition could not be
+    /// consumed within the given number of retries. [`Ok(())`] otherwise.
     pub(crate) async fn consume(mut self) -> TaskResult<(), P> {
         let mut partition_remainder = Ok(self.partition_remainder.take());
 
