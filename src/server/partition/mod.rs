@@ -35,6 +35,7 @@ pub trait PartitionCreator<P: Partition> {
     async fn new_partition(&self, partition_id: &PartitionId) -> Result<P, P::Error>;
 }
 
+/// Unique idetifier for a [`Partition`] in `laminarmq`
 #[derive(Eq, Hash, PartialEq, Debug, Clone)]
 pub struct PartitionId {
     /// topic id string

@@ -1,7 +1,11 @@
+//! Module providing single-node [`super::Partition`] implementation>
+
 use std::{ops::Deref, time::Duration};
 
+/// Default record expury duration for single-node partition implementations.
 pub const DEFAULT_EXPIRY_DURATION: Duration = Duration::from_secs(86400 * 7);
 
+/// Request enumeration for single-node [`super::Partition`] requests.
 pub enum PartitionRequest<T: Deref<Target = [u8]>> {
     RemoveExpired { expiry_duration: Duration },
 
