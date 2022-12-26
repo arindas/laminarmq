@@ -15,6 +15,7 @@ pub mod split {
     }
 
     impl<T> SplitAt<T> for Vec<T> {
+        #[cfg(not(tarpaulin_include))]
         fn split_at(mut self, at: usize) -> Option<(Self, Self)> {
             if at > self.len() {
                 None
