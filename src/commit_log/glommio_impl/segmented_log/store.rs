@@ -202,6 +202,14 @@ impl Store {
 
         self.writer = stream_writer_with_buffer_size(writer, self.buffer_size);
 
+        let reader = DmaFile::open(backing_file_path.deref())
+            .await
+            .map_err(StoreError::StorageError)?;
+
+        drop(backing_file_path);
+
+        self.reader = reader;
+
         self.size = position;
         Ok(())
     }
