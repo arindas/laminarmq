@@ -1,18 +1,15 @@
 //! Module providing an in-memory partition implementation that stores records in a hash map.
 use crate::commit_log::{segmented_log::RecordMetadata, Record};
 
-use super::super::{
-    super::{super::common::borrow::BytesCow, single_node::Response},
-    single_node::PartitionRequest,
-    PartitionId,
-};
+use super::super::{super::single_node::Response, single_node::PartitionRequest, PartitionId};
 use async_trait::async_trait;
-use std::{borrow::Cow, collections::HashMap, error::Error, fmt::Display};
+use bytes::Bytes;
+use std::{collections::HashMap, error::Error, fmt::Display};
 
 /// In-memory partition implementation based off of a [`HashMap`]
 #[derive(Debug)]
 pub struct Partition {
-    records: HashMap<u64, BytesCow<'static>>,
+    records: HashMap<u64, Bytes>,
     size: usize,
 }
 
@@ -52,8 +49,8 @@ impl Error for PartitionError {}
 #[async_trait(?Send)]
 impl super::super::Partition for Partition {
     type Error = PartitionError;
-    type Request = PartitionRequest<Cow<'static, [u8]>>;
-    type Response = Response<Cow<'static, [u8]>>;
+    type Request = PartitionRequest<Bytes>;
+    type Response = Response<Bytes>;
 
     async fn serve_idempotent(
         &self,
@@ -73,7 +70,7 @@ impl super::super::Partition for Partition {
                                 offset,
                                 additional_metadata: (),
                             },
-                            value: x.clone().into(),
+                            value: x.clone(),
                         },
                         next_offset,
                     }
@@ -89,7 +86,7 @@ impl super::super::Partition for Partition {
                 let current_offset = self.size as u64;
                 let record_size = record_bytes.len();
 
-                self.records.insert(current_offset, record_bytes.into());
+                self.records.insert(current_offset, record_bytes);
 
                 self.size += record_size;
 
@@ -198,7 +195,7 @@ mod tests {
                     bytes_written,
                 } = partition
                     .serve(Request::Append {
-                        record_bytes: record.as_bytes().into(),
+                        record_bytes: bytes::Bytes::from_static(record.as_bytes()),
                     })
                     .await
                     .unwrap()
