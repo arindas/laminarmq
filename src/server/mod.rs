@@ -121,7 +121,10 @@ pub mod single_node {
 }
 
 pub mod partition;
+
+#[cfg(not(tarpaulin_include))]
 pub mod router;
+
 pub mod worker;
 
 #[cfg(not(tarpaulin_include))]

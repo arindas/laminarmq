@@ -211,6 +211,7 @@ pub mod commit_log;
 pub mod common;
 pub mod server;
 
+#[cfg(not(tarpaulin_include))]
 pub mod prelude {
     //! Prelude module for [`laminarmq`](super) with common exports for convenience.
 
