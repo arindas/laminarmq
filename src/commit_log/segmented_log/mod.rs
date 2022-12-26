@@ -59,6 +59,7 @@ where
     OffsetNotValidToAdvanceTo,
 }
 
+#[cfg(not(tarpaulin_include))]
 impl<T, S> Display for SegmentedLogError<T, S>
 where
     T: Deref<Target = [u8]>,

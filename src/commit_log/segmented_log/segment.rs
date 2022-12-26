@@ -33,6 +33,7 @@ where
     OffsetOutOfBounds,
 }
 
+#[cfg(not(tarpaulin_include))]
 impl<T: Deref<Target = [u8]>, S: Store<T>> Display for SegmentError<T, S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
