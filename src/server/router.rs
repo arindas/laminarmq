@@ -107,6 +107,12 @@ pub mod single_node {
         }
     }
 
+    impl Default for Router {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
     #[async_trait::async_trait(?Send)]
     impl super::Router<Request<bytes::Bytes>> for Router {
         async fn route(
@@ -165,6 +171,155 @@ pub mod single_node {
                 ),
                 _ => None,
             }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use hyper::{Body, Request as HyperRequest};
+
+        use crate::server::{
+            partition::single_node::DEFAULT_EXPIRY_DURATION,
+            router::{single_node::Router, Router as _},
+            single_node::Request,
+        };
+
+        #[test]
+        fn test_router() {
+            futures_lite::future::block_on(async {
+                let router = Router::default();
+
+                if let Some(Request::Read { partition, offset }) = router
+                    .route(
+                        HyperRequest::get("/api/v1/topics/some_topic/partitions/68419/records/109")
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                {
+                    assert_eq!(partition.topic, "some_topic");
+                    assert_eq!(partition.partition_number, 68419);
+                    assert_eq!(offset, 109);
+                } else {
+                    assert!(false, "Read request not routed!");
+                }
+
+                if let Some(Request::Append {
+                    partition,
+                    record_bytes,
+                }) = router
+                    .route(
+                        HyperRequest::post("/api/v1/topics/some_topic/partitions/68419/records/")
+                            .body(Body::from(bytes::Bytes::from_static(b"Hello World!")))
+                            .unwrap(),
+                    )
+                    .await
+                {
+                    assert_eq!(partition.topic, "some_topic");
+                    assert_eq!(partition.partition_number, 68419);
+                    let bytes: &[u8] = b"Hello World!";
+                    assert_eq!(record_bytes, bytes);
+                } else {
+                    assert!(false, "Append request not routed!")
+                }
+
+                if let Some(Request::LowestOffset { partition }) = router
+                    .route(
+                        HyperRequest::get(
+                            "/api/v1/topics/some_topic/partitions/68419/stat/lowest_offset",
+                        )
+                        .body(Body::empty())
+                        .unwrap(),
+                    )
+                    .await
+                {
+                    assert_eq!(partition.topic, "some_topic");
+                    assert_eq!(partition.partition_number, 68419);
+                } else {
+                    assert!(false, "LowestOffset request not routed!");
+                }
+
+                if let Some(Request::HighestOffset { partition }) = router
+                    .route(
+                        HyperRequest::get(
+                            "/api/v1/topics/some_topic/partitions/68419/stat/highest_offset",
+                        )
+                        .body(Body::empty())
+                        .unwrap(),
+                    )
+                    .await
+                {
+                    assert_eq!(partition.topic, "some_topic");
+                    assert_eq!(partition.partition_number, 68419);
+                } else {
+                    assert!(false, "HighestOffset request not routed!");
+                }
+
+                if let Some(Request::RemoveExpired {
+                    partition,
+                    expiry_duration,
+                }) = router
+                    .route(
+                        HyperRequest::post(
+                            "/api/v1/topics/some_topic/partitions/68419/remove_expired",
+                        )
+                        .body(Body::empty())
+                        .unwrap(),
+                    )
+                    .await
+                {
+                    assert_eq!(partition.topic, "some_topic");
+                    assert_eq!(partition.partition_number, 68419);
+                    assert_eq!(expiry_duration, DEFAULT_EXPIRY_DURATION);
+                } else {
+                    assert!(false, "RemoveExpired request not routed!");
+                }
+
+                if let Some(Request::PartitionHierachy) = router
+                    .route(
+                        HyperRequest::get("/api/v1/hierachy")
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                {
+                } else {
+                    assert!(false, "PartitionHierachy request not routed!");
+                }
+
+                if let Some(Request::CreatePartition(partition)) = router
+                    .route(
+                        HyperRequest::post("/api/v1/topics/some_topic/partitions/68419")
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                {
+                    assert_eq!(partition.topic, "some_topic");
+                    assert_eq!(partition.partition_number, 68419);
+                } else {
+                    assert!(false, "CreatePartition request not routed!");
+                }
+
+                if let Some(Request::RemovePartition(partition)) = router
+                    .route(
+                        HyperRequest::delete("/api/v1/topics/some_topic/partitions/68419")
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                {
+                    assert_eq!(partition.topic, "some_topic");
+                    assert_eq!(partition.partition_number, 68419);
+                } else {
+                    assert!(false, "RemovePartition request not routed!");
+                }
+
+                assert!(router
+                    .route(HyperRequest::get("/bad/uri").body(Body::empty()).unwrap())
+                    .await
+                    .is_none());
+            });
         }
     }
 }

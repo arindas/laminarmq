@@ -171,15 +171,51 @@ mod tests {
     fn test_partition_consumer() {
         LocalExecutorBuilder::new(Placement::Unbound)
             .spawn(|| async move {
-                let partition_container = Rc::new(RwLock::new(HashMap::<
-                    PartitionId,
-                    Rc<RwLock<InMemPartition>>,
-                >::new()));
-
                 let partition_id = PartitionId {
                     topic: "some_topic".into(),
                     partition_number: 0,
                 };
+
+                // test case with multiple Rc refs
+                let partition = Rc::new(RwLock::new(InMemPartition::new()));
+
+                let _stub = partition.clone();
+
+                let remainder = PartitionConsumer::with_retries_and_wait_duration(
+                    PartitionRemainder::Rc(partition),
+                    partition_id.clone(),
+                    InMemPartitionCreator,
+                    ConsumeMethod::Remove,
+                    5,
+                    Duration::from_nanos(1),
+                )
+                .consume()
+                .await;
+
+                assert!(matches!(remainder, Err(TaskError::PartitionLost(_))));
+
+                // test case with existing read lock
+                let partition = Rc::new(RwLock::new(InMemPartition::new()));
+
+                let _stub = partition.read().await.unwrap();
+
+                let remainder = PartitionConsumer::with_retries_and_wait_duration(
+                    PartitionRemainder::Rc(partition.clone()),
+                    partition_id.clone(),
+                    InMemPartitionCreator,
+                    ConsumeMethod::Remove,
+                    5,
+                    Duration::from_nanos(1),
+                )
+                .consume()
+                .await;
+
+                assert!(matches!(remainder, Err(TaskError::PartitionLost(_))));
+
+                let partition_container = Rc::new(RwLock::new(HashMap::<
+                    PartitionId,
+                    Rc<RwLock<InMemPartition>>,
+                >::new()));
 
                 partition_container.write().await.unwrap().insert(
                     partition_id.clone(),
@@ -193,11 +229,13 @@ mod tests {
                     .remove(&partition_id)
                     .unwrap();
 
-                PartitionConsumer::new(
+                PartitionConsumer::with_retries_and_wait_duration(
                     PartitionRemainder::Rc(partition),
-                    partition_id,
+                    partition_id.clone(),
                     InMemPartitionCreator,
                     ConsumeMethod::Remove,
+                    5,
+                    Duration::from_nanos(1),
                 )
                 .consume()
                 .await
