@@ -81,6 +81,8 @@ pub mod worker {
     }
 }
 
+#[cfg(not(tarpaulin_include))]
 pub mod hyper_compat;
+
 pub mod partition;
 pub mod processor;

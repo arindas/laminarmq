@@ -22,6 +22,7 @@ where
     NotSupported,
 }
 
+#[cfg(not(tarpaulin_include))]
 impl<M, T, CL> Display for PartitionError<M, T, CL>
 where
     M: serde::Serialize + serde::de::DeserializeOwned,
@@ -37,6 +38,7 @@ where
     }
 }
 
+#[cfg(not(tarpaulin_include))]
 impl<M, T, CL> Debug for PartitionError<M, T, CL>
 where
     M: serde::Serialize + serde::de::DeserializeOwned,

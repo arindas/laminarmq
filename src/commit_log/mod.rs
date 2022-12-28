@@ -87,7 +87,7 @@ where
     /// Remove expired storage used, if any. Default implementation simply returns with [`Ok(())`]
     ///
     /// ### Errors:
-    /// Possible errors arising in implementations could include errors during remooval of files.
+    /// Possible errors arising in implementations could include errors during removal of files.
     async fn remove_expired(&mut self, _expiry_duration: Duration) -> Result<(), Self::Error> {
         Ok(())
     }

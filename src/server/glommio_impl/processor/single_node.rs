@@ -279,7 +279,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::{borrow::Cow, ops::Deref};
+    use std::ops::Deref;
 
     use super::{
         super::super::{
@@ -303,22 +303,21 @@ mod tests {
         },
         Processor,
     };
+    use bytes::Bytes;
     use glommio::{executor, Latency, LocalExecutorBuilder, Placement, Shares};
 
     fn new_single_node_in_memory_partition_task(
-        worker_request: WorkerRequest<Cow<'static, [u8]>>,
+        worker_request: WorkerRequest<Bytes>,
     ) -> (
         Task<
             Partition,
-            Request<Cow<'static, [u8]>>,
-            Response<Cow<'static, [u8]>>,
-            ResponseSender<Response<Cow<'static, [u8]>>, Partition>,
+            Request<Bytes>,
+            Response<Bytes>,
+            ResponseSender<Response<Bytes>, Partition>,
         >,
-        ResponseReceiver<Response<Cow<'static, [u8]>>, Partition>,
+        ResponseReceiver<Response<Bytes>, Partition>,
     ) {
-        new_task::<Partition, Request<Cow<'static, [u8]>>, Response<Cow<'static, [u8]>>>(
-            worker_request.into(),
-        )
+        new_task::<Partition, Request<Bytes>, Response<Bytes>>(worker_request.into())
     }
 
     #[test]
@@ -383,7 +382,7 @@ mod tests {
                     new_single_node_in_memory_partition_task(WorkerRequest::Partition {
                         partition: partition_id_1.clone(),
                         request: PartitionRequest::Append {
-                            record_bytes: sample_record_bytes.into(),
+                            record_bytes: Bytes::from_static(sample_record_bytes),
                         },
                     });
 

@@ -14,6 +14,7 @@ pub mod split {
         fn split_at(self, at: usize) -> Option<(Self, Self)>;
     }
 
+    #[cfg(not(tarpaulin_include))]
     impl<T> SplitAt<T> for Vec<T> {
         fn split_at(mut self, at: usize) -> Option<(Self, Self)> {
             if at > self.len() {
@@ -38,48 +39,6 @@ pub mod split {
                     ReadResult::slice(&self, 0, at)?,
                     ReadResult::slice(&self, at, self.len() - at)?,
                 ))
-            }
-        }
-    }
-}
-
-pub mod borrow {
-    //! Module providing types making borrowed values easier to work with.
-    use bytes::Bytes;
-    use std::{borrow::Cow, ops::Deref};
-
-    /// Enumeration to generalize over [`bytes::Bytes`] and [`Cow`]`<[u8]>`.
-    #[derive(Debug, Clone)]
-    pub enum BytesCow<'a> {
-        Owned(Bytes),
-        Borrowed(Cow<'a, [u8]>),
-    }
-
-    impl<'a> From<Cow<'a, [u8]>> for BytesCow<'a> {
-        fn from(cow: Cow<'a, [u8]>) -> Self {
-            match cow {
-                Cow::Borrowed(_) => BytesCow::Borrowed(cow),
-                Cow::Owned(owned_bytes) => BytesCow::Owned(Bytes::from(owned_bytes)),
-            }
-        }
-    }
-
-    impl<'a> From<BytesCow<'a>> for Cow<'a, [u8]> {
-        fn from(bytes_cow: BytesCow<'a>) -> Self {
-            match bytes_cow {
-                BytesCow::Owned(x) => Into::<Vec<u8>>::into(x).into(),
-                BytesCow::Borrowed(cow) => cow,
-            }
-        }
-    }
-
-    impl<'a> Deref for BytesCow<'a> {
-        type Target = [u8];
-
-        fn deref(&self) -> &Self::Target {
-            match self {
-                BytesCow::Owned(x) => x.deref(),
-                BytesCow::Borrowed(x) => x.deref(),
             }
         }
     }

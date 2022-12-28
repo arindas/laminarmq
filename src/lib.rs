@@ -27,7 +27,7 @@
 //! In order to use `laminarmq` as a library, add the following to your `Cargo.toml`:
 //! ```toml
 //! [dependencies]
-//! laminarmq = "0.0.2"
+//! laminarmq = "0.0.4"
 //! ```
 //!
 //! The current implementation based on [`glommio`](https://docs.rs/glommio) runs only on linux. `glommio` requires
@@ -211,6 +211,7 @@ pub mod commit_log;
 pub mod common;
 pub mod server;
 
+#[cfg(not(tarpaulin_include))]
 pub mod prelude {
     //! Prelude module for [`laminarmq`](super) with common exports for convenience.
 
