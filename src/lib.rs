@@ -1,5 +1,5 @@
 //! <p align="center">
-//!   <img src="https://i.imgur.com/pCnE0eQ.png" alt="laminarmq">
+//!   <img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/logo.png" alt="laminarmq">
 //! </p>
 //!
 //! <p align="center">
@@ -63,7 +63,7 @@
 //!
 //! ### Execution Model
 //!
-//! ![execution-model](https://i.imgur.com/jQOcNR0.png)
+//! ![execution-model](https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-execution-model.png)
 //!
 //! `laminarmq` uses the thread-per-core execution model where individual processor cores are limited to single threads.
 //! This model encourages design that minimizes inter-thread contention and locks, thereby improving tail latencies in
@@ -136,7 +136,7 @@
 //! The segmented-log data structure for storing records is inspired from
 //! [Apache Kafka](https://www.microsoft.com/en-us/research/wp-content/uploads/2017/09/Kafka.pdf).
 //!
-//! ![segmented_log](https://i.imgur.com/JiLVcHi.png)
+//! ![segmented_log](https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-segmented-log.png)
 //!
 //! A segmented log is a collection of read segments and a single write segment. Each "segment" is backed by a
 //! storage file on disk called "store".

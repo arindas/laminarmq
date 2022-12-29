@@ -5,7 +5,7 @@ repository = "https://github.com/arindas/laminarmq"
 license = "MIT"
 categories = ["web-programming"]
 keywords = ["message-queue", "distributed-systems", "segmented-log", "io-uring"]
-exclude = [".github/"]
+exclude = [".github/", "assets/"]
 version = "0.0.4"
 edition = "2021"
 
