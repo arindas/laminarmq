@@ -118,6 +118,36 @@ pub mod single_node {
         CreatePartition,
         RemovePartition,
     }
+
+    pub mod hyper_impl {
+        use super::Response;
+        use hyper::{Body, Response as HyperResponse};
+        use std::ops::Deref;
+
+        impl<T> From<Response<T>> for HyperResponse<Body>
+        where
+            T: Deref<Target = [u8]>,
+        {
+            fn from(value: Response<T>) -> Self {
+                match value {
+                    Response::PartitionHierachy(_) => todo!(),
+                    Response::Read {
+                        record: _,
+                        next_offset: _,
+                    } => todo!(),
+                    Response::LowestOffset(_) => todo!(),
+                    Response::HighestOffset(_) => todo!(),
+                    Response::Append {
+                        write_offset: _,
+                        bytes_written: _,
+                    } => todo!(),
+                    Response::ExpiredRemoved => todo!(),
+                    Response::PartitionCreated => todo!(),
+                    Response::PartitionRemoved => todo!(),
+                }
+            }
+        }
+    }
 }
 
 pub mod partition;
