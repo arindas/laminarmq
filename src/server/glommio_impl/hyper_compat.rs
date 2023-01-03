@@ -4,7 +4,14 @@ use crate::server::tokio_compat::TokioIO;
 use futures_lite::Future;
 use glommio::{net::TcpListener, sync::Semaphore, GlommioError, TaskQueueHandle as TaskQ};
 use hyper::{rt::Executor, server::conn::Http, service::service_fn, Request, Response};
-use std::{io, net::SocketAddr, rc::Rc};
+use std::{
+    io::{
+        self,
+        ErrorKind::{ConnectionRefused, ConnectionReset},
+    },
+    net::SocketAddr,
+    rc::Rc,
+};
 use tracing::{error, error_span, instrument, Instrument};
 
 /// [`hyper::rt::Executor`] implementation that executes futures by spawning them on a
@@ -45,7 +52,7 @@ impl From<ConnResult> for io::Result<()> {
             Err(_) => Err(()),
             _ => Ok(()),
         }
-        .map_err(|_| io::Error::from(io::ErrorKind::ConnectionReset))
+        .map_err(|_| io::Error::from(ConnectionReset))
     }
 }
 
@@ -59,7 +66,7 @@ pub fn serve_http<S, RespBd, F, FError, A>(
     task_q: TaskQ,
 ) -> io::Result<()>
 where
-    S: FnMut(Request<hyper::Body>) -> F + 'static + Copy,
+    S: FnMut(Request<hyper::Body>) -> F + 'static + Clone,
     F: Future<Output = Result<Response<RespBd>, FError>> + 'static,
     FError: std::error::Error + 'static + Send + Sync,
     RespBd: hyper::body::HttpBody + 'static,
@@ -71,11 +78,16 @@ where
 
     HyperExecutor { task_q }.execute(
         async move {
-            while max_connections > 0 {
+            if max_connections == 0 {
+                return Err::<(), GlommioError<()>>(io::Error::from(ConnectionRefused).into());
+            }
+
+            loop {
                 let stream = listener.accept().await?;
                 let addr = stream.local_addr()?;
 
                 let scoped_conn_control = conn_control.clone();
+                let captured_service = service.clone();
 
                 HyperExecutor { task_q }.execute(
                     async move {
@@ -83,7 +95,7 @@ where
 
                         let http = Http::new()
                             .with_executor(HyperExecutor { task_q })
-                            .serve_connection(TokioIO(stream), service_fn(service));
+                            .serve_connection(TokioIO(stream), service_fn(captured_service));
 
                         let conn_res: io::Result<()> = ConnResult(addr, http.await).into();
                         conn_res
@@ -91,8 +103,6 @@ where
                     .instrument(error_span!("connection_handler")),
                 );
             }
-
-            Ok::<(), GlommioError<()>>(())
         }
         .instrument(error_span!("tcp_listener")),
     );

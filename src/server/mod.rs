@@ -42,6 +42,7 @@ pub mod single_node {
     ///
     /// ## Generic parameters
     /// `T`: container for request data bytes
+    #[derive(Debug)]
     pub enum Request<T: Deref<Target = [u8]>> {
         /// Requests a map containing a mapping from topic ids
         /// to lists of partition numbers under them.
