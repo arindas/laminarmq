@@ -232,6 +232,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "ctrlc-async"
+version = "3.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "598e9d68e769aa1283460a3b0ec0d049ccfb6170277aea37089fa3f58fd721a1"
+dependencies = [
+ "nix",
+ "tokio",
+ "winapi 0.3.9",
+]
+
+[[package]]
 name = "enclose"
 version = "1.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -538,6 +549,7 @@ dependencies = [
  "byteorder",
  "bytes",
  "crc32fast",
+ "ctrlc-async",
  "futures-core",
  "futures-lite",
  "futures-util",
@@ -902,6 +914,18 @@ dependencies = [
  "bytes",
  "memchr",
  "pin-project-lite",
+ "tokio-macros",
+]
+
+[[package]]
+name = "tokio-macros"
+version = "1.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d266c00fde287f55d3f1c3e96c500c362a2b8c695076ec180f27918820bc6df8"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

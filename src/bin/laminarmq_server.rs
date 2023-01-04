@@ -21,12 +21,15 @@ async fn request_handler(
 ) -> Result<Response<Body>, Infallible> {
     let response = if let Some(request) = shared_state.router.route(request).await {
         info!("serving => {:?}", request);
-        Response::new(Body::from(format!("{:?}\n", request)))
+
+        Response::new(Body::from("Valid request!"))
     } else {
+        let status = StatusCode::NOT_FOUND;
+
         Response::builder()
-            .status(StatusCode::NOT_FOUND)
-            .body(Body::from("not found\n"))
-            .expect("unable to construct body.")
+            .status(status)
+            .body(Body::from(status.canonical_reason().unwrap()))
+            .unwrap()
     };
 
     Ok(response)
@@ -34,11 +37,27 @@ async fn request_handler(
 
 #[cfg(target_os = "linux")]
 fn main() {
+    use tracing::{info_span, Instrument};
+
     let fmt_subscriber = FmtSubscriber::builder()
         .with_max_level(Level::INFO)
         .finish();
 
     subscriber::set_global_default(fmt_subscriber).expect("setting default subscriber failed");
+
+    let (signal_tx, mut signal_rx) = tokio::sync::mpsc::channel::<()>(1);
+
+    ctrlc_async::set_async_handler(
+        async move {
+            info!("Received CTRL+C.");
+            signal_tx
+                .send(())
+                .await
+                .expect("unable to send on signal channel");
+        }
+        .instrument(info_span!("ctrlc_async_handler")),
+    )
+    .expect("Error setting Ctrl-C handler");
 
     LocalExecutorBuilder::new(Placement::Unbound)
         .name(THREAD_NAME)
@@ -64,7 +83,9 @@ fn main() {
 
             info!("Listening for HTTP requests on 0.0.0.0:8080");
 
-            std::future::pending::<()>().await;
+            signal_rx.recv().await;
+
+            info!("Done Listening to requests.");
         })
         .expect("unable to spawn root future")
         .join()
