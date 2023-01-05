@@ -34,6 +34,26 @@ pub enum TaskError<P: Partition> {
     LockAcqFailed,
 }
 
+pub mod hyper_impl {
+    //! Module providing utilities for converting from [`TaskError`](super::TaskError) to
+    //! [`StatusCode`](hyper::StatusCode).
+
+    use super::{Partition, TaskError};
+    use hyper::StatusCode;
+
+    impl<P: Partition> From<&TaskError<P>> for StatusCode {
+        fn from(value: &TaskError<P>) -> Self {
+            match value {
+                TaskError::PartitionError(_) => StatusCode::BAD_REQUEST,
+                TaskError::PartitionNotFound(_) => StatusCode::NOT_FOUND,
+                TaskError::PartitionInUse(_) => StatusCode::FAILED_DEPENDENCY,
+                TaskError::PartitionLost(_) => StatusCode::INTERNAL_SERVER_ERROR,
+                TaskError::LockAcqFailed => StatusCode::LOCKED,
+            }
+        }
+    }
+}
+
 #[cfg(not(tarpaulin_include))]
 impl<P: Partition> Display for TaskError<P> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

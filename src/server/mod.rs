@@ -121,6 +121,9 @@ pub mod single_node {
     }
 
     pub mod hyper_impl {
+        //! Module providing utilities for serializing [`Response`](super::Response)
+        //! into a [`hyper::Response`] for responding back to the client.
+
         use super::Response;
         use hyper::{Body, Response as HyperResponse};
         use std::ops::Deref;

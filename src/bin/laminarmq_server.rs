@@ -1,5 +1,6 @@
 use glommio::{executor, Latency, LocalExecutorBuilder, Placement, Shares};
-use hyper::{http, Body, Request, Response, StatusCode};
+use hyper::{Body, Request, Response, StatusCode};
+use std::convert::Infallible;
 use std::{rc::Rc, time::Duration};
 use tracing::{error, info, instrument, subscriber, Level};
 use tracing_subscriber::FmtSubscriber;
@@ -18,22 +19,29 @@ struct State {
 async fn request_handler(
     shared_state: Rc<State>,
     request: Request<Body>,
-) -> Result<Response<Body>, http::Error> {
+) -> Result<Response<Body>, Infallible> {
     let response = if let Some(request) = shared_state.router.route(request).await {
         info!("serving => {:?}", request);
 
-        Response::new(Body::from("Valid request!"))
+        Ok(Body::from("Valid request!"))
     } else {
         error!("Request not routed.");
 
-        let status = StatusCode::NOT_FOUND;
-
-        Response::builder()
-            .status(status)
-            .body(Body::from(status.canonical_reason().unwrap_or_default()))?
+        Err((String::with_capacity(0), StatusCode::NOT_FOUND))
     };
 
-    Ok(response)
+    match match response {
+        Err((message, status)) if message.is_empty() => {
+            Err((status.canonical_reason().unwrap_or_default().into(), status))
+        }
+        response => response,
+    } {
+        Ok(body) => Ok(Response::new(body)),
+        Err((message, status)) => Ok(Response::builder()
+            .status(status)
+            .body(Body::from(message))
+            .unwrap_or_default()),
+    }
 }
 
 #[cfg(target_os = "linux")]
