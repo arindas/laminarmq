@@ -1,7 +1,7 @@
 use glommio::{executor, Latency, LocalExecutorBuilder, Placement, Shares};
-use hyper::{Body, Request, Response, StatusCode};
-use std::{convert::Infallible, rc::Rc, time::Duration};
-use tracing::{info, instrument, subscriber, Level};
+use hyper::{http, Body, Request, Response, StatusCode};
+use std::{rc::Rc, time::Duration};
+use tracing::{error, info, instrument, subscriber, Level};
 use tracing_subscriber::FmtSubscriber;
 
 use laminarmq::server::glommio_impl::hyper_compat::serve_http;
@@ -18,18 +18,19 @@ struct State {
 async fn request_handler(
     shared_state: Rc<State>,
     request: Request<Body>,
-) -> Result<Response<Body>, Infallible> {
+) -> Result<Response<Body>, http::Error> {
     let response = if let Some(request) = shared_state.router.route(request).await {
         info!("serving => {:?}", request);
 
         Response::new(Body::from("Valid request!"))
     } else {
+        error!("Request not routed.");
+
         let status = StatusCode::NOT_FOUND;
 
         Response::builder()
             .status(status)
-            .body(Body::from(status.canonical_reason().unwrap()))
-            .unwrap()
+            .body(Body::from(status.canonical_reason().unwrap_or_default()))?
     };
 
     Ok(response)
