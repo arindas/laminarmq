@@ -126,3 +126,176 @@ impl Response<Vec<u8>> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use byteorder::WriteBytesExt;
+
+    use crate::{
+        commit_log::segmented_log::RecordMetadata, prelude::Record, server::single_node::Response,
+    };
+    use std::{borrow::Cow, collections::HashMap, io::Cursor};
+
+    #[test]
+    fn test_response_io() {
+        futures_lite::future::block_on(async {
+            let mut backing_storage = Cursor::new(Vec::<u8>::new());
+
+            let old_position = backing_storage.position();
+
+            const MESSAGE: &[u8] = b"Hello World!";
+            const OFFSET: u64 = 107;
+            const NEXT_OFFSET: u64 = 68419;
+
+            let response = Response::Read {
+                record: Record {
+                    metadata: RecordMetadata {
+                        offset: OFFSET,
+                        additional_metadata: (),
+                    },
+                    value: MESSAGE,
+                },
+                next_offset: NEXT_OFFSET,
+            };
+
+            response.write(&mut backing_storage).await.unwrap();
+
+            let position = backing_storage.position();
+            backing_storage.set_position(old_position);
+
+            if let Response::Read {
+                record,
+                next_offset,
+            } = Response::read(&mut backing_storage).await.unwrap()
+            {
+                assert_eq!(record.metadata.offset, OFFSET);
+                assert_eq!(record.value, MESSAGE);
+                assert_eq!(next_offset, NEXT_OFFSET);
+            } else {
+                assert!(false, "Wrong response type read.");
+            }
+
+            backing_storage.set_position(position);
+
+            let old_position = backing_storage.position();
+
+            let baseline_partition_hierarchy: HashMap<Cow<'static, str>, Vec<u64>> =
+                HashMap::from([("topic_1".into(), vec![1, 2]), ("topic_2".into(), vec![3])]);
+
+            let response = Response::<&[u8]>::PartitionHierachy(baseline_partition_hierarchy);
+            response.write(&mut backing_storage).await.unwrap();
+
+            let position = backing_storage.position();
+            backing_storage.set_position(old_position);
+
+            if let Response::PartitionHierachy(hierarchy) =
+                Response::read(&mut backing_storage).await.unwrap()
+            {
+                assert_eq!(hierarchy.get("topic_1").unwrap(), &[1, 2]);
+                assert_eq!(hierarchy.get("topic_2").unwrap(), &[3]);
+            } else {
+                assert!(false, "Wrong response type read.");
+            }
+
+            backing_storage.set_position(position);
+
+            let old_position = backing_storage.position();
+
+            const LOWEST_OFFSET: u64 = 107;
+            let response = Response::<&[u8]>::LowestOffset(LOWEST_OFFSET);
+            response.write(&mut backing_storage).await.unwrap();
+
+            let position = backing_storage.position();
+            backing_storage.set_position(old_position);
+
+            if let Response::LowestOffset(lowest_offset) =
+                Response::read(&mut backing_storage).await.unwrap()
+            {
+                assert_eq!(lowest_offset, LOWEST_OFFSET);
+            } else {
+                assert!(false, "Wrong response type received");
+            }
+
+            backing_storage.set_position(position);
+
+            let old_position = backing_storage.position();
+
+            const HIGHEST_OFFSET: u64 = 68419;
+            let response = Response::<&[u8]>::HighestOffset(HIGHEST_OFFSET);
+            response.write(&mut backing_storage).await.unwrap();
+
+            let position = backing_storage.position();
+            backing_storage.set_position(old_position);
+
+            if let Response::HighestOffset(highest_offset) =
+                Response::read(&mut backing_storage).await.unwrap()
+            {
+                assert_eq!(highest_offset, HIGHEST_OFFSET);
+            } else {
+                assert!(false, "Wrong response type received");
+            }
+
+            backing_storage.set_position(position);
+
+            let old_position = backing_storage.position();
+
+            const WRITE_OFFSET: u64 = 68419;
+            const BYTES_WRITTEN: usize = 107;
+            let response = Response::<&[u8]>::Append {
+                write_offset: WRITE_OFFSET,
+                bytes_written: BYTES_WRITTEN,
+            };
+            response.write(&mut backing_storage).await.unwrap();
+
+            let position = backing_storage.position();
+            backing_storage.set_position(old_position);
+
+            if let Response::Append {
+                write_offset,
+                bytes_written,
+            } = Response::read(&mut backing_storage).await.unwrap()
+            {
+                assert_eq!(write_offset, WRITE_OFFSET);
+                assert_eq!(bytes_written, BYTES_WRITTEN);
+            } else {
+                assert!(false, "Wrong response type received");
+            }
+
+            backing_storage.set_position(position);
+
+            let old_position = backing_storage.position();
+
+            const RESPONSES: [Response<&[u8]>; 3] = [
+                Response::<&[u8]>::ExpiredRemoved,
+                Response::<&[u8]>::PartitionCreated,
+                Response::<&[u8]>::PartitionRemoved,
+            ];
+
+            for response in &RESPONSES {
+                response.write(&mut backing_storage).await.unwrap();
+            }
+
+            let position = backing_storage.position();
+            backing_storage.set_position(old_position);
+
+            for i in 0..RESPONSES.len() {
+                let response = Response::read(&mut backing_storage).await.unwrap();
+                match (response, &RESPONSES[i]) {
+                    (Response::ExpiredRemoved, &Response::ExpiredRemoved) => {}
+                    (Response::PartitionCreated, &Response::PartitionCreated) => {}
+                    (Response::PartitionRemoved, &Response::PartitionRemoved) => {}
+                    _ => assert!(false, "Wrong response type received"),
+                }
+            }
+
+            backing_storage.set_position(position);
+
+            let old_position = backing_storage.position();
+            backing_storage.write_u8(70).unwrap();
+
+            backing_storage.set_position(old_position);
+
+            assert!(Response::read(&mut backing_storage).await.is_err());
+        });
+    }
+}
