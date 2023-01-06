@@ -35,6 +35,7 @@ pub enum TaskError<P: Partition> {
 }
 
 #[doc(hidden)]
+#[cfg(not(tarpaulin_include))]
 pub mod hyper_impl {
     //! Module providing utilities for converting from [`TaskError`](super::TaskError) to
     //! [`StatusCode`](hyper::StatusCode).
@@ -137,6 +138,7 @@ where
     _phantom_data: PhantomData<(P, S, Request, Response)>,
 }
 
+#[cfg(not(tarpaulin_include))]
 impl<P, Request, Response, S, Proc> Worker<P, Request, Response, S, Proc>
 where
     P: Partition,

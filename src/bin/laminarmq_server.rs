@@ -15,6 +15,7 @@ struct State {
     pub _task_tx: (),
 }
 
+#[cfg(not(tarpaulin_include))]
 #[instrument(skip(shared_state))]
 async fn request_handler(
     shared_state: Rc<State>,
@@ -44,6 +45,7 @@ async fn request_handler(
     }
 }
 
+#[cfg(not(tarpaulin_include))]
 #[cfg(target_os = "linux")]
 fn main() {
     use tracing::{info_span, Instrument};
