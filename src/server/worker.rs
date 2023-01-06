@@ -34,6 +34,7 @@ pub enum TaskError<P: Partition> {
     LockAcqFailed,
 }
 
+#[doc(hidden)]
 pub mod hyper_impl {
     //! Module providing utilities for converting from [`TaskError`](super::TaskError) to
     //! [`StatusCode`](hyper::StatusCode).
@@ -44,11 +45,13 @@ pub mod hyper_impl {
     impl<P: Partition> From<&TaskError<P>> for StatusCode {
         fn from(value: &TaskError<P>) -> Self {
             match value {
+                // partition is lost and can't be recovered, hence it's fitting
+                TaskError::PartitionLost(_) => StatusCode::INTERNAL_SERVER_ERROR,
+
                 TaskError::PartitionError(_) => StatusCode::BAD_REQUEST,
                 TaskError::PartitionNotFound(_) => StatusCode::NOT_FOUND,
                 TaskError::PartitionInUse(_) => StatusCode::FAILED_DEPENDENCY,
-                TaskError::PartitionLost(_) => StatusCode::INTERNAL_SERVER_ERROR,
-                TaskError::LockAcqFailed => StatusCode::LOCKED,
+                TaskError::LockAcqFailed => StatusCode::FAILED_DEPENDENCY,
             }
         }
     }

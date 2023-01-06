@@ -36,7 +36,7 @@ pub mod single_node {
     use crate::commit_log::{segmented_log::RecordMetadata, Record};
 
     use super::partition::PartitionId;
-    use std::{borrow::Cow, collections::HashMap, ops::Deref, time::Duration};
+    use std::{borrow::Cow, collections::HashMap, io, ops::Deref, time::Duration};
 
     /// Single node request schema.
     ///
@@ -103,6 +103,7 @@ pub mod single_node {
 
     /// Kinds of single node RPC requests.
     #[derive(Clone, Copy)]
+    #[repr(u8)]
     pub enum RequestKind {
         Read,
         Append,
@@ -120,36 +121,92 @@ pub mod single_node {
         RemovePartition,
     }
 
-    pub mod hyper_impl {
-        //! Module providing utilities for serializing [`Response`](super::Response)
-        //! into a [`hyper::Response`] for responding back to the client.
+    pub struct WireResponse<T: Deref<Target = [u8]>> {
+        request_kind: RequestKind,
+        serialized_bytes: Option<Vec<u8>>,
+        record_bytes: Option<T>,
+    }
 
-        use super::Response;
-        use hyper::{Body, Response as HyperResponse};
-        use std::ops::Deref;
+    impl<T: Deref<Target = [u8]>> From<Response<T>> for Result<WireResponse<T>, ()> {
+        fn from(value: Response<T>) -> Self {
+            use bincode::serialize;
 
-        impl<T> From<Response<T>> for HyperResponse<Body>
-        where
-            T: Deref<Target = [u8]>,
-        {
-            fn from(value: Response<T>) -> Self {
-                match value {
-                    Response::PartitionHierachy(_) => todo!(),
-                    Response::Read {
-                        record: _,
-                        next_offset: _,
-                    } => todo!(),
-                    Response::LowestOffset(_) => todo!(),
-                    Response::HighestOffset(_) => todo!(),
-                    Response::Append {
-                        write_offset: _,
-                        bytes_written: _,
-                    } => todo!(),
-                    Response::ExpiredRemoved => todo!(),
-                    Response::PartitionCreated => todo!(),
-                    Response::PartitionRemoved => todo!(),
-                }
+            Ok(match value {
+                Response::PartitionHierachy(hierarchy) => WireResponse {
+                    request_kind: RequestKind::PartitionHierachy,
+                    serialized_bytes: Some(serialize(&hierarchy).map_err(|_| ())?),
+                    record_bytes: None,
+                },
+                Response::Read {
+                    record,
+                    next_offset,
+                } => WireResponse {
+                    request_kind: RequestKind::Read,
+                    serialized_bytes: Some(
+                        serialize(&[record.metadata.offset, next_offset]).map_err(|_| ())?,
+                    ),
+                    record_bytes: Some(record.value),
+                },
+                Response::LowestOffset(lowest_offset) => WireResponse {
+                    request_kind: RequestKind::LowestOffset,
+                    serialized_bytes: Some(serialize(&lowest_offset).map_err(|_| ())?),
+                    record_bytes: None,
+                },
+                Response::HighestOffset(highest_offset) => WireResponse {
+                    request_kind: RequestKind::HighestOffset,
+                    serialized_bytes: Some(serialize(&highest_offset).map_err(|_| ())?),
+                    record_bytes: None,
+                },
+                Response::Append {
+                    write_offset,
+                    bytes_written,
+                } => WireResponse {
+                    request_kind: RequestKind::Append,
+                    serialized_bytes: Some(
+                        serialize(&[write_offset, bytes_written as u64]).map_err(|_| ())?,
+                    ),
+                    record_bytes: None,
+                },
+                Response::ExpiredRemoved => WireResponse {
+                    request_kind: RequestKind::RemoveExpired,
+                    serialized_bytes: None,
+                    record_bytes: None,
+                },
+                Response::PartitionCreated => WireResponse {
+                    request_kind: RequestKind::CreatePartition,
+                    serialized_bytes: None,
+                    record_bytes: None,
+                },
+                Response::PartitionRemoved => WireResponse {
+                    request_kind: RequestKind::RemovePartition,
+                    serialized_bytes: None,
+                    record_bytes: None,
+                },
+            })
+        }
+    }
+
+    impl<T: Deref<Target = [u8]>> WireResponse<T> {
+        pub async fn write<W: tokio::io::AsyncWrite + Unpin>(
+            &self,
+            mut writer: W,
+        ) -> io::Result<()> {
+            use tokio::io::AsyncWriteExt;
+
+            writer.write_u8(self.request_kind as u8).await?;
+
+            if let Some(serialized_bytes) = self.serialized_bytes.as_ref() {
+                writer.write_u64(serialized_bytes.len() as u64).await?;
+                writer.write(serialized_bytes).await?;
+            } else {
+                writer.write_u64(0 as u64).await?;
             }
+
+            if let Some(record_bytes) = self.record_bytes.as_ref() {
+                writer.write(record_bytes.deref()).await?;
+            }
+
+            Ok(())
         }
     }
 }
