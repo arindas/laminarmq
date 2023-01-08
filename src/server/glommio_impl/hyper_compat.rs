@@ -1,9 +1,9 @@
 //! Module providing utilities for setting up a [`hyper`] server using [`glommio`].
 
-use crate::server::tokio_compat::TokioIO;
+use crate::server::{tokio_compat::TokioIO, Server};
 use futures_lite::Future;
 use glommio::{net::TcpListener, sync::Semaphore, GlommioError, TaskQueueHandle as TaskQ};
-use hyper::{rt::Executor, server::conn::Http, service::service_fn, Request, Response};
+use hyper::{rt::Executor, server::conn::Http, Request, Response};
 use std::{
     io::{
         self,
@@ -13,7 +13,7 @@ use std::{
     rc::Rc,
 };
 use tower_service::Service;
-use tracing::{error, error_span, instrument, Instrument};
+use tracing::{error, instrument, trace, trace_span, Instrument};
 
 /// [`hyper::rt::Executor`] implementation that executes futures by spawning them on a
 /// [`glommio::TaskQueueHandle`].
@@ -59,70 +59,78 @@ impl From<ConnResult> for io::Result<()> {
 
 /// Serves HTTP requests at the given address using the given parameters. All request
 /// handling futures are spawned on the given [`TaskQueueHandle`].
-#[instrument(skip(addr, service))]
-pub fn serve_http<S, RespBd, F, FError, A>(
-    addr: A,
-    service: S,
-    max_connections: usize,
-    task_q: TaskQ,
-) -> io::Result<()>
-where
-    S: FnMut(Request<hyper::Body>) -> F + 'static + Clone,
-    F: Future<Output = Result<Response<RespBd>, FError>> + 'static,
-    FError: std::error::Error + 'static + Send + Sync,
-    RespBd: hyper::body::HttpBody + 'static,
-    RespBd::Error: std::error::Error + Send + Sync,
-    A: Into<SocketAddr>,
-{
-    serve_http_(addr, service_fn(service), max_connections, task_q)
+#[derive(Debug)]
+pub struct HyperServer {
+    pub max_connections: usize,
+    pub task_q: TaskQ,
 }
 
-pub fn serve_http_<S, RespBd, Error, A>(
-    addr: A,
-    service: S,
-    max_connections: usize,
-    task_q: TaskQ,
-) -> io::Result<()>
+impl<S, RespBd, Error> Server<S> for HyperServer
 where
     S: Service<Request<hyper::Body>, Response = Response<RespBd>, Error = Error> + Clone + 'static,
     Error: std::error::Error + 'static + Send + Sync,
     RespBd: hyper::body::HttpBody + 'static,
     RespBd::Error: std::error::Error + Send + Sync,
-    A: Into<SocketAddr>,
 {
-    let listener = TcpListener::bind(addr.into())?;
-    let conn_control = Rc::new(Semaphore::new(max_connections as _));
+    type Result = io::Result<()>;
 
-    HyperExecutor { task_q }.execute(
-        async move {
-            if max_connections == 0 {
-                return Err::<(), GlommioError<()>>(io::Error::from(ConnectionRefused).into());
+    #[instrument(skip(addr, service))]
+    fn serve_http<A>(&self, addr: A, service: S) -> Self::Result
+    where
+        A: Into<SocketAddr>,
+    {
+        let max_connections = self.max_connections;
+        let task_q = self.task_q;
+
+        let addr: SocketAddr = addr.into();
+
+        trace!("Attempting bind() on: {:?}", addr);
+        let listener = TcpListener::bind(addr)?;
+
+        let conn_control = Rc::new(Semaphore::new(max_connections as _));
+
+        HyperExecutor { task_q }.execute(
+            async move {
+                if max_connections == 0 {
+                    error!("max_connections = 0. Refusing connections.");
+                    return Err::<(), GlommioError<()>>(io::Error::from(ConnectionRefused).into());
+                }
+
+                trace!("Start listening for client connections.");
+
+                loop {
+                    let stream = listener.accept().await?;
+                    let addr = stream.local_addr()?;
+
+                    trace!("Accepted a connection");
+
+                    let scoped_conn_control = conn_control.clone();
+                    let captured_service = service.clone();
+
+                    HyperExecutor { task_q }.execute(
+                        async move {
+                            let _semaphore_permit = scoped_conn_control.acquire_permit(1).await?;
+
+                            trace!("Acquired permit on conn_control, begin serving connection");
+
+                            let http = Http::new()
+                                .with_executor(HyperExecutor { task_q })
+                                .serve_connection(TokioIO(stream), captured_service);
+
+                            trace!("Obtained connection handle.");
+
+                            let conn_res: io::Result<()> = ConnResult(addr, http.await).into();
+
+                            trace!("Done serving connection");
+                            conn_res
+                        }
+                        .instrument(trace_span!("connection_handler")),
+                    );
+                }
             }
+            .instrument(trace_span!("tcp_listener")),
+        );
 
-            loop {
-                let stream = listener.accept().await?;
-                let addr = stream.local_addr()?;
-
-                let scoped_conn_control = conn_control.clone();
-                let captured_service = service.clone();
-
-                HyperExecutor { task_q }.execute(
-                    async move {
-                        let _semaphore_permit = scoped_conn_control.acquire_permit(1).await?;
-
-                        let http = Http::new()
-                            .with_executor(HyperExecutor { task_q })
-                            .serve_connection(TokioIO(stream), captured_service);
-
-                        let conn_res: io::Result<()> = ConnResult(addr, http.await).into();
-                        conn_res
-                    }
-                    .instrument(error_span!("connection_handler")),
-                );
-            }
-        }
-        .instrument(error_span!("tcp_listener")),
-    );
-
-    Ok(())
+        Ok(())
+    }
 }

@@ -5,7 +5,6 @@ use std::{rc::Rc, time::Duration};
 use tracing::{error, info, instrument, subscriber, Level};
 use tracing_subscriber::FmtSubscriber;
 
-use laminarmq::server::glommio_impl::hyper_compat::serve_http;
 use laminarmq::server::router::{single_node::Router, Router as _};
 
 const THREAD_NAME: &str = "laminarmq_server_thread_0";
@@ -48,10 +47,12 @@ async fn request_handler(
 #[cfg(not(tarpaulin_include))]
 #[cfg(target_os = "linux")]
 fn main() {
+    use hyper::service::service_fn;
+    use laminarmq::server::{glommio_impl::hyper_compat::HyperServer, Server};
     use tracing::{info_span, Instrument};
 
     let fmt_subscriber = FmtSubscriber::builder()
-        .with_max_level(Level::INFO)
+        .with_max_level(Level::TRACE)
         .finish();
 
     subscriber::set_global_default(fmt_subscriber).expect("setting default subscriber failed");
@@ -84,13 +85,17 @@ fn main() {
                 "rpc_server_tq",
             );
 
-            serve_http(
-                ([0, 0, 0, 0], 8080),
-                move |req| request_handler(shared_state.clone(), req),
-                1024,
-                rpc_server_tq,
-            )
-            .expect("serve_http errored out.");
+            let server = HyperServer {
+                max_connections: 1024,
+                task_q: rpc_server_tq,
+            };
+
+            server
+                .serve_http(
+                    ([0, 0, 0, 0], 8080),
+                    service_fn(move |req| request_handler(shared_state.clone(), req)),
+                )
+                .expect("serve_http errored out.");
 
             info!("Listening for HTTP requests on 0.0.0.0:8080");
 

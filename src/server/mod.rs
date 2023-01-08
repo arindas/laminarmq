@@ -41,3 +41,11 @@ pub mod tokio_compat;
 
 #[cfg(target_os = "linux")]
 pub mod glommio_impl;
+
+pub trait Server<Service> {
+    type Result;
+
+    fn serve_http<A>(&self, addr: A, service: Service) -> Self::Result
+    where
+        A: Into<std::net::SocketAddr>;
+}
