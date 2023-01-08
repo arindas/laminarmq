@@ -12,6 +12,7 @@ use std::{
     net::SocketAddr,
     rc::Rc,
 };
+use tower_service::Service;
 use tracing::{error, error_span, instrument, Instrument};
 
 /// [`hyper::rt::Executor`] implementation that executes futures by spawning them on a
@@ -73,6 +74,22 @@ where
     RespBd::Error: std::error::Error + Send + Sync,
     A: Into<SocketAddr>,
 {
+    serve_http_(addr, service_fn(service), max_connections, task_q)
+}
+
+pub fn serve_http_<S, RespBd, Error, A>(
+    addr: A,
+    service: S,
+    max_connections: usize,
+    task_q: TaskQ,
+) -> io::Result<()>
+where
+    S: Service<Request<hyper::Body>, Response = Response<RespBd>, Error = Error> + Clone + 'static,
+    Error: std::error::Error + 'static + Send + Sync,
+    RespBd: hyper::body::HttpBody + 'static,
+    RespBd::Error: std::error::Error + Send + Sync,
+    A: Into<SocketAddr>,
+{
     let listener = TcpListener::bind(addr.into())?;
     let conn_control = Rc::new(Semaphore::new(max_connections as _));
 
@@ -95,7 +112,7 @@ where
 
                         let http = Http::new()
                             .with_executor(HyperExecutor { task_q })
-                            .serve_connection(TokioIO(stream), service_fn(captured_service));
+                            .serve_connection(TokioIO(stream), captured_service);
 
                         let conn_res: io::Result<()> = ConnResult(addr, http.await).into();
                         conn_res

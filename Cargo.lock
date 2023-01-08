@@ -558,6 +558,7 @@ dependencies = [
  "route-recognizer",
  "serde",
  "tokio",
+ "tower-service",
  "tracing",
  "tracing-subscriber",
 ]
