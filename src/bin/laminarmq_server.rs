@@ -2,7 +2,7 @@ use glommio::{executor, Latency, LocalExecutorBuilder, Placement, Shares};
 use hyper::{Body, Request, Response, StatusCode};
 use std::convert::Infallible;
 use std::{rc::Rc, time::Duration};
-use tracing::{error, info, instrument, subscriber, Level};
+use tracing::{debug, error, info, instrument, subscriber, Level};
 use tracing_subscriber::FmtSubscriber;
 
 use laminarmq::server::router::{single_node::Router, Router as _};
@@ -21,7 +21,7 @@ async fn request_handler(
     request: Request<Body>,
 ) -> Result<Response<Body>, Infallible> {
     let response = if let Some(request) = shared_state.router.route(request).await {
-        info!("serving => {:?}", request);
+        debug!("serving => {:?}", request);
 
         Ok(Body::from("Valid request!"))
     } else {
@@ -29,6 +29,8 @@ async fn request_handler(
 
         Err((String::with_capacity(0), StatusCode::NOT_FOUND))
     };
+
+    debug!("Response received.");
 
     match match response {
         Err((message, status)) if message.is_empty() => {
@@ -52,7 +54,7 @@ fn main() {
     use tracing::{info_span, Instrument};
 
     let fmt_subscriber = FmtSubscriber::builder()
-        .with_max_level(Level::TRACE)
+        .with_max_level(Level::DEBUG)
         .finish();
 
     subscriber::set_global_default(fmt_subscriber).expect("setting default subscriber failed");
@@ -85,16 +87,12 @@ fn main() {
                 "rpc_server_tq",
             );
 
-            let server = HyperServer {
-                max_connections: 1024,
-                task_q: rpc_server_tq,
-            };
+            let server = HyperServer::new(1024, rpc_server_tq, ([0, 0, 0, 0], 8080));
 
             server
-                .serve_http(
-                    ([0, 0, 0, 0], 8080),
-                    service_fn(move |req| request_handler(shared_state.clone(), req)),
-                )
+                .serve(service_fn(move |req| {
+                    request_handler(shared_state.clone(), req)
+                }))
                 .expect("serve_http errored out.");
 
             info!("Listening for HTTP requests on 0.0.0.0:8080");

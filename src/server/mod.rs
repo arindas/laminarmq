@@ -42,10 +42,14 @@ pub mod tokio_compat;
 #[cfg(target_os = "linux")]
 pub mod glommio_impl;
 
+/// Trait for abstracting a RPC server implementation.
 pub trait Server<Service> {
     type Result;
 
-    fn serve_http<A>(&self, addr: A, service: Service) -> Self::Result
-    where
-        A: Into<std::net::SocketAddr>;
+    /// Serves RPC requests using the provided [`Service`] instance.
+    ///
+    /// ## Implementation note:
+    /// This method should setup a mechanism for scheduling
+    /// request-serving tasks and return without blocking.
+    fn serve(&self, service: Service) -> Self::Result;
 }

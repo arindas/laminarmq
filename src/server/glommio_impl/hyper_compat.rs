@@ -13,7 +13,7 @@ use std::{
     rc::Rc,
 };
 use tower_service::Service;
-use tracing::{error, instrument, trace, trace_span, Instrument};
+use tracing::{debug, error, instrument, trace_span, Instrument};
 
 /// [`hyper::rt::Executor`] implementation that executes futures by spawning them on a
 /// [`glommio::TaskQueueHandle`].
@@ -63,6 +63,20 @@ impl From<ConnResult> for io::Result<()> {
 pub struct HyperServer {
     pub max_connections: usize,
     pub task_q: TaskQ,
+    pub addr: SocketAddr,
+}
+
+impl HyperServer {
+    pub fn new<A>(max_connections: usize, task_q: TaskQ, addr: A) -> Self
+    where
+        A: Into<SocketAddr>,
+    {
+        Self {
+            max_connections,
+            task_q,
+            addr: addr.into(),
+        }
+    }
 }
 
 impl<S, RespBd, Error> Server<S> for HyperServer
@@ -74,18 +88,13 @@ where
 {
     type Result = io::Result<()>;
 
-    #[instrument(skip(addr, service))]
-    fn serve_http<A>(&self, addr: A, service: S) -> Self::Result
-    where
-        A: Into<SocketAddr>,
-    {
+    #[instrument(skip(service))]
+    fn serve(&self, service: S) -> Self::Result {
         let max_connections = self.max_connections;
         let task_q = self.task_q;
 
-        let addr: SocketAddr = addr.into();
-
-        trace!("Attempting bind() on: {:?}", addr);
-        let listener = TcpListener::bind(addr)?;
+        debug!("Attempting bind()");
+        let listener = TcpListener::bind(self.addr)?;
 
         let conn_control = Rc::new(Semaphore::new(max_connections as _));
 
@@ -96,13 +105,13 @@ where
                     return Err::<(), GlommioError<()>>(io::Error::from(ConnectionRefused).into());
                 }
 
-                trace!("Start listening for client connections.");
+                debug!("Start listening for client connections.");
 
                 loop {
                     let stream = listener.accept().await?;
                     let addr = stream.local_addr()?;
 
-                    trace!("Accepted a connection");
+                    debug!("Accepted a connection");
 
                     let scoped_conn_control = conn_control.clone();
                     let captured_service = service.clone();
@@ -111,17 +120,17 @@ where
                         async move {
                             let _semaphore_permit = scoped_conn_control.acquire_permit(1).await?;
 
-                            trace!("Acquired permit on conn_control, begin serving connection");
+                            debug!("Acquired permit on conn_control, begin serving connection");
 
                             let http = Http::new()
                                 .with_executor(HyperExecutor { task_q })
                                 .serve_connection(TokioIO(stream), captured_service);
 
-                            trace!("Obtained connection handle.");
+                            debug!("Obtained connection handle.");
 
                             let conn_res: io::Result<()> = ConnResult(addr, http.await).into();
 
-                            trace!("Done serving connection");
+                            debug!("Done serving connection");
                             conn_res
                         }
                         .instrument(trace_span!("connection_handler")),
