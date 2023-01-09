@@ -83,7 +83,7 @@ fn main() {
 
             let rpc_server_tq = executor().create_task_queue(
                 Shares::default(),
-                Latency::Matters(Duration::from_micros(10)),
+                Latency::NotImportant,
                 "rpc_server_tq",
             );
 
