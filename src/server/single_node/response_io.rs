@@ -28,7 +28,10 @@ impl<T: Deref<Target = [u8]>> Response<T> {
                     )
                     .await?;
                 writer
-                    .write(&bincode::serialize(&hierarchy).unwrap_or(vec![]))
+                    .write_all(
+                        &bincode::serialize(&hierarchy)
+                            .map_err(|_| io::Error::new(Other, "bincode serialization failed"))?,
+                    )
                     .await?;
             }
 
@@ -40,7 +43,7 @@ impl<T: Deref<Target = [u8]>> Response<T> {
                 writer.write_u64(record.metadata.offset).await?;
                 writer.write_u64(*next_offset).await?;
                 writer.write_u64(record.value.len() as u64).await?;
-                writer.write(record.value.deref()).await?;
+                writer.write_all(record.value.deref()).await?;
             }
 
             Self::LowestOffset(lowest_offset) => {

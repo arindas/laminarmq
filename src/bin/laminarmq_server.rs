@@ -1,7 +1,7 @@
 use glommio::{executor, Latency, LocalExecutorBuilder, Placement, Shares};
 use hyper::{Body, Request, Response, StatusCode};
 use std::convert::Infallible;
-use std::{rc::Rc, time::Duration};
+use std::rc::Rc;
 use tracing::{debug, error, info, instrument, subscriber, Level};
 use tracing_subscriber::FmtSubscriber;
 
