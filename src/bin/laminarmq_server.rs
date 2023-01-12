@@ -89,15 +89,22 @@ fn main() {
 
             let server = HyperServer::new(1024, rpc_server_tq, ([0, 0, 0, 0], 8080));
 
-            server
+            let server_task = server
                 .serve(service_fn(move |req| {
                     request_handler(shared_state.clone(), req)
                 }))
                 .expect("serve_http errored out.");
 
+            let server_join_handle = server_task.detach();
+
             info!("Listening for HTTP requests on 0.0.0.0:8080");
 
             signal_rx.recv().await;
+
+            // stop the future that the the server is listening
+            // on from being polled any further
+            server_join_handle.cancel();
+            server_join_handle.await; // join() on server task
 
             info!("Done Listening to requests.");
         })
