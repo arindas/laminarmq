@@ -54,7 +54,7 @@ The current implementation based on [`glommio`](https://docs.rs/glommio) runs on
 >512
 >```
 
-Refer to latest git [API Documentation](https://arindas.github.io/laminarmq/laminarmq/)
+Refer to latest git [API Documentation](https://arindas.github.io/laminarmq/docs/laminarmq/)
 or [Crate Documentation](https://docs.rs/laminarmq) for more details.
 
 `laminarmq` presents an elementary commit-log abstraction (a series of records ordered by offsets), on top of which
