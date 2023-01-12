@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["PartitionError","Error type for [`Partition`]"]],"struct":[["Partition","In-memory partition implementation based off of a [`HashMap`]"],["PartitionCreator","Creates [`Partition`] instances."]]};

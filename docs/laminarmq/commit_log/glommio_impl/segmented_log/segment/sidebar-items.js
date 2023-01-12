@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["glommio_segment","Creates a new [`Segment`] instance specialized to the [`glommio`] runtime."]]};

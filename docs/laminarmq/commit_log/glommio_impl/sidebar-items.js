@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":[["prelude","Prelude module for `glommio_impl` with common exports for convenience."],["segmented_log","Module providing the specialization for `SegmentedLog` for the [`glommio`] runtime."]]};

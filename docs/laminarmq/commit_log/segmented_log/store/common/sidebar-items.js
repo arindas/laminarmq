@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":[["RECORD_HEADER_LENGTH","Number of bytes required for storing the record header."],["STORE_FILE_EXTENSION","Extension used by backing files for `Store`s."]],"struct":[["RecordHeader","Header for a record stored in `Store`."]]};

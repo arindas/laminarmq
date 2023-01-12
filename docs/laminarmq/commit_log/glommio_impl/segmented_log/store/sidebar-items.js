@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":[["DEFAULT_STORE_WRITER_BUFFER_SIZE","Default buffer size used by the [`DmaStreamWriter`] in [`Store`] when created with [`Store::new`]."]],"enum":[["StoreError","Error type used by [`Store`]."]],"struct":[["Store","[`crate::commit_log::segmented_log::store::Store`] implementation for the [`glommio`] runtime."]]};

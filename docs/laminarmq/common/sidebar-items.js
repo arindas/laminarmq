@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":[["split","Module providing a splittable slice abstraction."]]};

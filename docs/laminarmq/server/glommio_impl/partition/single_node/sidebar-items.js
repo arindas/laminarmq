@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":[["commit_log","Module providing specializations for `commit_log` based partition implementations specific to the [`glommio`] runtime."]]};

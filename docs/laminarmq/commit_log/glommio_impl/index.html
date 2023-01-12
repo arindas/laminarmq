@@ -1,0 +1,46 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Module providing specializations of different generic entities and trait impls for the [`glommio`] runtime."><meta name="keywords" content="rust, rustlang, rust-lang, glommio_impl"><title>laminarmq::commit_log::glommio_impl - Rust</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../../favicon.svg"></head><body class="rustdoc mod"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../laminarmq/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../laminarmq/index.html"><div class="logo-container"><img class="rust-logo" src="../../../rust-logo.svg" alt="logo"></div></a><h2 class="location"><a href="#">Module glommio_impl</a></h2><div class="sidebar-elems"><section><ul class="block"><li><a href="#modules">Modules</a></li></ul></section></div></nav><main><div class="width-limiter"><nav class="sub"><form class="search-form"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><a href="../../../help.html">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></form></nav><section id="main-content" class="content"><div class="main-heading"><h1 class="fqn">Module <a href="../../index.html">laminarmq</a>::<wbr><a href="../index.html">commit_log</a>::<wbr><a class="mod" href="#">glommio_impl</a><button id="copy-path" onclick="copy_path(this)" title="Copy item path to clipboard"><img src="../../../clipboard.svg" width="19" height="18" alt="Copy item path"></button></h1><span class="out-of-band"><a class="srclink" href="../../../src/laminarmq/commit_log/glommio_impl/mod.rs.html#1-57">source</a> · <a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">[<span class="inner">&#x2212;</span>]</a></span></div><details class="rustdoc-toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Module providing specializations of different generic entities and trait impls for the [<code>glommio</code>] runtime.</p>
+<h4 id="sample-usage"><a href="#sample-usage">Sample usage:</a></h4>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>glommio::{LocalExecutorBuilder, Placement};
+<span class="kw">use </span>std::path::PathBuf;
+
+<span class="kw">use </span>laminarmq::commit_log::prelude::<span class="kw-2">*</span>;
+
+<span class="kw">let </span>local_ex = LocalExecutorBuilder::new(Placement::Unbound)
+    .spawn(<span class="kw">move </span>|| <span class="kw">async move </span>{
+        <span class="kw">const </span>LOG_CONFIG: SegmentedLogConfig = SegmentedLogConfig {
+            initial_offset: <span class="number">0</span>,
+            segment_config: SegmentConfig {
+                store_buffer_size: <span class="prelude-val">None</span>,
+                max_store_bytes: <span class="number">512</span>,
+            },
+            truncate_on_append: <span class="bool-val">false</span>,
+        };
+
+        <span class="kw">let </span>storage_dir_path = <span class="string">&quot;/tmp/laminarmq_commit_log_glommio_impl_segmented_log&quot;</span>;
+
+        <span class="kw">let </span>log = glommio_segmented_log::&lt;<span class="kw-2">&amp;</span>str, ()&gt;(storage_dir_path, LOG_CONFIG)
+            .<span class="kw">await
+            </span>.unwrap();
+
+        log.close().<span class="kw">await</span>.unwrap();
+
+        <span class="macro">assert!</span>(PathBuf::from(store_file_path(
+            <span class="kw-2">&amp;</span>storage_dir_path,
+            LOG_CONFIG.initial_offset
+        ))
+        .exists());
+
+        <span class="kw">let </span>log = glommio_segmented_log::&lt;<span class="kw-2">&amp;</span>str, ()&gt;(storage_dir_path, LOG_CONFIG)
+            .<span class="kw">await
+            </span>.unwrap();
+
+        log.remove().<span class="kw">await</span>.unwrap();
+        <span class="macro">assert!</span>(!PathBuf::from(<span class="kw-2">&amp;</span>storage_dir_path).exists());
+    })
+    .unwrap();
+local_ex.join().unwrap();</code></pre></div>
+<h4 id="note"><a href="#note">Note:</a></h4>
+<p>All the modules nested in this module have their own tests. When in confusion regarding the
+API of a particular component, read how it is tested in order to understand them better.</p>
+</div></details><h2 id="modules" class="small-section-header"><a href="#modules">Modules</a></h2><div class="item-table"><div class="item-row"><div class="item-left module-item"><a class="mod" href="prelude/index.html" title="laminarmq::commit_log::glommio_impl::prelude mod">prelude</a></div><div class="item-right docblock-short">Prelude module for <a href="index.html"><code>glommio_impl</code></a> with common exports for convenience.</div></div><div class="item-row"><div class="item-left module-item"><a class="mod" href="segmented_log/index.html" title="laminarmq::commit_log::glommio_impl::segmented_log mod">segmented_log</a></div><div class="item-right docblock-short">Module providing the specialization for
+<a href="../segmented_log/struct.SegmentedLog.html"><code>SegmentedLog</code></a> for the [<code>glommio</code>] runtime.</div></div></div></section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="laminarmq" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.1 (90743e729 2023-01-10)" ></div></body></html>

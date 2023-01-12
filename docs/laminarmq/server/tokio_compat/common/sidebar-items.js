@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["read_exact","Reads the given exact number of bytes from the given reader into a [`Vec<u8>`]."]]};

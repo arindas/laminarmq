@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["new_task","Creates a new [`GlommioTask`] for servicing the given `Request`."]],"type":[["GlommioTask","[`Task`] specialization for [`glommio`] with [`ResponseSender`]."],["ResponseReceiver","Type alias for Response channel receiving end."],["ResponseSender","Type alias for Response channel sending end."]]};

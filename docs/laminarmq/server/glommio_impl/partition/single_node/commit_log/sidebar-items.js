@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":[["segmented_log","Module providing specializations for `segmented_log` based partition implementations specific to the [`glommio`] runtime."]]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":[["single_node","Module providing single-node specific partition implementations."]]};

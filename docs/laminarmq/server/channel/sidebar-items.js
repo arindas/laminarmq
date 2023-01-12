@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"trait":[["Receiver","Trait representing the receiving end of a channel."],["Sender","Trait representing the sending end of a channel."]]};

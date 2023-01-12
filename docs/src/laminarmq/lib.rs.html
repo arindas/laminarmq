@@ -1,0 +1,440 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/lib.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>lib.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../normalize.css"><link rel="stylesheet" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../ayu.css" disabled><link rel="stylesheet" href="../../dark.css" disabled><link rel="stylesheet" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../../favicon.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"></nav><main><div class="width-limiter"><nav class="sub"><a class="sub-logo-container" href="../../laminarmq/index.html"><img class="rust-logo" src="../../rust-logo.svg" alt="logo"></a><form class="search-form"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><a href="../../help.html">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></form></nav><section id="main-content" class="content"><div class="example-wrap"><pre class="src-line-numbers"><span id="1">1</span>
+<span id="2">2</span>
+<span id="3">3</span>
+<span id="4">4</span>
+<span id="5">5</span>
+<span id="6">6</span>
+<span id="7">7</span>
+<span id="8">8</span>
+<span id="9">9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+</pre><pre class="rust"><code><span class="doccomment">//! &lt;p align=&quot;center&quot;&gt;
+//!   &lt;img src=&quot;https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/logo.png&quot; alt=&quot;laminarmq&quot;&gt;
+//! &lt;/p&gt;
+//!
+//! &lt;p align=&quot;center&quot;&gt;
+//!   &lt;a href=&quot;https://github.com/arindas/laminarmq/actions/workflows/ci.yml&quot;&gt;
+//!   &lt;img src=&quot;https://github.com/arindas/laminarmq/actions/workflows/ci.yml/badge.svg&quot; /&gt;
+//!   &lt;/a&gt;
+//!   &lt;a href=&quot;https://codecov.io/gh/arindas/laminarmq&quot; &gt;
+//!   &lt;img src=&quot;https://codecov.io/gh/arindas/laminarmq/branch/main/graph/badge.svg?token=6VLETF5REC&quot;/&gt;
+//!   &lt;/a&gt;
+//!   &lt;a href=&quot;https://crates.io/crates/laminarmq&quot;&gt;
+//!   &lt;img src=&quot;https://img.shields.io/crates/v/laminarmq&quot; /&gt;
+//!   &lt;/a&gt;
+//!   &lt;a href=&quot;https://github.com/arindas/laminarmq/actions/workflows/rustdoc.yml&quot;&gt;
+//!   &lt;img src=&quot;https://github.com/arindas/laminarmq/actions/workflows/rustdoc.yml/badge.svg&quot; /&gt;
+//!   &lt;/a&gt;
+//! &lt;/p&gt;
+//!
+//! &lt;p align=&quot;center&quot;&gt;
+//! A scalable, distributed message queue powered by a segmented, partitioned, replicated and immutable log.
+//! &lt;br&gt;&lt;i&gt;This is currently a work in progress.&lt;/i&gt;
+//! &lt;/p&gt;
+//!
+//! ## Usage
+//! `laminarmq` provides a library crate and two binaries for managing `laminarmq` deployments.
+//! In order to use `laminarmq` as a library, add the following to your `Cargo.toml`:
+//! ```toml
+//! [dependencies]
+//! laminarmq = &quot;0.0.4&quot;
+//! ```
+//!
+//! The current implementation based on [`glommio`](https://docs.rs/glommio) runs only on linux. `glommio` requires
+//! `io_uring` support in the linux kernel. `glommio` requires a kernel with a recent enough `io_uring` support, at
+//! least current enough to run discovery probes. The minimum version at this time is 5.8.
+//!
+//! Please also note Glommio requires at least 512 KiB of locked memory for `io_uring` to work. You can increase
+//! the `memlock` resource limit (rlimit) as follows:
+//!
+//! ```text
+//! $ vi /etc/security/limits.conf
+//! *    hard    memlock        512
+//! *    soft    memlock        512
+//! ```
+//!
+//! Please note that 512 KiB is the minimum needed to spawn a single executor. Spawning multiple executors may
+//! require you to raise the limit accordingly.
+//!
+//! To make the new limits effective, you need to log in to the machine again. You can verify that the limits
+//! are updated by running the following:
+//!
+//! ```text
+//! $ ulimit -l
+//! 512
+//! ```
+//!
+//! `laminarmq` presents an elementary commit-log abstraction (a series of records ordered by offsets), on top of which
+//! several message queue semantics such as publish subscribe or even full blown protocols like MQTT could be implemented.
+//! Users are free to read the messages with offsets in any order they need.
+//!
+//! ## Design
+//! This section describes the internal design of `laminarmq`.
+//!
+//! ### Execution Model
+//!
+//! ![execution-model](https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-execution-model.png)
+//!
+//! `laminarmq` uses the thread-per-core execution model where individual processor cores are limited to single threads.
+//! This model encourages design that minimizes inter-thread contention and locks, thereby improving tail latencies in
+//! software services. Read: [The Impact of Thread per Core Architecture on Application Tail Latency.](
+//! https://helda.helsinki.fi//bitstream/handle/10138/313642/tpc_ancs19.pdf?sequence=1)
+//!
+//! In our case, each thread is responsible for servicing only a subset of the partitions. Requests pertaining to a specific
+//! partition are always routed to the same thread. This greatly increases locality of requests. The routing mechanism
+//! could be implemented in a several ways:
+//! - Each thread listens on a unique port. We have a reverse proxy of sorts to forward requests to specific ports.
+//! - An eBPF based packet filter is used to route packets to appropriate threads based on the topic and partition of
+//! the request to which the packet belongs to.
+//!
+//! Since each processor core is limited to a single thread, tasks in a thread need to be scheduled efficiently. Hence each
+//! worker thread runs their own task scheduler. Tasks can be scheduled on different task queues and different task queues
+//! can be provisioned with specific fractions of CPU time shares.
+//!
+//! The current implementation only provides a single node, single threaded server; request routing is yet to be
+//! implemented. However, the eBPF route is more desirable since it doesn&#39;t require any additional dependency on the
+//! user&#39;s end.
+//!
+//! `laminarmq` is generic enough to be implemented with different `async` runtimes. However, for our initial release
+//! we have elected [`glommio`](https://docs.rs/glommio) as our thread-per-core runtime. `glommio` leverages the new
+//! linux 5.x [`io_uring`](https://kernel.dk/io_uring.pdf) API which facilitates true asynchronous IO for both
+//! networking and disk interfaces. (Other `async` runtimes such as [`tokio`](https://docs.rs/tokio) make blocking
+//! system calls for disk IO operations in a thread-pool.)
+//!
+//! `io_uring` also has the advantage of being able to queue together multiple system calls together and then
+//! asynchronously wait for their completion by making a maximum of one context switch. It is also possible to
+//! avoid context switches altogether. This is achieved with a pair of ring buffers called the submission-queue
+//! and the completion-queue. Once the queues are set up, user can queue multiple system calls on the submission
+//! queue. The linux kernel processes the system calls and places the results in the completion queue. The user
+//! can then freely read the results from the completion-queue. This entire process after setting up the queues
+//! doesn&#39;t require any additional context switch.
+//!
+//! Read more: &lt;https://man.archlinux.org/man/io_uring.7.en&gt;
+//!
+//! `glommio` presents additional abstractions on top of `io_uring` in the form of an async runtime, with support
+//! for networking, disk IO, channels, single threaded locks and more.
+//!
+//! Read more: &lt;https://www.datadoghq.com/blog/engineering/introducing-glommio/&gt;
+//!
+//! ### Architecture
+//! This section describes the planned architecture for making our message queue distributed across multiple nodes.
+//!
+//! #### Storage Hierarchy
+//! Data is persisted in `laminarmq` with the following hierarchy:
+//!
+//! ```text
+//! [cluster]
+//! ├── node#001
+//! │   ├── (topic#001 -&gt; partition#001) [L]
+//! │   │   └── segmented_log{[segment#001, segment#002, ...]}
+//! │   ├── (topic#001 -&gt; partition#002) [L]
+//! │   │   └── segmented_log{[segment#001, segment#002, ...]}
+//! │   └── (topic#002 -&gt; partition#001) [F]
+//! │       └── segmented_log{[segment#001, segment#002, ...]}
+//! ├── node#002
+//! │   ├── (topic#001 -&gt; partition#002) [F]
+//! │   │   └── segmented_log{[segment#001, segment#002, ...]}
+//! │   └── (topic#002 -&gt; partition#001) [L]
+//! │       └── segmented_log{[segment#001, segment#002, ...]}
+//! └── ...other nodes
+//! ```
+//!
+//! Every &quot;partition&quot; is backed by a persistent, segmented log. A log is an append only collection of &quot;message&quot;(s).
+//! Messages in a &quot;partition&quot; are accessed using their &quot;offset&quot; i.e. location of the &quot;message&quot;&#39;s bytes in the log.
+//!
+//! #### `segmented_log`: Persistent data structure for storing records in a partition
+//! The segmented-log data structure for storing records is inspired from
+//! [Apache Kafka](https://www.microsoft.com/en-us/research/wp-content/uploads/2017/09/Kafka.pdf).
+//!
+//! ![segmented_log](https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-segmented-log.png)
+//!
+//! A segmented log is a collection of read segments and a single write segment. Each &quot;segment&quot; is backed by a
+//! storage file on disk called &quot;store&quot;.
+//!
+//! The log is:
+//! - &quot;immutable&quot;, since only &quot;append&quot;, &quot;read&quot; and &quot;truncate&quot; operations are allowed. It is not possible to update
+//! or delete records from the middle of the log.
+//! - &quot;segmented&quot;, since it is composed of segments, where each segment services records from a particular range
+//! of offsets.
+//!
+//! All writes go to the write segment. A new record is written at `offset = write_segment.next_offset` in the write
+//! segment. When we max out the capacity of the write segment, we close the write segment and reopen it as a read
+//! segment. The re-opened segment is added to the list of read segments. A new write segment is then created with
+//! `base_offset` equal to the `next_offset` of the previous write segment.
+//!
+//! When reading from a particular offset, we linearly check which segment contains the given
+//! read segment. If a segment capable of servicing a read from the given offset is found, we
+//! read from that segment. If no such segment is found among the read segments, we default to
+//! the write segment. The following scenarios may occur when reading from the write segment in
+//! this case:
+//! - The write segment has synced the messages including the message at the given offset. In
+//! this case the record is read successfully and returned.
+//! - The write segment hasn&#39;t synced the data at the given offset. In this case the read fails
+//! with a segment I/O error.
+//! - If the offset is out of bounds of even the write segment, we return an &quot;out of bounds&quot;
+//! error.
+//!
+//! Checkout `laminarmq`&#39;s `segmented_log` implementation [here](crate::commit_log::segmented_log).
+//!
+//!
+//! #### Replication and Partitioning (or redundancy and horizontal scaling)
+//! A particular &quot;node&quot; contains some or all &quot;partition&quot;(s) of a &quot;topic&quot;. Hence a &quot;topic&quot; is both partitioned and
+//! replicated within the nodes. The data is partitioned with the dividing of the data among the &quot;partition&quot;(s),
+//! and replicated by replicating these &quot;partition&quot;(s) among the other &quot;node&quot;(s).
+//!
+//! Each partition is part of a Raft group; e.g each replica of `(topic#001 -&gt; partition#001)` is part of a Raft
+//! group, while each replica of `(topic#002 -&gt; partition#002)` are part of a different Raft group. A particular
+//! &quot;node&quot; might host some Raft leader &quot;partition&quot;(s) as well as Raft follower &quot;partition&quot;(s). For instance in the
+//! above example data persistence hierarchy, the `[L]` denote leaders, and the `[F]` denote followers.
+//!
+//! If a node goes down:
+//! - For every leader partition in that node:
+//!   - if there are no other follower replicas in other nodes in it&#39;s Raft group, that partition goes down.
+//!   - if there are other follower replicas in other nodes, there are leader elections among them and after a
+//!   leader is elected, reads and writes for that partition proceed normally
+//! - For every follower partition in that node:
+//!   - the remaining replicas in the same raft group continue to function in accordance with Raft&#39;s mechanisms.
+//!
+//! [CockroachDB](https://www.cockroachlabs.com/) and [Tikv](https://tikv.org) call this manner of using different
+//! Raft groups for different data buckets on the same node as MultiRaft.
+//!
+//! Read more here:
+//! - &lt;https://tikv.org/deep-dive/scalability/multi-raft/&gt;
+//! - &lt;https://www.cockroachlabs.com/blog/scaling-raft/&gt;
+//!
+//! #### Service Discovery
+//! Now we maintain a &quot;member-list&quot; abstraction of all &quot;node&quot;(s) which states which nodes are online in real time.
+//! This &quot;member-list&quot; abstraction is able to respond to events such as a new node joining or leaving the cluster.
+//! (It internally uses a gossip protocol for membership information dissemination.) This abstraction can also
+//! handle queries like the different &quot;partition&quot;(s) hosted by a particular node. Using this we do the following:
+//! - Create new replicas of partitions or rebalance partitions when a node joins or leaves the cluster.
+//! - Identify which node holds which partition in real time. This information can be used for client side load
+//! balancing when reading or writing to a particular partition.
+//!
+//! #### Data Retention SLA
+//! A &quot;segment_age&quot; configuration is made available to configure the maximum allowed age of segments. Since all
+//! partitions maintain consistency using Raft consensus, they have completely identical message-segment distribution.
+//! At regular intervals, segments with age greater than the specified &quot;segment_age&quot; are removed and the messages
+//! stored in these segments are lost. A good value for &quot;segment_age&quot; could be `7 days`.
+
+</span><span class="kw">pub mod </span>commit_log;
+<span class="kw">pub mod </span>common;
+<span class="kw">pub mod </span>server;
+
+<span class="attribute">#[cfg(not(tarpaulin_include))]
+</span><span class="kw">pub mod </span>prelude {
+    <span class="doccomment">//! Prelude module for [`laminarmq`](super) with common exports for convenience.
+
+    </span><span class="kw">pub use </span><span class="kw">super</span>::commit_log::prelude::<span class="kw-2">*</span>;
+}
+</code></pre></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="laminarmq" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.1 (90743e729 2023-01-10)" ></div></body></html>

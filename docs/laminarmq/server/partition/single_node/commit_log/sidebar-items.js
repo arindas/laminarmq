@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["PartitionError","Error type for [`Partition`]"]],"mod":[["segmented_log","Module providing entities and utilities exclusive to `segmented_log`."]],"struct":[["Partition","[`Partition`] backed by a [`CommitLog`] instance for storage."]]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["ConnResult",""],["HyperServer","Serves HTTP requests at the given address using the given parameters. All request handling futures are spawned on the given [`TaskQueueHandle`]."]]};

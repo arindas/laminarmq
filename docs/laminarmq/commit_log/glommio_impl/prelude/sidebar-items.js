@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["ReadResult","ReadResult encapsulates a buffer, returned by read operations like `get_buffer_aligned` and `read_at`"]]};

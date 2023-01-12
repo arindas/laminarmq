@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":[["single_node","Module responsible for routing single node HTTP requests to concrete single node RPC requests."]],"trait":[["Router","Generic trait representing a router capable of routing HTTP requests to the given Request type."]]};

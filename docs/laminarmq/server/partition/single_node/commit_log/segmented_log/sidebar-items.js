@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["partition_storage_path","Obtain partition base storage directory for a specific partition from a given base directory and it’s partition id."]],"struct":[["PartitionConfig","Configuration for a `Partition` using a `segmented_log`."]]};

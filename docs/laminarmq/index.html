@@ -1,0 +1,181 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Usage"><meta name="keywords" content="rust, rustlang, rust-lang, laminarmq"><title>laminarmq - Rust</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../normalize.css"><link rel="stylesheet" href="../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../ayu.css" disabled><link rel="stylesheet" href="../dark.css" disabled><link rel="stylesheet" href="../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../storage.js"></script><script defer src="../crates.js"></script><script defer src="../main.js"></script><noscript><link rel="stylesheet" href="../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../favicon.svg"></head><body class="rustdoc mod crate"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../laminarmq/index.html"><div class="logo-container"><img class="rust-logo" src="../rust-logo.svg" alt="logo"></div></a><h2></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../laminarmq/index.html"><div class="logo-container"><img class="rust-logo" src="../rust-logo.svg" alt="logo"></div></a><h2 class="location"><a href="#">Crate laminarmq</a></h2><div class="sidebar-elems"><ul class="block"><li class="version">Version 0.0.4</li><li><a id="all-types" href="all.html">All Items</a></li></ul><section><ul class="block"><li><a href="#modules">Modules</a></li></ul></section></div></nav><main><div class="width-limiter"><nav class="sub"><form class="search-form"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><a href="../help.html">?</a></div><div id="settings-menu" tabindex="-1"><a href="../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../wheel.svg"></a></div></form></nav><section id="main-content" class="content"><div class="main-heading"><h1 class="fqn">Crate <a class="mod" href="#">laminarmq</a><button id="copy-path" onclick="copy_path(this)" title="Copy item path to clipboard"><img src="../clipboard.svg" width="19" height="18" alt="Copy item path"></button></h1><span class="out-of-band"><a class="srclink" href="../src/laminarmq/lib.rs.html#1-219">source</a> · <a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">[<span class="inner">&#x2212;</span>]</a></span></div><details class="rustdoc-toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p align="center">
+  <img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/logo.png" alt="laminarmq">
+</p>
+<p align="center">
+  <a href="https://github.com/arindas/laminarmq/actions/workflows/ci.yml">
+  <img src="https://github.com/arindas/laminarmq/actions/workflows/ci.yml/badge.svg" />
+  </a>
+  <a href="https://codecov.io/gh/arindas/laminarmq" >
+  <img src="https://codecov.io/gh/arindas/laminarmq/branch/main/graph/badge.svg?token=6VLETF5REC"/>
+  </a>
+  <a href="https://crates.io/crates/laminarmq">
+  <img src="https://img.shields.io/crates/v/laminarmq" />
+  </a>
+  <a href="https://github.com/arindas/laminarmq/actions/workflows/rustdoc.yml">
+  <img src="https://github.com/arindas/laminarmq/actions/workflows/rustdoc.yml/badge.svg" />
+  </a>
+</p>
+<p align="center">
+A scalable, distributed message queue powered by a segmented, partitioned, replicated and immutable log.
+<br><i>This is currently a work in progress.</i>
+</p>
+<h3 id="usage"><a href="#usage">Usage</a></h3>
+<p><code>laminarmq</code> provides a library crate and two binaries for managing <code>laminarmq</code> deployments.
+In order to use <code>laminarmq</code> as a library, add the following to your <code>Cargo.toml</code>:</p>
+<div class="example-wrap"><pre class="language-toml"><code>[dependencies]
+laminarmq = &quot;0.0.4&quot;
+</code></pre></div>
+<p>The current implementation based on <a href="https://docs.rs/glommio"><code>glommio</code></a> runs only on linux. <code>glommio</code> requires
+<code>io_uring</code> support in the linux kernel. <code>glommio</code> requires a kernel with a recent enough <code>io_uring</code> support, at
+least current enough to run discovery probes. The minimum version at this time is 5.8.</p>
+<p>Please also note Glommio requires at least 512 KiB of locked memory for <code>io_uring</code> to work. You can increase
+the <code>memlock</code> resource limit (rlimit) as follows:</p>
+<div class="example-wrap"><pre class="language-text"><code>$ vi /etc/security/limits.conf
+*    hard    memlock        512
+*    soft    memlock        512
+</code></pre></div>
+<p>Please note that 512 KiB is the minimum needed to spawn a single executor. Spawning multiple executors may
+require you to raise the limit accordingly.</p>
+<p>To make the new limits effective, you need to log in to the machine again. You can verify that the limits
+are updated by running the following:</p>
+<div class="example-wrap"><pre class="language-text"><code>$ ulimit -l
+512
+</code></pre></div>
+<p><code>laminarmq</code> presents an elementary commit-log abstraction (a series of records ordered by offsets), on top of which
+several message queue semantics such as publish subscribe or even full blown protocols like MQTT could be implemented.
+Users are free to read the messages with offsets in any order they need.</p>
+<h3 id="design"><a href="#design">Design</a></h3>
+<p>This section describes the internal design of <code>laminarmq</code>.</p>
+<h4 id="execution-model"><a href="#execution-model">Execution Model</a></h4>
+<p><img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-execution-model.png" alt="execution-model" /></p>
+<p><code>laminarmq</code> uses the thread-per-core execution model where individual processor cores are limited to single threads.
+This model encourages design that minimizes inter-thread contention and locks, thereby improving tail latencies in
+software services. Read: <a href="https://helda.helsinki.fi//bitstream/handle/10138/313642/tpc_ancs19.pdf?sequence=1">The Impact of Thread per Core Architecture on Application Tail Latency.</a></p>
+<p>In our case, each thread is responsible for servicing only a subset of the partitions. Requests pertaining to a specific
+partition are always routed to the same thread. This greatly increases locality of requests. The routing mechanism
+could be implemented in a several ways:</p>
+<ul>
+<li>Each thread listens on a unique port. We have a reverse proxy of sorts to forward requests to specific ports.</li>
+<li>An eBPF based packet filter is used to route packets to appropriate threads based on the topic and partition of
+the request to which the packet belongs to.</li>
+</ul>
+<p>Since each processor core is limited to a single thread, tasks in a thread need to be scheduled efficiently. Hence each
+worker thread runs their own task scheduler. Tasks can be scheduled on different task queues and different task queues
+can be provisioned with specific fractions of CPU time shares.</p>
+<p>The current implementation only provides a single node, single threaded server; request routing is yet to be
+implemented. However, the eBPF route is more desirable since it doesn’t require any additional dependency on the
+user’s end.</p>
+<p><code>laminarmq</code> is generic enough to be implemented with different <code>async</code> runtimes. However, for our initial release
+we have elected <a href="https://docs.rs/glommio"><code>glommio</code></a> as our thread-per-core runtime. <code>glommio</code> leverages the new
+linux 5.x <a href="https://kernel.dk/io_uring.pdf"><code>io_uring</code></a> API which facilitates true asynchronous IO for both
+networking and disk interfaces. (Other <code>async</code> runtimes such as <a href="https://docs.rs/tokio"><code>tokio</code></a> make blocking
+system calls for disk IO operations in a thread-pool.)</p>
+<p><code>io_uring</code> also has the advantage of being able to queue together multiple system calls together and then
+asynchronously wait for their completion by making a maximum of one context switch. It is also possible to
+avoid context switches altogether. This is achieved with a pair of ring buffers called the submission-queue
+and the completion-queue. Once the queues are set up, user can queue multiple system calls on the submission
+queue. The linux kernel processes the system calls and places the results in the completion queue. The user
+can then freely read the results from the completion-queue. This entire process after setting up the queues
+doesn’t require any additional context switch.</p>
+<p>Read more: <a href="https://man.archlinux.org/man/io_uring.7.en">https://man.archlinux.org/man/io_uring.7.en</a></p>
+<p><code>glommio</code> presents additional abstractions on top of <code>io_uring</code> in the form of an async runtime, with support
+for networking, disk IO, channels, single threaded locks and more.</p>
+<p>Read more: <a href="https://www.datadoghq.com/blog/engineering/introducing-glommio/">https://www.datadoghq.com/blog/engineering/introducing-glommio/</a></p>
+<h4 id="architecture"><a href="#architecture">Architecture</a></h4>
+<p>This section describes the planned architecture for making our message queue distributed across multiple nodes.</p>
+<h5 id="storage-hierarchy"><a href="#storage-hierarchy">Storage Hierarchy</a></h5>
+<p>Data is persisted in <code>laminarmq</code> with the following hierarchy:</p>
+<div class="example-wrap"><pre class="language-text"><code>[cluster]
+├── node#001
+│   ├── (topic#001 -&gt; partition#001) [L]
+│   │   └── segmented_log{[segment#001, segment#002, ...]}
+│   ├── (topic#001 -&gt; partition#002) [L]
+│   │   └── segmented_log{[segment#001, segment#002, ...]}
+│   └── (topic#002 -&gt; partition#001) [F]
+│       └── segmented_log{[segment#001, segment#002, ...]}
+├── node#002
+│   ├── (topic#001 -&gt; partition#002) [F]
+│   │   └── segmented_log{[segment#001, segment#002, ...]}
+│   └── (topic#002 -&gt; partition#001) [L]
+│       └── segmented_log{[segment#001, segment#002, ...]}
+└── ...other nodes
+</code></pre></div>
+<p>Every “partition” is backed by a persistent, segmented log. A log is an append only collection of “message”(s).
+Messages in a “partition” are accessed using their “offset” i.e. location of the “message”’s bytes in the log.</p>
+<h5 id="segmented_log-persistent-data-structure-for-storing-records-in-a-partition"><a href="#segmented_log-persistent-data-structure-for-storing-records-in-a-partition"><code>segmented_log</code>: Persistent data structure for storing records in a partition</a></h5>
+<p>The segmented-log data structure for storing records is inspired from
+<a href="https://www.microsoft.com/en-us/research/wp-content/uploads/2017/09/Kafka.pdf">Apache Kafka</a>.</p>
+<p><img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-segmented-log.png" alt="segmented_log" /></p>
+<p>A segmented log is a collection of read segments and a single write segment. Each “segment” is backed by a
+storage file on disk called “store”.</p>
+<p>The log is:</p>
+<ul>
+<li>“immutable”, since only “append”, “read” and “truncate” operations are allowed. It is not possible to update
+or delete records from the middle of the log.</li>
+<li>“segmented”, since it is composed of segments, where each segment services records from a particular range
+of offsets.</li>
+</ul>
+<p>All writes go to the write segment. A new record is written at <code>offset = write_segment.next_offset</code> in the write
+segment. When we max out the capacity of the write segment, we close the write segment and reopen it as a read
+segment. The re-opened segment is added to the list of read segments. A new write segment is then created with
+<code>base_offset</code> equal to the <code>next_offset</code> of the previous write segment.</p>
+<p>When reading from a particular offset, we linearly check which segment contains the given
+read segment. If a segment capable of servicing a read from the given offset is found, we
+read from that segment. If no such segment is found among the read segments, we default to
+the write segment. The following scenarios may occur when reading from the write segment in
+this case:</p>
+<ul>
+<li>The write segment has synced the messages including the message at the given offset. In
+this case the record is read successfully and returned.</li>
+<li>The write segment hasn’t synced the data at the given offset. In this case the read fails
+with a segment I/O error.</li>
+<li>If the offset is out of bounds of even the write segment, we return an “out of bounds”
+error.</li>
+</ul>
+<p>Checkout <code>laminarmq</code>’s <code>segmented_log</code> implementation <a href="commit_log/segmented_log/index.html">here</a>.</p>
+<h5 id="replication-and-partitioning-or-redundancy-and-horizontal-scaling"><a href="#replication-and-partitioning-or-redundancy-and-horizontal-scaling">Replication and Partitioning (or redundancy and horizontal scaling)</a></h5>
+<p>A particular “node” contains some or all “partition”(s) of a “topic”. Hence a “topic” is both partitioned and
+replicated within the nodes. The data is partitioned with the dividing of the data among the “partition”(s),
+and replicated by replicating these “partition”(s) among the other “node”(s).</p>
+<p>Each partition is part of a Raft group; e.g each replica of <code>(topic#001 -&gt; partition#001)</code> is part of a Raft
+group, while each replica of <code>(topic#002 -&gt; partition#002)</code> are part of a different Raft group. A particular
+“node” might host some Raft leader “partition”(s) as well as Raft follower “partition”(s). For instance in the
+above example data persistence hierarchy, the <code>[L]</code> denote leaders, and the <code>[F]</code> denote followers.</p>
+<p>If a node goes down:</p>
+<ul>
+<li>For every leader partition in that node:
+<ul>
+<li>if there are no other follower replicas in other nodes in it’s Raft group, that partition goes down.</li>
+<li>if there are other follower replicas in other nodes, there are leader elections among them and after a
+leader is elected, reads and writes for that partition proceed normally</li>
+</ul>
+</li>
+<li>For every follower partition in that node:
+<ul>
+<li>the remaining replicas in the same raft group continue to function in accordance with Raft’s mechanisms.</li>
+</ul>
+</li>
+</ul>
+<p><a href="https://www.cockroachlabs.com/">CockroachDB</a> and <a href="https://tikv.org">Tikv</a> call this manner of using different
+Raft groups for different data buckets on the same node as MultiRaft.</p>
+<p>Read more here:</p>
+<ul>
+<li><a href="https://tikv.org/deep-dive/scalability/multi-raft/">https://tikv.org/deep-dive/scalability/multi-raft/</a></li>
+<li><a href="https://www.cockroachlabs.com/blog/scaling-raft/">https://www.cockroachlabs.com/blog/scaling-raft/</a></li>
+</ul>
+<h5 id="service-discovery"><a href="#service-discovery">Service Discovery</a></h5>
+<p>Now we maintain a “member-list” abstraction of all “node”(s) which states which nodes are online in real time.
+This “member-list” abstraction is able to respond to events such as a new node joining or leaving the cluster.
+(It internally uses a gossip protocol for membership information dissemination.) This abstraction can also
+handle queries like the different “partition”(s) hosted by a particular node. Using this we do the following:</p>
+<ul>
+<li>Create new replicas of partitions or rebalance partitions when a node joins or leaves the cluster.</li>
+<li>Identify which node holds which partition in real time. This information can be used for client side load
+balancing when reading or writing to a particular partition.</li>
+</ul>
+<h5 id="data-retention-sla"><a href="#data-retention-sla">Data Retention SLA</a></h5>
+<p>A “segment_age” configuration is made available to configure the maximum allowed age of segments. Since all
+partitions maintain consistency using Raft consensus, they have completely identical message-segment distribution.
+At regular intervals, segments with age greater than the specified “segment_age” are removed and the messages
+stored in these segments are lost. A good value for “segment_age” could be <code>7 days</code>.</p>
+</div></details><h2 id="modules" class="small-section-header"><a href="#modules">Modules</a></h2><div class="item-table"><div class="item-row"><div class="item-left module-item"><a class="mod" href="commit_log/index.html" title="laminarmq::commit_log mod">commit_log</a></div><div class="item-right docblock-short">Module providing a “commit log” abstraction.</div></div><div class="item-row"><div class="item-left module-item"><a class="mod" href="common/index.html" title="laminarmq::common mod">common</a></div><div class="item-right docblock-short">Module containing common utilities used throughout <code>laminarmq</code>.</div></div><div class="item-row"><div class="item-left module-item"><a class="mod" href="prelude/index.html" title="laminarmq::prelude mod">prelude</a></div><div class="item-right docblock-short">Prelude module for <a href="index.html"><code>laminarmq</code></a> with common exports for convenience.</div></div><div class="item-row"><div class="item-left module-item"><a class="mod" href="server/index.html" title="laminarmq::server mod">server</a></div><div class="item-right docblock-short">Module providing abstractions for commit-log based message queue RPC server.</div></div></div></section></div></main><div id="rustdoc-vars" data-root-path="../" data-current-crate="laminarmq" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.1 (90743e729 2023-01-10)" ></div></body></html>

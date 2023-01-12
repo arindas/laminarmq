@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["Processor","Single-node [`glommio`] specific processor implementation that schedules [`Task`] processing futures on a dedicated [`glommio::TaskQueueHandle`]"]]};

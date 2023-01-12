@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["ProcessorRequest","Adminstrative requests specific to a `Processor` and not a specific `Partition` instance."],["WorkerRequest","Request enumeration to generalize over [`ProcessorRequest`] and [`PartitionRequest`]."]]};

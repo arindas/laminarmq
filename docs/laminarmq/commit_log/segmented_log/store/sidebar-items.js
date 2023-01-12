@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["store_record_stream","Returns [`Stream`] of “record”(s) stored in this [`Store`] starting from the given position in FIFO order."]],"mod":[["common","Module providing common utilities to be used by all implementations of `Store`."]],"trait":[["Store","Trait representing a collection of record backed by some form of persistent storage."]]};

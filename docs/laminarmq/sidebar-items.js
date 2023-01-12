@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":[["commit_log","Module providing a “commit log” abstraction."],["common","Module containing common utilities used throughout `laminarmq`."],["prelude","Prelude module for `laminarmq` with common exports for convenience."],["server","Module providing abstractions for commit-log based message queue RPC server."]]};

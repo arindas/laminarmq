@@ -1,0 +1,1 @@
+window.ALL_CRATES = ["laminarmq","laminarmq_client_cli","laminarmq_server"];

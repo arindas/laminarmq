@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["new_bounded","Creates a new bounded channel using [`glommio::channels::local_channel::new_bounded`]."],["new_unbounded","Creates a new unbounded channel using [`glommio::channels::local_channel::new_unbounded`]."]],"struct":[["Receiver","Wraps a [`LocalReceiver`]"],["Sender","Wraps a [`LocalSender`]"]]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["SegmentConfig","Configuration pertaining to segment storage and buffer sizes."]]};
