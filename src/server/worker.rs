@@ -34,6 +34,30 @@ pub enum TaskError<P: Partition> {
     LockAcqFailed,
 }
 
+#[doc(hidden)]
+#[cfg(not(tarpaulin_include))]
+pub mod hyper_impl {
+    //! Module providing utilities for converting from [`TaskError`](super::TaskError) to
+    //! [`StatusCode`](hyper::StatusCode).
+
+    use super::{Partition, TaskError};
+    use hyper::StatusCode;
+
+    impl<P: Partition> From<&TaskError<P>> for StatusCode {
+        fn from(value: &TaskError<P>) -> Self {
+            match value {
+                // partition is lost and can't be recovered, hence it's fitting
+                TaskError::PartitionLost(_) => StatusCode::INTERNAL_SERVER_ERROR,
+
+                TaskError::PartitionError(_) => StatusCode::BAD_REQUEST,
+                TaskError::PartitionNotFound(_) => StatusCode::NOT_FOUND,
+                TaskError::PartitionInUse(_) => StatusCode::FAILED_DEPENDENCY,
+                TaskError::LockAcqFailed => StatusCode::FAILED_DEPENDENCY,
+            }
+        }
+    }
+}
+
 #[cfg(not(tarpaulin_include))]
 impl<P: Partition> Display for TaskError<P> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -114,6 +138,7 @@ where
     _phantom_data: PhantomData<(P, S, Request, Response)>,
 }
 
+#[cfg(not(tarpaulin_include))]
 impl<P, Request, Response, S, Proc> Worker<P, Request, Response, S, Proc>
 where
     P: Partition,

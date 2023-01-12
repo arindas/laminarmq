@@ -30,95 +30,7 @@ pub mod channel {
     }
 }
 
-pub mod single_node {
-    //! Module providing single-node specific RPC request and response types. Each request
-    //! has a corresponding response type and vice-versa.
-    use crate::commit_log::{segmented_log::RecordMetadata, Record};
-
-    use super::partition::PartitionId;
-    use std::{borrow::Cow, collections::HashMap, ops::Deref, time::Duration};
-
-    /// Single node request schema.
-    ///
-    /// ## Generic parameters
-    /// `T`: container for request data bytes
-    pub enum Request<T: Deref<Target = [u8]>> {
-        /// Requests a map containing a mapping from topic ids
-        /// to lists of partition numbers under them.
-        PartitionHierachy,
-
-        /// Remove expired records in the given partition.
-        RemoveExpired {
-            partition: PartitionId,
-            expiry_duration: Duration,
-        },
-
-        CreatePartition(PartitionId),
-        RemovePartition(PartitionId),
-
-        Read {
-            partition: PartitionId,
-            offset: u64,
-        },
-        Append {
-            partition: PartitionId,
-            record_bytes: T,
-        },
-
-        LowestOffset {
-            partition: PartitionId,
-        },
-        HighestOffset {
-            partition: PartitionId,
-        },
-    }
-
-    /// Single node response schema.
-    ///
-    /// ## Generic parameters
-    /// `T`: container for response data bytes
-    pub enum Response<T: Deref<Target = [u8]>> {
-        /// Response containing a mapping from topic ids to lists
-        /// of partition numbers under them.
-        PartitionHierachy(HashMap<Cow<'static, str>, Vec<u64>>),
-
-        Read {
-            record: Record<RecordMetadata<()>, T>,
-            next_offset: u64,
-        },
-        LowestOffset(u64),
-        HighestOffset(u64),
-
-        Append {
-            write_offset: u64,
-            bytes_written: usize,
-        },
-
-        /// Response for [`Request::RemoveExpired`]
-        ExpiredRemoved,
-        PartitionCreated,
-        PartitionRemoved,
-    }
-
-    /// Kinds of single node RPC requests.
-    #[derive(Clone, Copy)]
-    pub enum RequestKind {
-        Read,
-        Append,
-
-        LowestOffset,
-        HighestOffset,
-
-        /// Remove expired records in partition.
-        RemoveExpired,
-
-        /// Requests a map containing a mapping from topic ids
-        /// to lists of partition numbers under them.
-        PartitionHierachy,
-        CreatePartition,
-        RemovePartition,
-    }
-}
+pub mod single_node;
 
 pub mod partition;
 pub mod router;
@@ -129,3 +41,15 @@ pub mod tokio_compat;
 
 #[cfg(target_os = "linux")]
 pub mod glommio_impl;
+
+/// Trait for abstracting a RPC server implementation.
+pub trait Server<Service> {
+    type Result;
+
+    /// Serves RPC requests using the provided [`Service`] instance.
+    ///
+    /// ## Implementation note:
+    /// This method should setup a mechanism for scheduling
+    /// request-serving tasks and return without blocking.
+    fn serve(&self, service: Service) -> Self::Result;
+}
