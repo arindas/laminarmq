@@ -7,7 +7,7 @@ use hyper::{rt::Executor, server::conn::Http, Request, Response};
 use std::{
     io::{
         self,
-        ErrorKind::{ConnectionRefused, ConnectionReset},
+        ErrorKind::{ConnectionRefused, ConnectionReset, Other},
     },
     net::SocketAddr,
     rc::Rc,
@@ -22,6 +22,21 @@ struct HyperExecutor {
     task_q: TaskQ,
 }
 
+impl HyperExecutor {
+    fn spawn<F>(&self, f: F) -> Result<glommio::Task<F::Output>, ()>
+    where
+        F: Future + 'static,
+        F::Output: 'static,
+    {
+        glommio::spawn_local_into(f, self.task_q).map_err(|spawn_error| {
+            error!(
+                "spawn_local_into -> {:?} ==> {:?}",
+                self.task_q, spawn_error
+            );
+        })
+    }
+}
+
 impl<F> Executor<F> for HyperExecutor
 where
     F: Future + 'static,
@@ -29,15 +44,7 @@ where
 {
     #[instrument(skip(self, f))]
     fn execute(&self, f: F) {
-        glommio::spawn_local_into(f, self.task_q)
-            .map_err(|spawn_error| {
-                error!(
-                    "spawn_local_into -> {:?} ==> {:?}",
-                    self.task_q, spawn_error
-                );
-            })
-            .map(|task| task.detach())
-            .ok();
+        self.spawn(f).map(|task| task.detach()).ok();
     }
 }
 
@@ -86,7 +93,7 @@ where
     RespBd: hyper::body::HttpBody + 'static,
     RespBd::Error: std::error::Error + Send + Sync,
 {
-    type Result = io::Result<()>;
+    type Result = io::Result<glommio::Task<Result<(), GlommioError<()>>>>;
 
     #[instrument(skip(service))]
     fn serve(&self, service: S) -> Self::Result {
@@ -98,7 +105,7 @@ where
 
         let conn_control = Rc::new(Semaphore::new(max_connections as _));
 
-        HyperExecutor { task_q }.execute(
+        let spawn_result = HyperExecutor { task_q }.spawn(
             async move {
                 if max_connections == 0 {
                     error!("max_connections = 0. Refusing connections.");
@@ -140,6 +147,6 @@ where
             .instrument(trace_span!("tcp_listener")),
         );
 
-        Ok(())
+        spawn_result.map_err(|_| io::Error::new(Other, "error spawning tcp_listener"))
     }
 }
