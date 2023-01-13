@@ -55,7 +55,9 @@ The current implementation based on [`glommio`](https://docs.rs/glommio) runs on
 >```
 
 Refer to latest git [API Documentation](https://arindas.github.io/laminarmq/docs/laminarmq/)
-or [Crate Documentation](https://docs.rs/laminarmq) for more details.
+or [Crate Documentation](https://docs.rs/laminarmq) for more details. There's also a
+[book](https://arindas.github.io/laminarmq/book) being written to further describe
+design decisions, implementation details and recipes.
 
 `laminarmq` presents an elementary commit-log abstraction (a series of records ordered by offsets), on top of which
 several message queue semantics such as publish subscribe or even full blown protocols like MQTT could be implemented.
