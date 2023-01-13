@@ -5,8 +5,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/arindas/laminarmq/actions/workflows/laminarmq-book.yml">
-  <img src="https://github.com/arindas/laminarmq/actions/workflows/laminarmq-book.yml/badge.svg" alt=""/>
+  <a href="https://github.com/arindas/laminarmq/actions/workflows/book.yml">
+  <img src="https://github.com/arindas/laminarmq/actions/workflows/book.yml/badge.svg" alt=""/>
   </a>
 </p>
 

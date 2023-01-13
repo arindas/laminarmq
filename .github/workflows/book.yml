@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - book
+    paths:
+      - src/**
 
 jobs:
   deploy:
