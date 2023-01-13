@@ -1,4 +1,4 @@
-name: laminarmq-book
+name: mdbook
 
 on:
   push:
