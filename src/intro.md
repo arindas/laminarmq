@@ -11,7 +11,8 @@
 </p>
 
 <p align="center">
-A scalable, distributed message queue powered by a segmented, partitioned, replicated and immutable log.
+A scalable, distributed message queue powered by a segmented,<br/>
+partitioned, replicated and immutable log.
 </p>
 
 `laminarmq` presents an elementary commit-log abstraction (a series of records ordered by offsets), on top of which
