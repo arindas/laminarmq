@@ -21,3 +21,5 @@ Users are free to read the messages with offsets in any order they need.
 This book is meant to answer the "Why?" and "How?" questions behind `laminarmq` and it's internal design. The "What?"
 questions are extensively covered in [API Documentation](https://docs.rs/laminarmq).
 
+## License
+`laminarmq` is licensed under the MIT License. See [License](./LICENSE) for more details.
