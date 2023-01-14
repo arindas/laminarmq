@@ -8,11 +8,21 @@ pub mod channel {
     use std::error::Error;
 
     /// Trait representing the sending end of a channel.
+    #[async_trait(?Send)]
     pub trait Sender<T> {
         type Error: Error;
 
-        /// Sends the given value over this channel. This method is expected not to block and
-        /// return immediately.
+        /// Sends the given valye of this channel. Asynchronously waits if there is no space
+        /// to write an item to the channel.
+        ///
+        /// ## Errors
+        /// Possible error situations could include:
+        /// - unable to send item
+        /// - receiving end dropped
+        async fn send(&self, item: T) -> Result<(), Self::Error>;
+
+        /// Sends the given value over this channel. This method is expected not to block
+        /// and return immediately.
         ///
         /// ## Errors
         /// Possible error situations could include:

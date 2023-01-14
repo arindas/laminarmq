@@ -90,7 +90,7 @@ where
     P: Partition,
     S: Sender<TaskResult<Response, P>>,
 {
-    /// `Request to be processed.
+    /// `Request` to be processed.
     pub request: Request,
 
     /// Send end of the channel to send back response

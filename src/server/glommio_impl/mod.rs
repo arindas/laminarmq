@@ -13,8 +13,13 @@ pub mod channel {
     /// Wraps a [`LocalSender`]
     pub struct Sender<T>(LocalSender<T>);
 
+    #[async_trait(?Send)]
     impl<T> BaseSender<T> for Sender<T> {
         type Error = GlommioError<T>;
+
+        async fn send(&self, item: T) -> Result<(), Self::Error> {
+            self.0.send(item).await
+        }
 
         fn try_send(&self, item: T) -> Result<(), Self::Error> {
             self.0.try_send(item)
