@@ -56,7 +56,7 @@ pub mod glommio_impl;
 pub trait Server<Service> {
     type Result;
 
-    /// Serves RPC requests using the provided [`Service`] instance.
+    /// Serves RPC requests using the provided `Service` instance.
     ///
     /// ## Implementation note:
     /// This method should setup a mechanism for scheduling

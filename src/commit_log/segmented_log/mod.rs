@@ -123,56 +123,28 @@ where
     }
 }
 
-/// A cross platform immutable, persisted and segmented log implementation using [`Segment`]
-/// instances.
+/// A cross platform immutable, persistent and segmented [`CommitLog`](super::CommitLog)
+/// implementation using [`Segment`] instances.
 ///
-/// [`SegmentedLog`] is a [`CommitLog`](super::CommitLog) implementation.
+/// The segmented-log data structure for storing records is inspired from
+/// [Apache Kafka](https://www.microsoft.com/en-us/research/wp-content/uploads/2017/09/Kafka.pdf).
+///
+/// ![segmented_log](https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-segmented-log.png)
+/// <p align="center">
+/// <b>Fig:</b> File organisation for persisting the <code>segmented_log</code> data structure on a
+/// <code>*nix</code> file system.
+/// </p>
 ///
 /// A segmented log is a collection of read segments and a single write segment. It consists of
 /// a [`Vec<Segment>`] for storing read segments and a single [`Option<Segment>`] for storing
-/// the write segment.
+/// the write segment. Each [`Segment`] is backed by a storage file on disk called
+/// [`Store`](store::Store).
 ///
 /// The log is:
 /// - "immutable", since only "append", "read" and "truncate" operations are allowed. It is not
 /// possible to update or delete records from the middle of the log.
 /// - "segmented", since it is composed of segments, where each segment services records from a
 /// particular range of offsets.
-///
-/// ```text
-/// [segmented_log]
-/// ┌─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
-/// │                                                                                                                                                     │
-/// │                               [log:"read"]           ├[offset#x)    ├[offset#x + size(xm_1)]  ├[offset(xm_n-1)]   ├[offset(xm_n-1) + size(xm_n-1)]  │
-/// │                               ┌──────────┐           ┌──────────────┬──────────────┬─         ┬───────────────────┬──────────────┐                  │
-/// │  initial_offset: offset#x     │ offset#x │->[segment]│ message#xm_1 │ message#xm_2 │ …      … │ message#xm_n-1    │ message#xm_n │                  │
-/// │                               │          │           └──────────────┴──────────────┴─         ┴───────────────────┴──────────────┘                  │
-/// │                               │          │                                                                                                          │
-/// │                               ├──────────┤           ├[offset#y)    ├[offset#y + size(ym_1)]  ├[offset(ym_n-1)]   ├[offset(ym_n-1) + size(ym_n-1)]  │
-/// │                               ├──────────┤           ┌──────────────┬──────────────┬─         ┬───────────────────┬──────────────┐                  │
-/// │  {offset#y = (offset(xm_n) +  │ offset#y │->[segment]│ message#ym_1 │ message#ym_2 │ …      … │ message#ym_n-1    │ message#ym_n │                  │
-/// │               size(xm_n))}    │          │           └──────────────┴──────────────┴─         ┴───────────────────┴──────────────┘                  │
-/// │                               │          │                                                                                                          │
-/// │                               ├──────────┤           ├[offset#x)    ├[offset#x + size(xm_1)]  ├[offset(xm_n-1)]   ├[offset(xm_n-1) + size(xm_n-1)]  │
-/// │                               ├──────────┤           ┌──────────────┬──────────────┬─         ┬───────────────────┬──────────────┐                  │
-/// │  {offset#z = (offset(ym_n) +  │ offset#z │->[segment]│ message#zm_1 │ message#zm_2 │ …      … │ message#zm_n-1    │ message#zm_n │                  │
-/// │               size(ym_n))}    │          │           └──────────────┴──────────────┴─         ┴───────────────────┴──────────────┘                  │
-/// │                               │          │                                                                                                          │
-/// │                               ├──────────┤                                                                                                          │
-/// │                                   ....                                                                                                              │
-/// │                                                                                                                                                     │
-/// │                                                                                                                                                     │
-/// │                               [log:"write"] -> [segment](with base_offset = next_offset of last read segment)                                       │
-/// │                                                                                                                                                     │
-/// │  where:                                                                                                                                             │
-/// │  =====                                                                                                                                              │
-/// │  offset(m: Message) := offset of message m in log.                                                                                                  │
-/// │  size(m: Message) := size of message m                                                                                                              │
-/// │                                                                                                                                                     │
-/// │  offset#x := some offset x                                                                                                                          │
-/// │  message#m := some message m                                                                                                                        │
-/// │                                                                                                                                                     │
-/// └─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
-/// ```
 ///
 /// All writes go to the write segment. When we max out the capacity of the write segment, we
 /// close the write segment and reopen it as a read segment. The re-opened segment is added to

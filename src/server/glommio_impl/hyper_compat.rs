@@ -65,7 +65,7 @@ impl From<ConnResult> for io::Result<()> {
 }
 
 /// Serves HTTP requests at the given address using the given parameters. All request
-/// handling futures are spawned on the given [`TaskQueueHandle`].
+/// handling futures are spawned on the given [`TaskQ`].
 #[derive(Debug)]
 pub struct HyperServer {
     pub max_connections: usize,

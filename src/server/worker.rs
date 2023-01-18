@@ -1,6 +1,9 @@
 //! Module providing abstraction for processing requests with a thread pre core architecture.
 //!
 //! ![execution-model](https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-execution-model.png)
+//! <p align="center">
+//! <b>Fig:</b> Execution model depicting application level partitioning and request level parallelism.
+//! </p>
 //!
 //! `laminarmq` uses the thread-per-core execution model where individual processor cores are limited to single threads.
 //! This model encourages design that minimizes inter-thread contention and locks, thereby improving tail latencies in
