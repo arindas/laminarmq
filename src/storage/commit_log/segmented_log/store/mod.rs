@@ -1,9 +1,11 @@
 pub mod common {
+    use std::io::ErrorKind::UnexpectedEof;
+
+    use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+    use bytes::Buf;
+
     use futures_core::Stream;
     use futures_lite::{AsyncWrite, AsyncWriteExt, StreamExt};
-
-    use byteorder::{LittleEndian, WriteBytesExt};
-    use bytes::Buf;
 
     /// Extension used by backing files for [`Store`](super::Store)s.
     pub const STORE_FILE_EXTENSION: &str = "store";
@@ -17,6 +19,22 @@ pub mod common {
     }
 
     impl RecordHeader {
+        /// Creates a [`RecordHeader`] instance from serialized record header bytes.
+        /// This method internally users a [`std::io::Cursor`] to read the checksum and
+        /// length as integers from the given bytes with little endian encoding.
+        pub fn from_bytes_le(record_header_bytes: &[u8]) -> std::io::Result<RecordHeader> {
+            let mut cursor = std::io::Cursor::new(record_header_bytes);
+
+            let checksum = cursor.read_u32::<LittleEndian>()?;
+            let length = cursor.read_u32::<LittleEndian>()?;
+
+            if checksum == 0 && length == 0 {
+                Err(std::io::Error::from(UnexpectedEof))
+            } else {
+                Ok(Self { checksum, length })
+            }
+        }
+
         /// Serializes this given record header to an owned byte array.
         /// This method internally use a [`std::io::Cursor`] to write the checksum and length
         /// fields as little endian integers into the byte array.
@@ -46,6 +64,14 @@ pub mod common {
 
         fn try_from(value: RecordHeader) -> Result<Self, Self::Error> {
             value.as_bytes()
+        }
+    }
+
+    impl TryFrom<&[u8]> for RecordHeader {
+        type Error = std::io::Error;
+
+        fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+            RecordHeader::from_bytes_le(value)
         }
     }
 
