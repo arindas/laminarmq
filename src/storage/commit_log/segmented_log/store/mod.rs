@@ -28,13 +28,13 @@ pub trait Store:
 
     async fn read(
         &self,
-        position: &u64,
+        position: &Self::Position,
         record_header: &RecordHeader,
     ) -> Result<Self::Content, Self::Error>;
 }
 
 pub mod common {
-    use std::io::ErrorKind::UnexpectedEof;
+    use std::io::{ErrorKind::UnexpectedEof, Read, Write};
 
     use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
     use bytes::Buf;
@@ -55,14 +55,9 @@ pub mod common {
     }
 
     impl RecordHeader {
-        /// Creates a [`RecordHeader`] instance from serialized record header bytes.
-        /// This method internally users a [`std::io::Cursor`] to read the checksum and
-        /// length as integers from the given bytes with little endian encoding.
-        pub fn from_bytes_le(record_header_bytes: &[u8]) -> std::io::Result<RecordHeader> {
-            let mut cursor = std::io::Cursor::new(record_header_bytes);
-
-            let checksum = cursor.read_u32::<LittleEndian>()?;
-            let length = cursor.read_u32::<LittleEndian>()?;
+        pub fn read<R: Read>(source: &mut R) -> std::io::Result<RecordHeader> {
+            let checksum = source.read_u32::<LittleEndian>()?;
+            let length = source.read_u32::<LittleEndian>()?;
 
             if checksum == 0 && length == 0 {
                 Err(std::io::Error::from(UnexpectedEof))
@@ -71,19 +66,11 @@ pub mod common {
             }
         }
 
-        /// Serializes this given record header to an owned byte array.
-        /// This method internally use a [`std::io::Cursor`] to write the checksum and length
-        /// fields as little endian integers into the byte array.
-        pub fn as_bytes(self) -> std::io::Result<[u8; RECORD_HEADER_LENGTH]> {
-            let mut bytes = [0; RECORD_HEADER_LENGTH];
+        pub fn write<W: Write>(&self, dest: &mut W) -> std::io::Result<()> {
+            dest.write_u32::<LittleEndian>(self.checksum)?;
+            dest.write_u32::<LittleEndian>(self.length)?;
 
-            let buffer: &mut [u8] = &mut bytes;
-            let mut cursor = std::io::Cursor::new(buffer);
-
-            cursor.write_u32::<LittleEndian>(self.checksum)?;
-            cursor.write_u32::<LittleEndian>(self.length)?;
-
-            Ok(bytes)
+            Ok(())
         }
 
         pub fn compute(record_bytes: &[u8]) -> Self {
@@ -99,22 +86,6 @@ pub mod common {
         pub fn valid_for_record_bytes(&self, record_bytes: &[u8]) -> bool {
             self.length as usize == record_bytes.len()
                 && self.checksum == crc32fast::hash(record_bytes)
-        }
-    }
-
-    impl TryFrom<RecordHeader> for [u8; RECORD_HEADER_LENGTH] {
-        type Error = std::io::Error;
-
-        fn try_from(value: RecordHeader) -> Result<Self, Self::Error> {
-            value.as_bytes()
-        }
-    }
-
-    impl TryFrom<&[u8]> for RecordHeader {
-        type Error = std::io::Error;
-
-        fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-            RecordHeader::from_bytes_le(value)
         }
     }
 
