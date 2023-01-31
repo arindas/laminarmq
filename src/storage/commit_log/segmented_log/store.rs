@@ -7,8 +7,8 @@ use std::ops::Deref;
 
 #[async_trait::async_trait(?Send)]
 pub trait Store:
-    AsyncConsume<ConsumeError = Self::Error>
-    + AsyncTruncate<Mark = Self::Position, TruncError = Self::Error>
+    AsyncTruncate<Mark = Self::Position, TruncError = Self::Error>
+    + AsyncConsume<ConsumeError = Self::Error>
 {
     /// Content bytes to be read from this store.
     type Content: Deref<Target = [u8]>;

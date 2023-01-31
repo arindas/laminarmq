@@ -8,7 +8,7 @@ pub mod commit_log;
 #[async_trait(?Send)]
 pub trait AsyncIndexedRead {
     /// Error type to be used by this trait.
-    type IndexError: std::error::Error;
+    type ReadError: std::error::Error;
 
     /// Value to be read.
     type Value;
@@ -20,7 +20,7 @@ pub trait AsyncIndexedRead {
 
     fn lowest_index(&self) -> Self::Idx;
 
-    async fn read(&self, idx: &Self::Idx) -> Result<Self::Value, Self::IndexError>;
+    async fn read(&self, idx: &Self::Idx) -> Result<Self::Value, Self::ReadError>;
 }
 
 pub async fn indexed_read_stream<'a, R, RB>(
@@ -74,3 +74,5 @@ pub trait AsyncConsume {
 
     async fn close(self) -> Result<(), Self::ConsumeError>;
 }
+
+pub mod impls;

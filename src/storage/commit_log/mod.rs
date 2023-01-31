@@ -7,9 +7,9 @@ pub struct Record<M, T> {
 
 #[async_trait::async_trait(?Send)]
 pub trait CommitLog<M, X, T>:
-    AsyncIndexedRead<Value = Record<M, T>, IndexError = Self::Error>
-    + AsyncConsume<ConsumeError = Self::Error>
+    AsyncIndexedRead<Value = Record<M, T>, ReadError = Self::Error>
     + AsyncTruncate<Mark = Self::Idx, TruncError = Self::Error>
+    + AsyncConsume<ConsumeError = Self::Error>
 {
     type Error: std::error::Error;
 
