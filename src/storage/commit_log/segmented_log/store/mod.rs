@@ -1,3 +1,38 @@
+use super::super::{AsyncConsume, AsyncTruncate};
+use bytes::Buf;
+use common::RecordHeader;
+use futures_core::Stream;
+use num::Unsigned;
+use std::ops::Deref;
+
+#[async_trait::async_trait(?Send)]
+pub trait Store:
+    AsyncConsume<ConsumeError = Self::Error>
+    + AsyncTruncate<Mark = Self::Position, TruncError = Self::Error>
+{
+    /// Content bytes to be read from this store.
+    type Content: Deref<Target = [u8]>;
+
+    type Position: Unsigned;
+
+    /// The error type used by the methods of this trait.
+    type Error: std::error::Error;
+
+    async fn append<B, S>(
+        &mut self,
+        stream: &mut S,
+    ) -> Result<(Self::Position, RecordHeader), Self::Error>
+    where
+        B: Buf,
+        S: Stream<Item = B> + Unpin;
+
+    async fn read(
+        &self,
+        position: &u64,
+        record_header: &RecordHeader,
+    ) -> Result<Self::Content, Self::Error>;
+}
+
 pub mod common {
     use std::io::ErrorKind::UnexpectedEof;
 
@@ -13,6 +48,7 @@ pub mod common {
     /// Number of bytes required for storing the record header.
     pub const RECORD_HEADER_LENGTH: usize = 8;
 
+    #[derive(Debug, Default, PartialEq, Eq)]
     pub struct RecordHeader {
         pub checksum: u32,
         pub length: u32,
@@ -48,6 +84,13 @@ pub mod common {
             cursor.write_u32::<LittleEndian>(self.length)?;
 
             Ok(bytes)
+        }
+
+        pub fn compute(record_bytes: &[u8]) -> Self {
+            RecordHeader {
+                checksum: crc32fast::hash(record_bytes),
+                length: record_bytes.len() as u32,
+            }
         }
 
         /// States whether this [`RecordHeader`] is valid for the given record bytes. This
