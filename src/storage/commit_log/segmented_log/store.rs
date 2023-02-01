@@ -1,4 +1,4 @@
-use super::super::{AsyncConsume, AsyncTruncate};
+use super::super::super::{AsyncConsume, AsyncTruncate, SizedStorage};
 use bytes::Buf;
 use common::RecordHeader;
 use futures_core::Stream;
@@ -9,6 +9,7 @@ use std::ops::Deref;
 pub trait Store:
     AsyncTruncate<Mark = Self::Position, TruncError = Self::Error>
     + AsyncConsume<ConsumeError = Self::Error>
+    + SizedStorage
 {
     /// Content bytes to be read from this store.
     type Content: Deref<Target = [u8]>;

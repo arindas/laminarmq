@@ -75,4 +75,8 @@ pub trait AsyncConsume {
     async fn close(self) -> Result<(), Self::ConsumeError>;
 }
 
+pub trait SizedStorage {
+    fn size() -> usize;
+}
+
 pub mod impls;
