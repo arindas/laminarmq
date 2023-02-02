@@ -1,9 +1,12 @@
-use crate::common::split::SplitAt;
-
-use super::store::Store;
-use super::{super::super::*, index::Index};
-use super::{MetaWithIdx, Record};
+use bytes::Buf;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+
+use super::{
+    super::super::{super::common::split::SplitAt, *},
+    index::Index,
+    store::Store,
+    MetaWithIdx, Record,
+};
 use std::{marker::PhantomData, time::Instant};
 
 /// Configuration pertaining to segment storage and buffer sizes.
@@ -64,6 +67,8 @@ pub enum SegmentError<StoreError, IndexError> {
 
     IndexError(IndexError),
 
+    InvalidInputIndex,
+
     SegmentMaxed,
 
     /// Error when ser/deser-ializing a record.
@@ -122,6 +127,10 @@ where
             .await
             .map_err(SegmentError::StoreError)?;
 
+        if !record_header.valid_for_record_bytes(&record_bytes) {
+            return Err(SegmentError::SerializationError);
+        }
+
         let metadata_size = bincode::serialized_size(&MetaWithIdx {
             index: num::zero::<Self::Idx>(),
             metadata: M::default(),
@@ -136,5 +145,43 @@ where
             bincode::deserialize(&metadata).map_err(|_| SegmentError::SerializationError)?;
 
         Ok(Record { metadata, value })
+    }
+}
+
+type SegError<S, I> = SegmentError<<S as Store>::Error, <I as Index>::Error>;
+
+impl<M, X, I, S, ReqBuf> Segment<M, X, I, S>
+where
+    S: Store,
+    I: Index<Position = S::Position>,
+    ReqBuf: Buf,
+    X: Stream<Item = ReqBuf> + Unpin,
+{
+    pub async fn append(
+        &mut self,
+        record: &mut Record<M, I::Idx, X>,
+    ) -> Result<usize, SegError<S, I>> {
+        if &record.metadata.index != self.index.highest_index() {
+            return Err(SegmentError::InvalidInputIndex);
+        }
+
+        if self.is_maxed() {
+            return Err(SegmentError::SegmentMaxed);
+        }
+
+        let index_record = self
+            .store
+            .append(&mut record.value)
+            .await
+            .map_err(SegmentError::StoreError)?;
+
+        self.index
+            .append(&index_record)
+            .await
+            .map_err(SegmentError::IndexError)?;
+
+        let (_, record_header) = index_record;
+
+        Ok(record_header.length as usize)
     }
 }

@@ -16,6 +16,6 @@ pub trait Index:
 
     async fn append(
         &mut self,
-        index_record: (Self::Position, RecordHeader),
+        index_record: &(Self::Position, RecordHeader),
     ) -> Result<(), Self::Error>;
 }
