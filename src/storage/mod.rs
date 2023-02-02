@@ -84,7 +84,7 @@ pub trait AsyncConsume {
 }
 
 pub trait SizedStorage {
-    fn size() -> usize;
+    fn size(&self) -> usize;
 }
 
 pub mod impls;

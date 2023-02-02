@@ -46,9 +46,15 @@ impl<M, X, I, S> Segment<M, X, I, S> {
     }
 }
 
+impl<M, X, I, S: Store> SizedStorage for Segment<M, X, I, S> {
+    fn size(&self) -> usize {
+        self.store.size()
+    }
+}
+
 impl<M, X, I, S: Store> Segment<M, X, I, S> {
-    pub fn config(&self) -> &Config {
-        &self.config
+    pub fn is_maxed(&self) -> bool {
+        self.store.size() >= self.config.max_store_bytes
     }
 }
 
