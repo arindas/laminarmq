@@ -1,7 +1,9 @@
+use crate::common::split::SplitAt;
+
 use super::store::Store;
-use super::Record;
 use super::{super::super::*, index::Index};
-use serde::{Deserialize, Serialize};
+use super::{MetaWithIdx, Record};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{marker::PhantomData, time::Instant};
 
 /// Configuration pertaining to segment storage and buffer sizes.
@@ -18,25 +20,35 @@ pub struct Config {
 }
 
 pub struct Segment<M, X, I, S> {
-    _index: I,
-    _store: S,
+    index: I,
+    store: S,
 
-    _config: Config,
+    config: Config,
 
-    _created_at: Instant,
+    created_at: Instant,
 
     _phantom_data: PhantomData<(M, X)>,
 }
 
 impl<M, X, I, S> Segment<M, X, I, S> {
-    pub fn new(_index: I, _store: S, _config: Config) -> Self {
+    pub fn new(index: I, store: S, config: Config) -> Self {
         Self {
-            _index,
-            _store,
-            _created_at: Instant::now(),
-            _config,
+            index,
+            store,
+            config,
+            created_at: Instant::now(),
             _phantom_data: PhantomData,
         }
+    }
+
+    pub fn created_at(&self) -> Instant {
+        self.created_at
+    }
+}
+
+impl<M, X, I, S: Store> Segment<M, X, I, S> {
+    pub fn config(&self) -> &Config {
+        &self.config
     }
 }
 
@@ -72,8 +84,10 @@ where
 #[async_trait::async_trait(?Send)]
 impl<M, X, I, S> AsyncIndexedRead for Segment<M, X, I, S>
 where
-    I: Index,
     S: Store,
+    I: Index<Position = S::Position>,
+    I::Idx: Serialize + DeserializeOwned,
+    M: Default + Serialize + DeserializeOwned,
 {
     type ReadError = SegmentError<S::Error, I::Error>;
 
@@ -82,14 +96,39 @@ where
     type Value = Record<M, Self::Idx, S::Content>;
 
     fn highest_index(&self) -> &Self::Idx {
-        self._index.highest_index()
+        self.index.highest_index()
     }
 
     fn lowest_index(&self) -> &Self::Idx {
-        self._index.lowest_index()
+        self.index.lowest_index()
     }
 
-    async fn read(&self, _idx: &Self::Idx) -> Result<Self::Value, Self::ReadError> {
-        Err(SegmentError::SerializationError)
+    async fn read(&self, idx: &Self::Idx) -> Result<Self::Value, Self::ReadError> {
+        let (position, record_header) = self
+            .index
+            .read(idx)
+            .await
+            .map_err(SegmentError::IndexError)?;
+
+        let record_bytes = self
+            .store
+            .read(&position, &record_header)
+            .await
+            .map_err(SegmentError::StoreError)?;
+
+        let metadata_size = bincode::serialized_size(&MetaWithIdx {
+            index: num::zero::<Self::Idx>(),
+            metadata: M::default(),
+        })
+        .map_err(|_| SegmentError::SerializationError)? as usize;
+
+        let (metadata, value) = record_bytes
+            .split_at(metadata_size)
+            .ok_or(SegmentError::SerializationError)?;
+
+        let metadata =
+            bincode::deserialize(&metadata).map_err(|_| SegmentError::SerializationError)?;
+
+        Ok(Record { metadata, value })
     }
 }

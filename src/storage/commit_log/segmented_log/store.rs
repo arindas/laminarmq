@@ -1,3 +1,5 @@
+use crate::common::split::SplitAt;
+
 use super::super::super::{AsyncConsume, AsyncTruncate, SizedStorage};
 use bytes::Buf;
 use common::RecordHeader;
@@ -12,7 +14,7 @@ pub trait Store:
     + SizedStorage
 {
     /// Content bytes to be read from this store.
-    type Content: Deref<Target = [u8]>;
+    type Content: Deref<Target = [u8]> + SplitAt<u8>;
 
     type Position: Unsigned;
 
