@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use futures_core::Stream;
-use num::{ToPrimitive, Unsigned};
+use num::{CheckedSub, ToPrimitive, Unsigned};
 use std::{cmp, ops::RangeBounds};
 
 pub mod commit_log;
@@ -14,11 +14,19 @@ pub trait AsyncIndexedRead {
     type Value;
 
     /// Type to index with.
-    type Idx: Unsigned + ToPrimitive + Ord + Copy;
+    type Idx: Unsigned + CheckedSub + ToPrimitive + Ord + Copy;
 
-    fn highest_index(&self) -> Self::Idx;
+    fn highest_index(&self) -> &Self::Idx;
 
-    fn lowest_index(&self) -> Self::Idx;
+    fn lowest_index(&self) -> &Self::Idx;
+
+    fn normalize_index(&self, idx: &Self::Idx) -> Option<Self::Idx> {
+        if idx <= &self.highest_index() {
+            idx.checked_sub(self.lowest_index())
+        } else {
+            None
+        }
+    }
 
     async fn read(&self, idx: &Self::Idx) -> Result<Self::Value, Self::ReadError>;
 }
@@ -32,7 +40,7 @@ where
     R: AsyncIndexedRead,
     R::Value: 'a,
 {
-    let (lo_min, hi_max) = (indexed_read.lowest_index(), indexed_read.highest_index());
+    let (lo_min, hi_max) = (*indexed_read.lowest_index(), *indexed_read.highest_index());
 
     let lo = match index_bounds.start_bound() {
         std::ops::Bound::Included(x) => *x,

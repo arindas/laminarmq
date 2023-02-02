@@ -1,5 +1,8 @@
+use super::store::Store;
+use super::Record;
+use super::{super::super::*, index::Index};
 use serde::{Deserialize, Serialize};
-use std::time::Instant;
+use std::{marker::PhantomData, time::Instant};
 
 /// Configuration pertaining to segment storage and buffer sizes.
 #[derive(Serialize, Deserialize, Default, Debug, Clone, Copy)]
@@ -14,16 +17,27 @@ pub struct Config {
     pub max_store_bytes: usize,
 }
 
-pub struct Segment<Idx, I, S> {
+pub struct Segment<M, X, I, S> {
     _index: I,
     _store: S,
 
-    _base_index: Idx,
-    _next_index: Idx,
+    _config: Config,
 
     _created_at: Instant,
 
-    _config: Config,
+    _phantom_data: PhantomData<(M, X)>,
+}
+
+impl<M, X, I, S> Segment<M, X, I, S> {
+    pub fn new(_index: I, _store: S, _config: Config) -> Self {
+        Self {
+            _index,
+            _store,
+            _created_at: Instant::now(),
+            _config,
+            _phantom_data: PhantomData,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -36,13 +50,6 @@ pub enum SegmentError<StoreError, IndexError> {
 
     /// Error when ser/deser-ializing a record.
     SerializationError,
-
-    /// Offset used for reading or writing to a segment is beyond that store's allowed
-    /// capacity by the [`config::SegmentConfig::max_store_bytes`] limit.
-    OffsetBeyondCapacity,
-
-    /// Offset is out of bounds of the written region in this segment.
-    OffsetOutOfBounds,
 }
 
 impl<StoreError, IndexError> std::fmt::Display for SegmentError<StoreError, IndexError>
@@ -60,4 +67,29 @@ where
     StoreError: std::error::Error,
     IndexError: std::error::Error,
 {
+}
+
+#[async_trait::async_trait(?Send)]
+impl<M, X, I, S> AsyncIndexedRead for Segment<M, X, I, S>
+where
+    I: Index,
+    S: Store,
+{
+    type ReadError = SegmentError<S::Error, I::Error>;
+
+    type Idx = I::Idx;
+
+    type Value = Record<M, Self::Idx, S::Content>;
+
+    fn highest_index(&self) -> &Self::Idx {
+        self._index.highest_index()
+    }
+
+    fn lowest_index(&self) -> &Self::Idx {
+        self._index.lowest_index()
+    }
+
+    async fn read(&self, _idx: &Self::Idx) -> Result<Self::Value, Self::ReadError> {
+        Err(SegmentError::SerializationError)
+    }
 }
