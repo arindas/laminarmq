@@ -20,12 +20,14 @@ pub trait AsyncIndexedRead {
 
     fn lowest_index(&self) -> &Self::Idx;
 
+    fn has_index(&self, idx: &Self::Idx) -> bool {
+        idx >= self.lowest_index() && idx <= self.highest_index()
+    }
+
     fn normalize_index(&self, idx: &Self::Idx) -> Option<Self::Idx> {
-        if idx <= &self.highest_index() {
-            idx.checked_sub(self.lowest_index())
-        } else {
-            None
-        }
+        self.has_index(idx)
+            .then_some(idx)
+            .and_then(|idx| idx.checked_sub(self.lowest_index()))
     }
 
     async fn read(&self, idx: &Self::Idx) -> Result<Self::Value, Self::ReadError>;

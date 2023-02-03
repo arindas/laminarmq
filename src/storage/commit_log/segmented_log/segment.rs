@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use bytes::Buf;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
@@ -7,7 +8,10 @@ use super::{
     store::Store,
     MetaWithIdx, Record,
 };
-use std::{marker::PhantomData, time::Instant};
+use std::{
+    marker::PhantomData,
+    time::{Duration, Instant},
+};
 
 /// Configuration pertaining to segment storage and buffer sizes.
 #[derive(Serialize, Deserialize, Default, Debug, Clone, Copy)]
@@ -34,6 +38,10 @@ pub struct Segment<M, X, I, S> {
 }
 
 impl<M, X, I, S> Segment<M, X, I, S> {
+    pub fn has_expired(&self, expiry_duration: &Duration) -> bool {
+        &self.created_at.elapsed() >= expiry_duration
+    }
+
     pub fn new(index: I, store: S, config: Config) -> Self {
         Self {
             index,
@@ -42,10 +50,6 @@ impl<M, X, I, S> Segment<M, X, I, S> {
             created_at: Instant::now(),
             _phantom_data: PhantomData,
         }
-    }
-
-    pub fn created_at(&self) -> Instant {
-        self.created_at
     }
 }
 
@@ -92,7 +96,7 @@ where
 {
 }
 
-#[async_trait::async_trait(?Send)]
+#[async_trait(?Send)]
 impl<M, X, I, S> AsyncIndexedRead for Segment<M, X, I, S>
 where
     S: Store,
@@ -183,5 +187,65 @@ where
         let (_, record_header) = index_record;
 
         Ok(record_header.length as usize)
+    }
+}
+
+#[async_trait(?Send)]
+impl<M, X, I, S> AsyncTruncate for Segment<M, X, I, S>
+where
+    S: Store,
+    I: Index<Position = S::Position>,
+{
+    type TruncError = SegError<S, I>;
+
+    type Mark = I::Idx;
+
+    async fn truncate(&mut self, idx: &Self::Mark) -> Result<(), Self::TruncError> {
+        let (position, _) = self
+            .index
+            .read(idx)
+            .await
+            .map_err(SegmentError::IndexError)?;
+
+        self.store
+            .truncate(&position)
+            .await
+            .map_err(SegmentError::StoreError)?;
+
+        self.index
+            .truncate(idx)
+            .await
+            .map_err(SegmentError::IndexError)?;
+
+        Ok(())
+    }
+}
+
+#[async_trait(?Send)]
+impl<M, X, I, S> AsyncConsume for Segment<M, X, I, S>
+where
+    S: Store,
+    I: Index,
+{
+    type ConsumeError = SegError<S, I>;
+
+    async fn close(self) -> Result<(), Self::ConsumeError> {
+        self.store.close().await.map_err(SegmentError::StoreError)?;
+        self.index.close().await.map_err(SegmentError::IndexError)?;
+
+        Ok(())
+    }
+
+    async fn remove(self) -> Result<(), Self::ConsumeError> {
+        self.store
+            .remove()
+            .await
+            .map_err(SegmentError::StoreError)?;
+        self.index
+            .remove()
+            .await
+            .map_err(SegmentError::IndexError)?;
+
+        Ok(())
     }
 }
