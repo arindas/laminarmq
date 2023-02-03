@@ -249,3 +249,8 @@ where
         Ok(())
     }
 }
+
+#[async_trait(?Send)]
+pub trait SegmentCreator<M, X, I, S, Idx> {
+    async fn create(&self, base_index: Idx, segment_config: Config) -> Segment<M, X, I, S>;
+}
