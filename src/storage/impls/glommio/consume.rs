@@ -43,6 +43,14 @@ impl<C: AsyncConsume> ConsumeHandle<C> {
         }
     }
 
+    pub fn with_consume_method(consumable: C, consume_method: ConsumeMethod) -> Self {
+        Self {
+            consumable: Some(consumable),
+            method: consume_method,
+            task_q: None,
+        }
+    }
+
     pub fn with_consume_method_and_tq(
         consumable: C,
         consume_method: ConsumeMethod,
@@ -123,6 +131,9 @@ mod mock {
         glommio::LocalExecutorBuilder::new(glommio::Placement::Unbound)
             .spawn(move || async move {
                 let mock = ConsumeHandle::new(Mock);
+                assert!(mock._tautology(), "Unexpected contradiction");
+
+                let mock = ConsumeHandle::with_consume_method(Mock, ConsumeMethod::Remove);
                 assert!(mock._tautology(), "Unexpected contradiction");
 
                 let remove_op_task_q = glommio::executor().create_task_queue(
