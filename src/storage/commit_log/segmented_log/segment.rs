@@ -38,8 +38,8 @@ pub struct Segment<M, X, I, S> {
 }
 
 impl<M, X, I, S> Segment<M, X, I, S> {
-    pub fn has_expired(&self, expiry_duration: &Duration) -> bool {
-        &self.created_at.elapsed() >= expiry_duration
+    pub fn has_expired(&self, expiry_duration: Duration) -> bool {
+        self.created_at.elapsed() >= expiry_duration
     }
 
     pub fn new(index: I, store: S, config: Config) -> Self {
