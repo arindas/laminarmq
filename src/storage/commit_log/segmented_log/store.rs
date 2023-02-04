@@ -5,7 +5,7 @@ use bytes::Buf;
 use common::RecordHeader;
 use futures_core::Stream;
 use num::Unsigned;
-use std::ops::Deref;
+use std::{hash::Hasher, ops::Deref};
 
 #[async_trait::async_trait(?Send)]
 pub trait Store:
@@ -15,6 +15,8 @@ pub trait Store:
 {
     /// Content bytes to be read from this store.
     type Content: Deref<Target = [u8]> + SplitAt<u8>;
+
+    type ChesksumHasher: Hasher + Default;
 
     /// Represents a position in the underlying storage.
     type Position: Unsigned;
@@ -47,7 +49,10 @@ pub trait Store:
 }
 
 pub mod common {
-    use std::io::{ErrorKind::UnexpectedEof, Read, Write};
+    use std::{
+        hash::Hasher,
+        io::{ErrorKind::UnexpectedEof, Read, Write},
+    };
 
     use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
     use bytes::Buf;
@@ -59,18 +64,18 @@ pub mod common {
     pub const STORE_FILE_EXTENSION: &str = "store";
 
     /// Number of bytes required for storing the record header.
-    pub const RECORD_HEADER_LENGTH: usize = 8;
+    pub const RECORD_HEADER_LENGTH: usize = 16;
 
     #[derive(Debug, Default, PartialEq, Eq)]
     pub struct RecordHeader {
-        pub checksum: u32,
-        pub length: u32,
+        pub checksum: u64,
+        pub length: usize,
     }
 
     impl RecordHeader {
         pub fn read<R: Read>(source: &mut R) -> std::io::Result<RecordHeader> {
-            let checksum = source.read_u32::<LittleEndian>()?;
-            let length = source.read_u32::<LittleEndian>()?;
+            let checksum = source.read_u64::<LittleEndian>()?;
+            let length = source.read_u64::<LittleEndian>()? as usize;
 
             if checksum == 0 && length == 0 {
                 Err(std::io::Error::from(UnexpectedEof))
@@ -80,29 +85,28 @@ pub mod common {
         }
 
         pub fn write<W: Write>(&self, dest: &mut W) -> std::io::Result<()> {
-            dest.write_u32::<LittleEndian>(self.checksum)?;
-            dest.write_u32::<LittleEndian>(self.length)?;
+            dest.write_u64::<LittleEndian>(self.checksum)?;
+            dest.write_u64::<LittleEndian>(self.length as u64)?;
 
             Ok(())
         }
 
-        pub fn compute(record_bytes: &[u8]) -> Self {
-            RecordHeader {
-                checksum: crc32fast::hash(record_bytes),
-                length: record_bytes.len() as u32,
-            }
-        }
+        pub fn compute<H>(record_bytes: &[u8]) -> Self
+        where
+            H: Hasher + Default,
+        {
+            let mut hasher = H::default();
+            hasher.write(record_bytes);
+            let checksum = hasher.finish();
 
-        /// States whether this [`RecordHeader`] is valid for the given record bytes. This
-        /// method internally checks if the checksum and length is valid for the given slice.
-        #[inline]
-        pub fn valid_for_record_bytes(&self, record_bytes: &[u8]) -> bool {
-            self.length as usize == record_bytes.len()
-                && self.checksum == crc32fast::hash(record_bytes)
+            RecordHeader {
+                checksum,
+                length: record_bytes.len(),
+            }
         }
     }
 
-    pub async fn write_record_bytes<B, S, W>(
+    pub async fn write_record_bytes<H, B, S, W>(
         buf_stream: &mut S,
         writer: &mut W,
     ) -> std::io::Result<RecordHeader>
@@ -110,14 +114,15 @@ pub mod common {
         B: Buf,
         S: Stream<Item = B> + Unpin,
         W: AsyncWrite + Unpin,
+        H: Hasher + Default,
     {
-        let (mut hasher, mut length) = (crc32fast::Hasher::new(), 0 as usize);
+        let (mut hasher, mut length) = (H::default(), 0 as usize);
         while let Some(mut buf) = buf_stream.next().await {
             while buf.has_remaining() {
                 let chunk = buf.chunk();
 
                 writer.write_all(chunk).await?;
-                hasher.update(chunk);
+                hasher.write(chunk);
 
                 let chunk_len = chunk.len();
                 buf.advance(chunk_len);
@@ -126,8 +131,8 @@ pub mod common {
         }
 
         Ok(RecordHeader {
-            checksum: hasher.finalize(),
-            length: length as u32,
+            checksum: hasher.finish(),
+            length,
         })
     }
 }
