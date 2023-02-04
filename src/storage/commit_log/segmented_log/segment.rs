@@ -131,10 +131,6 @@ where
             .await
             .map_err(SegmentError::StoreError)?;
 
-        if !record_header.valid_for_record_bytes(&record_bytes) {
-            return Err(SegmentError::SerializationError);
-        }
-
         let metadata_size = bincode::serialized_size(&MetaWithIdx {
             index: num::zero::<Self::Idx>(),
             metadata: M::default(),

@@ -16,11 +16,18 @@ pub trait Store:
     /// Content bytes to be read from this store.
     type Content: Deref<Target = [u8]> + SplitAt<u8>;
 
+    /// Represents a position in the underlying storage.
     type Position: Unsigned;
 
     /// The error type used by the methods of this trait.
     type Error: std::error::Error;
 
+    /// Consumes the provided [`Stream`] by writing it to this [`Store`].
+    /// This method computes the [`RecordHeader`] from the stream
+    /// while writing it to this [`Store`].
+    ///
+    /// Returns the position at which the bytes were written along with
+    /// the corresponding [`RecordHeader`] for the bytes.
     async fn append<B, S>(
         &mut self,
         stream: &mut S,
@@ -29,6 +36,9 @@ pub trait Store:
         B: Buf,
         S: Stream<Item = B> + Unpin;
 
+    /// Reads the record bytes content for the given [`RecordHeader`].
+    /// This method validates the read content with the given
+    /// [`RecordHeader`] before returning it.
     async fn read(
         &self,
         position: &Self::Position,
