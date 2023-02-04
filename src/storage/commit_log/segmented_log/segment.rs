@@ -247,6 +247,16 @@ where
 }
 
 #[async_trait(?Send)]
-pub trait SegmentCreator<M, X, I, S, Idx> {
-    async fn create(&self, base_index: Idx, segment_config: Config) -> Segment<M, X, I, S>;
+pub trait SegmentCreator {
+    type Error: std::error::Error;
+
+    type Idx: Unsigned;
+
+    type Segment;
+
+    async fn create(
+        &self,
+        base_index: Self::Idx,
+        segment_config: Config,
+    ) -> Result<Self::Segment, Self::Error>;
 }

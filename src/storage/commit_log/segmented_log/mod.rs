@@ -8,6 +8,7 @@ use self::{
     store::Store,
 };
 use super::super::*;
+use async_trait::async_trait;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 pub type Record<M, Idx, T> = super::Record<MetaWithIdx<M, Idx>, T>;
@@ -54,7 +55,7 @@ where
 
 impl<SegmentError: std::error::Error> std::error::Error for SegmentedLogError<SegmentError> {}
 
-#[async_trait::async_trait(?Send)]
+#[async_trait(?Send)]
 impl<M, X, I, S, SegC> AsyncIndexedRead for SegmentedLog<M, X, I, S, I::Idx, SegC>
 where
     S: Store,
