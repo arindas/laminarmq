@@ -2,6 +2,8 @@ pub mod index;
 pub mod segment;
 pub mod store;
 
+use std::time::Duration;
+
 use self::{
     index::Index,
     segment::{Config as SegmentConfig, SegError, Segment, SegmentCreator, SegmentError},
@@ -68,6 +70,38 @@ where
 }
 
 #[doc(hidden)]
+macro_rules! new_segment {
+    ($segmented_log:ident, $idx:ident) => {
+        $segmented_log
+            .segment_creator
+            .create(&$idx, &$segmented_log.config.segment_config)
+            .await
+            .map_err(SegmentedLogError::SegmentCreationError)
+    };
+}
+
+macro_rules! consume_segments {
+    ($segment_collection:ident, $async_consume_method:ident) => {
+        for segment in $segment_collection.drain(..) {
+            segment
+                .$async_consume_method()
+                .await
+                .map_err(SegmentedLogError::SegmentError)?;
+        }
+    };
+}
+
+#[doc(hidden)]
+macro_rules! taken_write_segment {
+    ($segmented_log:ident) => {
+        $segmented_log
+            .write_segment
+            .take()
+            .ok_or(SegmentedLogError::WriteSegmentLost)
+    };
+}
+
+#[doc(hidden)]
 macro_rules! write_segment_ref {
     ($segmented_log:ident, $ref_method:ident) => {
         $segmented_log
@@ -131,30 +165,17 @@ where
     pub async fn rotate_new_write_segment(&mut self) -> Result<(), SegLogError<S, I, SegC>> {
         self.reopen_write_segment().await?;
 
-        let write_segment = self
-            .write_segment
-            .take()
-            .ok_or(SegmentedLogError::WriteSegmentLost)?;
-
+        let write_segment = taken_write_segment!(self)?;
         let next_index = write_segment.highest_index();
 
         self.read_segments.push(write_segment);
-
-        self.write_segment = Some(
-            self.segment_creator
-                .create(&next_index, &self.config.segment_config)
-                .await
-                .map_err(SegmentedLogError::SegmentCreationError)?,
-        );
+        self.write_segment = Some(new_segment!(self, next_index)?);
 
         Ok(())
     }
 
     pub async fn reopen_write_segment(&mut self) -> Result<(), SegLogError<S, I, SegC>> {
-        let write_segment = self
-            .write_segment
-            .take()
-            .ok_or(SegmentedLogError::WriteSegmentLost)?;
+        let write_segment = taken_write_segment!(self)?;
 
         let write_segment_base_index = write_segment.lowest_index();
 
@@ -163,12 +184,41 @@ where
             .await
             .map_err(SegmentedLogError::SegmentError)?;
 
-        self.write_segment = Some(
-            self.segment_creator
-                .create(&write_segment_base_index, &self.config.segment_config)
-                .await
-                .map_err(SegmentedLogError::SegmentCreationError)?,
-        );
+        self.write_segment = Some(new_segment!(self, write_segment_base_index)?);
+
+        Ok(())
+    }
+
+    pub async fn remove_expired_segments(
+        &mut self,
+        expiry_duration: Duration,
+    ) -> Result<(), SegLogError<S, I, SegC>> {
+        let next_index = self.highest_index();
+
+        let mut segments = std::mem::replace(&mut self.read_segments, Vec::new());
+        segments.push(taken_write_segment!(self)?);
+
+        let segment_pos_in_vec = segments
+            .iter()
+            .position(|segment| !segment.has_expired(expiry_duration));
+
+        let (mut to_remove, mut to_keep) = if let Some(pos) = segment_pos_in_vec {
+            let non_expired_segments = segments.split_off(pos);
+            (segments, non_expired_segments)
+        } else {
+            (segments, Vec::new())
+        };
+
+        let write_segment = if let Some(write_segment) = to_keep.pop() {
+            write_segment
+        } else {
+            new_segment!(self, next_index)?
+        };
+
+        self.read_segments = to_keep;
+        self.write_segment = Some(write_segment);
+
+        consume_segments!(to_remove, remove);
 
         Ok(())
     }
@@ -220,26 +270,41 @@ where
         let next_index = segment_to_truncate.highest_index();
 
         let mut segments_to_remove = self.read_segments.split_off(segment_pos_in_vec + 1);
-        segments_to_remove.push(
-            self.write_segment
-                .take()
-                .ok_or(SegmentedLogError::WriteSegmentLost)?,
-        );
+        segments_to_remove.push(taken_write_segment!(self)?);
 
-        for segment in segments_to_remove.drain(..) {
-            segment
-                .remove()
-                .await
-                .map_err(SegmentedLogError::SegmentError)?;
-        }
+        consume_segments!(segments_to_remove, remove);
 
-        self.write_segment = Some(
-            self.segment_creator
-                .create(&next_index, &self.config.segment_config)
-                .await
-                .map_err(SegmentedLogError::SegmentCreationError)?,
-        );
+        self.write_segment = Some(new_segment!(self, next_index)?);
 
+        Ok(())
+    }
+}
+
+#[doc(hidden)]
+macro_rules! consume_segmented_log {
+    ($segmented_log:ident, $consume_method:ident) => {
+        let segments = &mut $segmented_log.read_segments;
+        segments.push(taken_write_segment!($segmented_log)?);
+        consume_segments!(segments, $consume_method);
+    };
+}
+
+#[async_trait(?Send)]
+impl<M, X, I, S, SegC> AsyncConsume for SegmentedLog<M, X, I, S, I::Idx, SegC>
+where
+    S: Store,
+    I: Index,
+    SegC: SegmentCreator,
+{
+    type ConsumeError = SegLogError<S, I, SegC>;
+
+    async fn remove(mut self) -> Result<(), Self::ConsumeError> {
+        consume_segmented_log!(self, remove);
+        Ok(())
+    }
+
+    async fn close(mut self) -> Result<(), Self::ConsumeError> {
+        consume_segmented_log!(self, close);
         Ok(())
     }
 }
