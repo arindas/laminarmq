@@ -46,6 +46,8 @@ pub enum SegmentedLogError<SegError, CreateError> {
     WriteSegmentLost,
 
     IndexOutOfBounds,
+
+    IndexGapEncountered,
 }
 
 impl<SegError, CreateError> std::fmt::Display for SegmentedLogError<SegError, CreateError>
@@ -63,6 +65,16 @@ where
     SegError: std::error::Error,
     CreateError: std::error::Error,
 {
+}
+
+#[doc(hidden)]
+macro_rules! write_segment_ref {
+    ($segmented_log:ident, $ref_method:ident) => {
+        $segmented_log
+            .write_segment
+            .$ref_method()
+            .ok_or(SegmentedLogError::WriteSegmentLost)
+    };
 }
 
 type SegLogError<S, I, SegC> = SegmentedLogError<SegError<S, I>, <SegC as SegmentCreator>::Error>;
@@ -154,6 +166,76 @@ where
         self.write_segment = Some(
             self.segment_creator
                 .create(&write_segment_base_index, &self.config.segment_config)
+                .await
+                .map_err(SegmentedLogError::SegmentCreationError)?,
+        );
+
+        Ok(())
+    }
+}
+
+#[async_trait(?Send)]
+impl<M, X, I, S, SegC> AsyncTruncate for SegmentedLog<M, X, I, S, I::Idx, SegC>
+where
+    S: Store,
+    I: Index<Position = S::Position>,
+    I::Idx: Serialize + DeserializeOwned,
+    M: Default + Serialize + DeserializeOwned,
+    SegC: SegmentCreator<Segment = Segment<M, X, I, S>, Idx = I::Idx>,
+{
+    type TruncError = SegLogError<S, I, SegC>;
+
+    type Mark = I::Idx;
+
+    async fn truncate(&mut self, idx: &Self::Mark) -> Result<(), Self::TruncError> {
+        if !self.has_index(idx) {
+            return Err(SegmentedLogError::IndexOutOfBounds);
+        }
+
+        let write_segment = write_segment_ref!(self, as_mut)?;
+
+        if idx >= &write_segment.lowest_index() {
+            return write_segment
+                .truncate(idx)
+                .await
+                .map_err(SegmentedLogError::SegmentError);
+        }
+
+        let segment_pos_in_vec = self
+            .read_segments
+            .iter()
+            .position(|seg| seg.has_index(idx))
+            .ok_or(SegmentedLogError::IndexGapEncountered)?;
+
+        let segment_to_truncate = self
+            .read_segments
+            .get_mut(segment_pos_in_vec)
+            .ok_or(SegmentedLogError::IndexGapEncountered)?;
+
+        segment_to_truncate
+            .truncate(idx)
+            .await
+            .map_err(SegmentedLogError::SegmentError)?;
+
+        let next_index = segment_to_truncate.highest_index();
+
+        let mut segments_to_remove = self.read_segments.split_off(segment_pos_in_vec + 1);
+        segments_to_remove.push(
+            self.write_segment
+                .take()
+                .ok_or(SegmentedLogError::WriteSegmentLost)?,
+        );
+
+        for segment in segments_to_remove.drain(..) {
+            segment
+                .remove()
+                .await
+                .map_err(SegmentedLogError::SegmentError)?;
+        }
+
+        self.write_segment = Some(
+            self.segment_creator
+                .create(&next_index, &self.config.segment_config)
                 .await
                 .map_err(SegmentedLogError::SegmentCreationError)?,
         );
