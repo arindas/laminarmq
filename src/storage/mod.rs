@@ -16,18 +16,26 @@ pub trait AsyncIndexedRead {
     /// Type to index with.
     type Idx: Unsigned + CheckedSub + ToPrimitive + Ord + Copy;
 
-    fn highest_index(&self) -> &Self::Idx;
+    /// Index upper exclusive bound
+    fn highest_index(&self) -> Self::Idx;
 
-    fn lowest_index(&self) -> &Self::Idx;
+    /// Index lower inclusive bound
+    fn lowest_index(&self) -> Self::Idx;
 
     fn has_index(&self, idx: &Self::Idx) -> bool {
-        idx >= self.lowest_index() && idx <= self.highest_index()
+        *idx >= self.lowest_index() && *idx < self.highest_index()
+    }
+
+    fn len(&self) -> Self::Idx {
+        self.highest_index()
+            .checked_sub(&self.lowest_index())
+            .unwrap_or(num::zero())
     }
 
     fn normalize_index(&self, idx: &Self::Idx) -> Option<Self::Idx> {
         self.has_index(idx)
             .then_some(idx)
-            .and_then(|idx| idx.checked_sub(self.lowest_index()))
+            .and_then(|idx| idx.checked_sub(&self.lowest_index()))
     }
 
     async fn read(&self, idx: &Self::Idx) -> Result<Self::Value, Self::ReadError>;
@@ -42,17 +50,21 @@ where
     R: AsyncIndexedRead,
     R::Value: 'a,
 {
-    let (lo_min, hi_max) = (*indexed_read.lowest_index(), *indexed_read.highest_index());
+    let (lo_min, hi_max) = (indexed_read.lowest_index(), indexed_read.highest_index());
+
+    let one = <R::Idx as num::One>::one();
+
+    let hi_max = hi_max - one;
 
     let lo = match index_bounds.start_bound() {
         std::ops::Bound::Included(x) => *x,
-        std::ops::Bound::Excluded(x) => *x + <R::Idx as num::One>::one(),
+        std::ops::Bound::Excluded(x) => *x + one,
         std::ops::Bound::Unbounded => lo_min,
     };
 
     let hi = match index_bounds.end_bound() {
         std::ops::Bound::Included(x) => *x,
-        std::ops::Bound::Excluded(x) => *x - <R::Idx as num::One>::one(),
+        std::ops::Bound::Excluded(x) => x.checked_sub(&one).unwrap_or(lo),
         std::ops::Bound::Unbounded => hi_max,
     };
 

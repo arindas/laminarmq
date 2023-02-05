@@ -4,7 +4,7 @@ pub mod store;
 
 use self::{
     index::Index,
-    segment::{Config as SegmentConfig, Segment, SegmentError},
+    segment::{Config as SegmentConfig, SegError, Segment, SegmentCreator, SegmentError},
     store::Store,
 };
 use super::super::*;
@@ -34,26 +34,38 @@ pub struct SegmentedLog<M, X, I, S, Idx, SegC> {
 
     config: Config<Idx>,
 
-    _segment_creator: SegC,
+    segment_creator: SegC,
 }
 
 #[derive(Debug)]
-pub enum SegmentedLogError<SegmentError> {
-    SegmentError(SegmentError),
+pub enum SegmentedLogError<SegError, CreateError> {
+    SegmentError(SegError),
+
+    SegmentCreationError(CreateError),
+
+    WriteSegmentLost,
 
     IndexOutOfBounds,
 }
 
-impl<SegmentError> std::fmt::Display for SegmentedLogError<SegmentError>
+impl<SegError, CreateError> std::fmt::Display for SegmentedLogError<SegError, CreateError>
 where
-    SegmentError: std::error::Error,
+    SegError: std::error::Error,
+    CreateError: std::error::Error,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", &self)
     }
 }
 
-impl<SegmentError: std::error::Error> std::error::Error for SegmentedLogError<SegmentError> {}
+impl<SegError, CreateError> std::error::Error for SegmentedLogError<SegError, CreateError>
+where
+    SegError: std::error::Error,
+    CreateError: std::error::Error,
+{
+}
+
+type SegLogError<S, I, SegC> = SegmentedLogError<SegError<S, I>, <SegC as SegmentCreator>::Error>;
 
 #[async_trait(?Send)]
 impl<M, X, I, S, SegC> AsyncIndexedRead for SegmentedLog<M, X, I, S, I::Idx, SegC>
@@ -62,25 +74,26 @@ where
     I: Index<Position = S::Position>,
     I::Idx: Serialize + DeserializeOwned,
     M: Default + Serialize + DeserializeOwned,
+    SegC: SegmentCreator,
 {
-    type ReadError = SegmentedLogError<SegmentError<S::Error, I::Error>>;
+    type ReadError = SegmentedLogError<SegmentError<S::Error, I::Error>, SegC::Error>;
 
     type Idx = I::Idx;
 
     type Value = Record<M, Self::Idx, S::Content>;
 
-    fn highest_index(&self) -> &Self::Idx {
+    fn highest_index(&self) -> Self::Idx {
         self.write_segment
             .as_ref()
             .map(|segment| segment.highest_index())
-            .unwrap_or(&self.config.initial_index)
+            .unwrap_or(self.config.initial_index)
     }
 
-    fn lowest_index(&self) -> &Self::Idx {
+    fn lowest_index(&self) -> Self::Idx {
         self.read_segments
             .first()
             .map(|segment| segment.lowest_index())
-            .unwrap_or(&self.config.initial_index)
+            .unwrap_or(self.config.initial_index)
     }
 
     async fn read(&self, idx: &Self::Idx) -> Result<Self::Value, Self::ReadError> {
@@ -92,5 +105,59 @@ where
             .read(idx)
             .await
             .map_err(SegmentedLogError::SegmentError)
+    }
+}
+
+impl<M, X, I, S, SegC> SegmentedLog<M, X, I, S, I::Idx, SegC>
+where
+    S: Store,
+    I: Index<Position = S::Position>,
+    I::Idx: Serialize + DeserializeOwned,
+    M: Default + Serialize + DeserializeOwned,
+    SegC: SegmentCreator<Segment = Segment<M, X, I, S>, Idx = I::Idx>,
+{
+    pub async fn rotate_new_write_segment(&mut self) -> Result<(), SegLogError<S, I, SegC>> {
+        self.reopen_write_segment().await?;
+
+        let write_segment = self
+            .write_segment
+            .take()
+            .ok_or(SegmentedLogError::WriteSegmentLost)?;
+
+        let next_index = write_segment.highest_index();
+
+        self.read_segments.push(write_segment);
+
+        self.write_segment = Some(
+            self.segment_creator
+                .create(&next_index, &self.config.segment_config)
+                .await
+                .map_err(SegmentedLogError::SegmentCreationError)?,
+        );
+
+        Ok(())
+    }
+
+    pub async fn reopen_write_segment(&mut self) -> Result<(), SegLogError<S, I, SegC>> {
+        let write_segment = self
+            .write_segment
+            .take()
+            .ok_or(SegmentedLogError::WriteSegmentLost)?;
+
+        let write_segment_base_index = write_segment.lowest_index();
+
+        write_segment
+            .close()
+            .await
+            .map_err(SegmentedLogError::SegmentError)?;
+
+        self.write_segment = Some(
+            self.segment_creator
+                .create(&write_segment_base_index, &self.config.segment_config)
+                .await
+                .map_err(SegmentedLogError::SegmentCreationError)?,
+        );
+
+        Ok(())
     }
 }

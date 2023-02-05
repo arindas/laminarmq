@@ -110,11 +110,11 @@ where
 
     type Value = Record<M, Self::Idx, S::Content>;
 
-    fn highest_index(&self) -> &Self::Idx {
+    fn highest_index(&self) -> Self::Idx {
         self.index.highest_index()
     }
 
-    fn lowest_index(&self) -> &Self::Idx {
+    fn lowest_index(&self) -> Self::Idx {
         self.index.lowest_index()
     }
 
@@ -148,7 +148,7 @@ where
     }
 }
 
-type SegError<S, I> = SegmentError<<S as Store>::Error, <I as Index>::Error>;
+pub(crate) type SegError<S, I> = SegmentError<<S as Store>::Error, <I as Index>::Error>;
 
 impl<M, X, I, S, ReqBuf> Segment<M, X, I, S>
 where
@@ -161,7 +161,7 @@ where
         &mut self,
         record: &mut Record<M, I::Idx, X>,
     ) -> Result<usize, SegError<S, I>> {
-        if &record.metadata.index != self.index.highest_index() {
+        if record.metadata.index != self.index.highest_index() {
             return Err(SegmentError::InvalidInputIndex);
         }
 
@@ -256,7 +256,7 @@ pub trait SegmentCreator {
 
     async fn create(
         &self,
-        base_index: Self::Idx,
-        segment_config: Config,
+        segment_base_index: &Self::Idx,
+        segment_config: &Config,
     ) -> Result<Self::Segment, Self::Error>;
 }
