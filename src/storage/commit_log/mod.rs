@@ -13,13 +13,13 @@ pub trait CommitLog<M, X, T>:
 {
     type Error: std::error::Error;
 
-    async fn append(&mut self, record: &Record<M, X>) -> Result<usize, Self::Error>;
+    async fn append(&mut self, record: &mut Record<M, X>) -> Result<usize, Self::Error>;
 
     async fn remove_expired(
         &mut self,
         _expiry_duration: std::time::Duration,
-    ) -> Result<usize, Self::Error> {
-        async { Ok(0) }.await
+    ) -> Result<Self::Idx, Self::Error> {
+        async { Ok(<Self::Idx as num::Zero>::zero()) }.await
     }
 }
 

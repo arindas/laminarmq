@@ -6,11 +6,15 @@ use std::time::Duration;
 
 use self::{
     index::Index,
-    segment::{Config as SegmentConfig, SegError, Segment, SegmentCreator, SegmentError},
+    segment::{Config as SegmentConfig, SegError, Segment, SegmentCreator},
     store::Store,
 };
-use super::super::*;
+use super::{
+    super::{AsyncConsume, AsyncIndexedRead, AsyncTruncate, Stream},
+    CommitLog,
+};
 use async_trait::async_trait;
+use bytes::Buf;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 pub type Record<M, Idx, T> = super::Record<MetaWithIdx<M, Idx>, T>;
@@ -122,7 +126,7 @@ where
     M: Default + Serialize + DeserializeOwned,
     SegC: SegmentCreator,
 {
-    type ReadError = SegmentedLogError<SegmentError<S::Error, I::Error>, SegC::Error>;
+    type ReadError = SegmentedLogError<SegError<S, I>, SegC::Error>;
 
     type Idx = I::Idx;
 
@@ -192,7 +196,7 @@ where
     pub async fn remove_expired_segments(
         &mut self,
         expiry_duration: Duration,
-    ) -> Result<(), SegLogError<S, I, SegC>> {
+    ) -> Result<I::Idx, SegLogError<S, I, SegC>> {
         let next_index = self.highest_index();
 
         let mut segments = std::mem::replace(&mut self.read_segments, Vec::new());
@@ -218,9 +222,16 @@ where
         self.read_segments = to_keep;
         self.write_segment = Some(write_segment);
 
-        consume_segments!(to_remove, remove);
+        let mut num_records_removed = <I::Idx as num::Zero>::zero();
+        for segment in to_remove.drain(..) {
+            num_records_removed = num_records_removed + segment.len();
 
-        Ok(())
+            segment
+                .remove()
+                .await
+                .map_err(SegmentedLogError::SegmentError)?;
+        }
+        Ok(num_records_removed)
     }
 }
 
@@ -306,5 +317,35 @@ where
     async fn close(mut self) -> Result<(), Self::ConsumeError> {
         consume_segmented_log!(self, close);
         Ok(())
+    }
+}
+
+#[async_trait(?Send)]
+impl<M, ReqBuf, X, I, S, SegC> CommitLog<MetaWithIdx<M, I::Idx>, X, S::Content>
+    for SegmentedLog<M, X, I, S, I::Idx, SegC>
+where
+    S: Store,
+    I: Index<Position = S::Position>,
+    I::Idx: Serialize + DeserializeOwned,
+    M: Default + Serialize + DeserializeOwned,
+    ReqBuf: Buf,
+    X: Stream<Item = ReqBuf> + Unpin,
+    SegC: SegmentCreator<Segment = Segment<M, X, I, S>, Idx = I::Idx>,
+{
+    type Error = SegLogError<S, I, SegC>;
+
+    async fn remove_expired(&mut self, expiry_duration: Duration) -> Result<I::Idx, Self::Error> {
+        self.remove_expired_segments(expiry_duration).await
+    }
+
+    async fn append(&mut self, record: &mut Record<M, I::Idx, X>) -> Result<usize, Self::Error> {
+        if write_segment_ref!(self, as_ref)?.is_maxed() {
+            self.rotate_new_write_segment().await?;
+        }
+
+        write_segment_ref!(self, as_mut)?
+            .append(record)
+            .await
+            .map_err(SegmentedLogError::SegmentError)
     }
 }
