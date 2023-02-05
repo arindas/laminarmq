@@ -193,6 +193,10 @@ where
         Ok(())
     }
 
+    /// Removes expired [`Segment`]`(s)` within this [`SegmentedLog`] instance.
+    ///
+    /// ## Returns
+    /// The number of records removed due to the removal of the segments.
     pub async fn remove_expired_segments(
         &mut self,
         expiry_duration: Duration,
