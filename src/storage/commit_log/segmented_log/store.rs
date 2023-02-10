@@ -69,13 +69,13 @@ pub mod common {
     #[derive(Debug, Default, PartialEq, Eq)]
     pub struct RecordHeader {
         pub checksum: u64,
-        pub length: usize,
+        pub length: u64,
     }
 
     impl RecordHeader {
         pub fn read<R: Read>(source: &mut R) -> std::io::Result<RecordHeader> {
             let checksum = source.read_u64::<LittleEndian>()?;
-            let length = source.read_u64::<LittleEndian>()? as usize;
+            let length = source.read_u64::<LittleEndian>()?;
 
             if checksum == 0 && length == 0 {
                 Err(std::io::Error::from(UnexpectedEof))
@@ -101,7 +101,7 @@ pub mod common {
 
             RecordHeader {
                 checksum,
-                length: record_bytes.len(),
+                length: record_bytes.len() as u64,
             }
         }
     }
@@ -132,7 +132,7 @@ pub mod common {
 
         Ok(RecordHeader {
             checksum: hasher.finish(),
-            length,
+            length: length as u64,
         })
     }
 }

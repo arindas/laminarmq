@@ -10,7 +10,7 @@ use self::{
     store::Store,
 };
 use super::{
-    super::{AsyncConsume, AsyncIndexedRead, AsyncTruncate, Stream},
+    super::{AsyncConsume, AsyncIndexedRead, AsyncTruncate, SizedStorage, Stream},
     CommitLog,
 };
 use async_trait::async_trait;
@@ -26,19 +26,19 @@ pub struct MetaWithIdx<M, Idx> {
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, Copy)]
-pub struct Config<Idx> {
+pub struct Config<Idx, Size> {
     /// Config for every segment in this Log.
-    pub segment_config: SegmentConfig,
+    pub segment_config: SegmentConfig<Size>,
 
     /// Index from which the first index of the Log starts.
     pub initial_index: Idx,
 }
 
-pub struct SegmentedLog<M, X, I, S, Idx, SegC> {
-    write_segment: Option<Segment<M, X, I, S>>,
-    read_segments: Vec<Segment<M, X, I, S>>,
+pub struct SegmentedLog<M, X, I, S, Idx, Size, SegC> {
+    write_segment: Option<Segment<M, X, I, S, Size>>,
+    read_segments: Vec<Segment<M, X, I, S, Size>>,
 
-    config: Config<Idx>,
+    config: Config<Idx, Size>,
 
     segment_creator: SegC,
 }
@@ -118,7 +118,7 @@ macro_rules! write_segment_ref {
 type SegLogError<S, I, SegC> = SegmentedLogError<SegError<S, I>, <SegC as SegmentCreator>::Error>;
 
 #[async_trait(?Send)]
-impl<M, X, I, S, SegC> AsyncIndexedRead for SegmentedLog<M, X, I, S, I::Idx, SegC>
+impl<M, X, I, S, SegC> AsyncIndexedRead for SegmentedLog<M, X, I, S, I::Idx, S::Size, SegC>
 where
     S: Store,
     I: Index<Position = S::Position>,
@@ -158,13 +158,17 @@ where
     }
 }
 
-impl<M, X, I, S, SegC> SegmentedLog<M, X, I, S, I::Idx, SegC>
+impl<M, X, I, S, SegC> SegmentedLog<M, X, I, S, I::Idx, S::Size, SegC>
 where
     S: Store,
     I: Index<Position = S::Position>,
     I::Idx: Serialize + DeserializeOwned,
     M: Default + Serialize + DeserializeOwned,
-    SegC: SegmentCreator<Segment = Segment<M, X, I, S>, Idx = I::Idx>,
+    SegC: SegmentCreator<
+        SegmentConfig = SegmentConfig<S::Size>,
+        Segment = Segment<M, X, I, S, S::Size>,
+        Idx = I::Idx,
+    >,
 {
     pub async fn rotate_new_write_segment(&mut self) -> Result<(), SegLogError<S, I, SegC>> {
         self.reopen_write_segment().await?;
@@ -240,13 +244,17 @@ where
 }
 
 #[async_trait(?Send)]
-impl<M, X, I, S, SegC> AsyncTruncate for SegmentedLog<M, X, I, S, I::Idx, SegC>
+impl<M, X, I, S, SegC> AsyncTruncate for SegmentedLog<M, X, I, S, I::Idx, S::Size, SegC>
 where
     S: Store,
     I: Index<Position = S::Position>,
     I::Idx: Serialize + DeserializeOwned,
     M: Default + Serialize + DeserializeOwned,
-    SegC: SegmentCreator<Segment = Segment<M, X, I, S>, Idx = I::Idx>,
+    SegC: SegmentCreator<
+        SegmentConfig = SegmentConfig<S::Size>,
+        Segment = Segment<M, X, I, S, S::Size>,
+        Idx = I::Idx,
+    >,
 {
     type TruncError = SegLogError<S, I, SegC>;
 
@@ -305,7 +313,7 @@ macro_rules! consume_segmented_log {
 }
 
 #[async_trait(?Send)]
-impl<M, X, I, S, SegC> AsyncConsume for SegmentedLog<M, X, I, S, I::Idx, SegC>
+impl<M, X, I, S, SegC> AsyncConsume for SegmentedLog<M, X, I, S, I::Idx, S::Size, SegC>
 where
     S: Store,
     I: Index,
@@ -324,9 +332,24 @@ where
     }
 }
 
+impl<M, X, I, S, Idx, SegC> SizedStorage for SegmentedLog<M, X, I, S, Idx, S::Size, SegC>
+where
+    S: Store,
+{
+    type Size = S::Size;
+
+    fn size(&self) -> Self::Size {
+        self.read_segments
+            .iter()
+            .chain(self.write_segment.as_ref())
+            .map(|x| x.size())
+            .sum()
+    }
+}
+
 #[async_trait(?Send)]
 impl<M, ReqBuf, X, I, S, SegC> CommitLog<MetaWithIdx<M, I::Idx>, X, S::Content>
-    for SegmentedLog<M, X, I, S, I::Idx, SegC>
+    for SegmentedLog<M, X, I, S, I::Idx, S::Size, SegC>
 where
     S: Store,
     I: Index<Position = S::Position>,
@@ -334,7 +357,11 @@ where
     M: Default + Serialize + DeserializeOwned,
     ReqBuf: Buf,
     X: Stream<Item = ReqBuf> + Unpin,
-    SegC: SegmentCreator<Segment = Segment<M, X, I, S>, Idx = I::Idx>,
+    SegC: SegmentCreator<
+        SegmentConfig = SegmentConfig<S::Size>,
+        Segment = Segment<M, X, I, S, S::Size>,
+        Idx = I::Idx,
+    >,
 {
     type Error = SegLogError<S, I, SegC>;
 
@@ -342,7 +369,10 @@ where
         self.remove_expired_segments(expiry_duration).await
     }
 
-    async fn append(&mut self, record: &mut Record<M, I::Idx, X>) -> Result<usize, Self::Error> {
+    async fn append(
+        &mut self,
+        record: &mut Record<M, I::Idx, X>,
+    ) -> Result<Self::Size, Self::Error> {
         if write_segment_ref!(self, as_ref)?.is_maxed() {
             self.rotate_new_write_segment().await?;
         }

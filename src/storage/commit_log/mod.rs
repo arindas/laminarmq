@@ -1,4 +1,4 @@
-use super::{AsyncConsume, AsyncIndexedRead, AsyncTruncate};
+use super::{AsyncConsume, AsyncIndexedRead, AsyncTruncate, SizedStorage};
 
 pub struct Record<M, T> {
     pub metadata: M,
@@ -10,10 +10,11 @@ pub trait CommitLog<M, X, T>:
     AsyncIndexedRead<Value = Record<M, T>, ReadError = Self::Error>
     + AsyncTruncate<Mark = Self::Idx, TruncError = Self::Error>
     + AsyncConsume<ConsumeError = Self::Error>
+    + SizedStorage
 {
     type Error: std::error::Error;
 
-    async fn append(&mut self, record: &mut Record<M, X>) -> Result<usize, Self::Error>;
+    async fn append(&mut self, record: &mut Record<M, X>) -> Result<Self::Size, Self::Error>;
 
     async fn remove_expired(
         &mut self,

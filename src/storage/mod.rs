@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use futures_core::Stream;
-use num::{CheckedSub, ToPrimitive, Unsigned};
-use std::{cmp, ops::RangeBounds};
+use num::{cast::FromPrimitive, CheckedSub, ToPrimitive, Unsigned};
+use std::{cmp, iter::Sum, ops::RangeBounds};
 
 pub mod commit_log;
 
@@ -98,7 +98,9 @@ pub trait AsyncConsume {
 }
 
 pub trait SizedStorage {
-    fn size(&self) -> usize;
+    type Size: Unsigned + FromPrimitive + Sum + Ord;
+
+    fn size(&self) -> Self::Size;
 }
 
 pub mod impls;
