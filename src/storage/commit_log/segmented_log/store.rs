@@ -5,7 +5,7 @@ use bytes::Buf;
 use common::RecordHeader;
 use futures_core::Stream;
 use num::Unsigned;
-use std::{hash::Hasher, ops::Deref};
+use std::{hash::Hasher, marker::PhantomData, ops::Deref};
 
 #[async_trait::async_trait(?Send)]
 pub trait Store:

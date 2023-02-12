@@ -28,7 +28,7 @@ pub trait Storage:
     async fn append<B, S, W, F, T>(
         &mut self,
         byte_stream: &mut S,
-        write_fn: W,
+        write_fn: &mut W,
     ) -> Result<(Self::Position, T), Self::Error>
     where
         B: Buf,
