@@ -1,17 +1,17 @@
 use crate::common::split::SplitAt;
 
-use super::super::super::{AsyncConsume, AsyncTruncate, SizedStorage};
+use super::super::super::{AsyncConsume, AsyncTruncate, Sizable};
 use bytes::Buf;
 use common::RecordHeader;
 use futures_core::Stream;
 use num::Unsigned;
-use std::{hash::Hasher, marker::PhantomData, ops::Deref};
+use std::{hash::Hasher, ops::Deref};
 
 #[async_trait::async_trait(?Send)]
 pub trait Store:
     AsyncTruncate<Mark = Self::Position, TruncError = Self::Error>
     + AsyncConsume<ConsumeError = Self::Error>
-    + SizedStorage
+    + Sizable
 {
     /// Content bytes to be read from this store.
     type Content: Deref<Target = [u8]> + SplitAt<u8>;

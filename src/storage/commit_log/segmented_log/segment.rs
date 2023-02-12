@@ -54,7 +54,7 @@ impl<M, X, I, S, Size> Segment<M, X, I, S, Size> {
     }
 }
 
-impl<M, X, I, S: Store> SizedStorage for Segment<M, X, I, S, S::Size> {
+impl<M, X, I, S: Store> Sizable for Segment<M, X, I, S, S::Size> {
     type Size = S::Size;
 
     fn size(&self) -> Self::Size {

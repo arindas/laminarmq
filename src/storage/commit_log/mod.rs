@@ -1,4 +1,4 @@
-use super::{AsyncConsume, AsyncIndexedRead, AsyncTruncate, SizedStorage};
+use super::{AsyncConsume, AsyncIndexedRead, AsyncTruncate, Sizable};
 
 pub struct Record<M, T> {
     pub metadata: M,
@@ -10,7 +10,7 @@ pub trait CommitLog<M, X, T>:
     AsyncIndexedRead<Value = Record<M, T>, ReadError = Self::Error>
     + AsyncTruncate<Mark = Self::Idx, TruncError = Self::Error>
     + AsyncConsume<ConsumeError = Self::Error>
-    + SizedStorage
+    + Sizable
 {
     type Error: std::error::Error;
 

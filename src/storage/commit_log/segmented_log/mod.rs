@@ -1,6 +1,5 @@
 pub mod index;
 pub mod segment;
-pub mod storage;
 pub mod store;
 
 use std::time::Duration;
@@ -11,7 +10,7 @@ use self::{
     store::Store,
 };
 use super::{
-    super::{AsyncConsume, AsyncIndexedRead, AsyncTruncate, SizedStorage, Stream},
+    super::{AsyncConsume, AsyncIndexedRead, AsyncTruncate, Sizable, Stream},
     CommitLog,
 };
 use async_trait::async_trait;
@@ -333,7 +332,7 @@ where
     }
 }
 
-impl<M, X, I, S, Idx, SegC> SizedStorage for SegmentedLog<M, X, I, S, Idx, S::Size, SegC>
+impl<M, X, I, S, Idx, SegC> Sizable for SegmentedLog<M, X, I, S, Idx, S::Size, SegC>
 where
     S: Store,
 {
