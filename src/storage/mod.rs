@@ -79,22 +79,22 @@ pub trait Storage:
 
     type Error: std::error::Error;
 
+    async fn append<B, S, W, F, T, 'storage, 'byte_stream>(
+        &'storage mut self,
+        byte_stream: &'byte_stream mut S,
+        write_fn: &mut W,
+    ) -> Result<(Self::Position, T), Self::Error>
+    where
+        W: FnMut(&'byte_stream mut S, &'storage mut Self::Write) -> F,
+        F: Future<Output = std::io::Result<T>>,
+        S: Stream<Item = B> + Unpin,
+        B: Buf;
+
     async fn read(
         &mut self,
         position: &Self::Position,
         size: &Self::Size,
     ) -> Result<Self::Content, Self::Error>;
-
-    async fn append<B, S, W, F, T>(
-        &mut self,
-        byte_stream: &mut S,
-        write_fn: &mut W,
-    ) -> Result<(Self::Position, T), Self::Error>
-    where
-        B: Buf,
-        S: Stream<Item = B> + Unpin,
-        W: FnMut(&mut S, &mut Self::Write) -> F,
-        F: Future<Output = std::io::Result<T>>;
 }
 
 pub mod commit_log;

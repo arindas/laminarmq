@@ -23,3 +23,5 @@ pub trait CommitLog<M, X, T>:
         async { Ok(<Self::Idx as num::Zero>::zero()) }.await
     }
 }
+
+pub mod segmented_log;
