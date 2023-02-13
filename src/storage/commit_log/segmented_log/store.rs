@@ -102,6 +102,12 @@ pub struct Store<S, H> {
     _phantom_data: PhantomData<H>,
 }
 
+pub enum StoreError<StorageError> {
+    StorageError(StorageError),
+    IncompatibleSizeType,
+    RecordHeaderMismatch,
+}
+
 impl<S, H> Store<S, H>
 where
     S: Storage,
@@ -111,17 +117,18 @@ where
         &mut self,
         position: &S::Position,
         record_header: &RecordHeader,
-    ) -> Result<S::Content, ()> {
-        let record_size = S::Size::from_u64(record_header.length).ok_or(())?;
+    ) -> Result<S::Content, StoreError<S::Error>> {
+        let record_size =
+            S::Size::from_u64(record_header.length).ok_or(StoreError::IncompatibleSizeType)?;
 
         let record_bytes = self
             ._storage
             .read(position, &record_size)
             .await
-            .map_err(|_| ())?;
+            .map_err(StoreError::StorageError)?;
 
         if &RecordHeader::compute::<H>(&record_bytes) != record_header {
-            return Err(());
+            return Err(StoreError::RecordHeaderMismatch);
         }
 
         Ok(record_bytes)
@@ -130,7 +137,7 @@ where
     pub async fn append<ReqBuf, ReqBody>(
         &mut self,
         stream: &mut ReqBody,
-    ) -> Result<(S::Position, RecordHeader), ()>
+    ) -> Result<(S::Position, RecordHeader), StoreError<S::Error>>
     where
         ReqBuf: Buf,
         ReqBody: Stream<Item = ReqBuf> + Unpin,
@@ -141,6 +148,6 @@ where
                 &mut write_record_bytes::<H, ReqBuf, ReqBody, S::Write>,
             )
             .await
-            .map_err(|_| ())
+            .map_err(StoreError::StorageError)
     }
 }
