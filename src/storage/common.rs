@@ -1,8 +1,36 @@
 use super::AsyncIndexedRead;
+use bytes::Buf;
 use futures_core::Stream;
+use futures_lite::{AsyncWrite, AsyncWriteExt, StreamExt};
 use num::CheckedSub;
 use std::{cmp, ops::RangeBounds};
 
+/// Writes all buffers from the given stream to the provided [`AsyncWrite`] instance. Returns the
+/// number of bytes written.
+pub async fn write_stream<B, S, W>(stream: &mut S, write: &mut W) -> std::io::Result<usize>
+where
+    B: Buf,
+    S: Stream<Item = B> + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    let mut length = 0 as usize;
+    while let Some(mut buf) = stream.next().await {
+        while buf.has_remaining() {
+            let chunk = buf.chunk();
+
+            write.write_all(chunk).await?;
+
+            let chunk_len = chunk.len();
+            buf.advance(chunk_len);
+            length += chunk_len;
+        }
+    }
+
+    Ok(length)
+}
+
+/// Returns a stream of items spanning the given index bounds from the provided
+/// [`AsyncIndexedRead`] instance.
 pub async fn indexed_read_stream<'a, R, RB>(
     indexed_read: &'a R,
     index_bounds: RB,

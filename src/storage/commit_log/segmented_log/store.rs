@@ -97,7 +97,7 @@ pub mod common {
 }
 
 pub struct Store<S, H> {
-    _storage: S,
+    storage: S,
 
     _phantom_data: PhantomData<H>,
 }
@@ -122,7 +122,7 @@ where
             S::Size::from_u64(record_header.length).ok_or(StoreError::IncompatibleSizeType)?;
 
         let record_bytes = self
-            ._storage
+            .storage
             .read(position, &record_size)
             .await
             .map_err(StoreError::StorageError)?;
@@ -142,7 +142,7 @@ where
         ReqBuf: Buf,
         ReqBody: Stream<Item = ReqBuf> + Unpin,
     {
-        self._storage
+        self.storage
             .append(
                 stream,
                 &mut write_record_bytes::<H, ReqBuf, ReqBody, S::Write>,
