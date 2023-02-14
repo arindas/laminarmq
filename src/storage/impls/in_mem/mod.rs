@@ -1,1 +1,1 @@
-pub mod segmented_log;
+pub mod storage;
