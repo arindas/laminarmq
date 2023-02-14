@@ -65,6 +65,7 @@ pub trait Sizable {
     fn size(&self) -> Self::Size;
 }
 
+/// A storage media. This abstraction supports random reads and linear writes.
 #[async_trait(?Send)]
 pub trait Storage:
     AsyncTruncate<Mark = Self::Position, TruncError = Self::Error>
@@ -79,7 +80,15 @@ pub trait Storage:
 
     type Error: std::error::Error;
 
-    async fn append<B, S, W, F, T, 'storage, 'byte_stream>(
+    /// Appends a stream of byte buffers at the end of the storage. Using streams enable us to
+    /// append data when all of the data is not available all at once. (e.g. when parsing a
+    /// HTTP request body).
+    ///
+    /// ## Params:
+    /// - `byte_stream`: Stream of byte buffers to write.
+    /// - `write_fn`: function to use for writing the provided stream to our underlying
+    /// [`AsyncWrite`] implementation.
+    async fn append<'storage, 'byte_stream, B, S, W, F, T>(
         &'storage mut self,
         byte_stream: &'byte_stream mut S,
         write_fn: &mut W,
@@ -90,6 +99,7 @@ pub trait Storage:
         S: Stream<Item = B> + Unpin,
         B: Buf;
 
+    /// Reads `size` number of bytes from the given `position`.
     async fn read(
         &mut self,
         position: &Self::Position,
