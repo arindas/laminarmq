@@ -1,10 +1,9 @@
+use self::common::{write_record_bytes, RecordHeader};
+use super::super::super::{AsyncConsume, AsyncTruncate, Sizable, Storage};
+use async_trait::async_trait;
 use bytes::Buf;
 use futures_core::Stream;
 use num::FromPrimitive;
-
-use self::common::{write_record_bytes, RecordHeader};
-
-use super::super::super::Storage;
 use std::{hash::Hasher, marker::PhantomData};
 
 pub mod common {
@@ -102,10 +101,25 @@ pub struct Store<S, H> {
     _phantom_data: PhantomData<H>,
 }
 
+#[derive(Debug)]
 pub enum StoreError<StorageError> {
     StorageError(StorageError),
     IncompatibleSizeType,
     RecordHeaderMismatch,
+}
+
+impl<StorageError> std::fmt::Display for StoreError<StorageError>
+where
+    StorageError: std::error::Error,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl<StorageError> std::error::Error for StoreError<StorageError> where
+    StorageError: std::error::Error
+{
 }
 
 impl<S, H> Store<S, H>
@@ -149,5 +163,43 @@ where
             )
             .await
             .map_err(StoreError::StorageError)
+    }
+}
+
+#[async_trait(?Send)]
+impl<S: Storage, H> AsyncTruncate for Store<S, H> {
+    type Mark = S::Mark;
+
+    type TruncError = StoreError<S::Error>;
+
+    async fn truncate(&mut self, pos: &Self::Mark) -> Result<(), Self::TruncError> {
+        self.storage
+            .truncate(pos)
+            .await
+            .map_err(StoreError::StorageError)
+    }
+}
+
+#[async_trait(?Send)]
+impl<S: Storage, H> AsyncConsume for Store<S, H> {
+    type ConsumeError = StoreError<S::Error>;
+
+    async fn remove(self) -> Result<(), Self::ConsumeError> {
+        self.storage
+            .remove()
+            .await
+            .map_err(StoreError::StorageError)
+    }
+
+    async fn close(self) -> Result<(), Self::ConsumeError> {
+        self.storage.close().await.map_err(StoreError::StorageError)
+    }
+}
+
+impl<S: Storage, H> Sizable for Store<S, H> {
+    type Size = S::Size;
+
+    fn size(&self) -> Self::Size {
+        self.storage.size()
     }
 }
