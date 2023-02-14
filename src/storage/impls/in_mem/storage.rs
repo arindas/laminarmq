@@ -3,7 +3,11 @@ use async_trait::async_trait;
 use bytes::Buf;
 use futures_core::{Future, Stream};
 use std::{
-    io::{Cursor, Read, Seek, SeekFrom},
+    io::{
+        self, Cursor,
+        ErrorKind::{self, UnexpectedEof},
+        Read, Seek, SeekFrom,
+    },
     ops::Deref,
 };
 
@@ -28,7 +32,7 @@ impl Sizable for InMemStorage {
 
 #[derive(Debug)]
 pub enum InMemStorageError {
-    IoError(std::io::Error),
+    IoError(io::Error),
 }
 
 impl std::fmt::Display for InMemStorageError {
@@ -36,8 +40,13 @@ impl std::fmt::Display for InMemStorageError {
         write!(f, "{:?}", self)
     }
 }
-
 impl std::error::Error for InMemStorageError {}
+
+impl From<ErrorKind> for InMemStorageError {
+    fn from(kind: ErrorKind) -> Self {
+        Self::IoError(io::Error::from(kind))
+    }
+}
 
 #[async_trait(?Send)]
 impl AsyncTruncate for InMemStorage {
@@ -83,7 +92,7 @@ impl Storage for InMemStorage {
     where
         B: Buf,
         S: Stream<Item = B> + Unpin,
-        F: Future<Output = std::io::Result<T>>,
+        F: Future<Output = io::Result<T>>,
         W: FnMut(&'byte_stream mut S, &'storage mut Self::Write) -> F,
     {
         let position = self.size();
@@ -111,6 +120,75 @@ impl Storage for InMemStorage {
             .read_to_end(&mut vec)
             .map_err(InMemStorageError::IoError)?;
 
+        if vec.len() < *size {
+            return Err(UnexpectedEof.into());
+        }
+
         Ok(vec)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::{
+        super::super::super::common::write_stream, InMemStorage, InMemStorageError, Sizable,
+        Storage,
+    };
+    use futures_lite::stream;
+
+    #[test]
+    fn test_in_mem_storage_read_write_consistency() {
+        futures_lite::future::block_on(async {
+            const REQ_BYTES: &[u8] = b"Hello World!";
+            let mut req_body = stream::iter(std::iter::once(REQ_BYTES));
+
+            let mut in_mem_storage = InMemStorage::default();
+
+            assert!(matches!(
+                in_mem_storage.read(&(0 as usize), &(1 as usize)).await,
+                Err(InMemStorageError::IoError(_))
+            ));
+
+            let write_position = in_mem_storage.size();
+
+            let (position, bytes_written) = in_mem_storage
+                .append(&mut req_body, &mut write_stream)
+                .await
+                .unwrap();
+
+            assert_eq!(position, write_position);
+            assert_eq!(bytes_written, REQ_BYTES.len());
+
+            let read_bytes = in_mem_storage
+                .read(&position, &bytes_written)
+                .await
+                .unwrap();
+
+            assert_eq!(read_bytes, REQ_BYTES);
+
+            const REPEAT: usize = 5;
+            let mut repeated_req_body = stream::iter([REQ_BYTES; REPEAT]);
+
+            let write_position = in_mem_storage.size();
+
+            let (position, bytes_written) = in_mem_storage
+                .append(&mut repeated_req_body, &mut write_stream)
+                .await
+                .unwrap();
+
+            assert_eq!(position, write_position);
+            assert_eq!(bytes_written, REQ_BYTES.len() * REPEAT);
+
+            let read_bytes = in_mem_storage
+                .read(&position, &bytes_written)
+                .await
+                .unwrap();
+
+            for i in 0..REPEAT {
+                let (lo, hi) = (i * REQ_BYTES.len(), (i + 1) * REQ_BYTES.len());
+                assert_eq!(REQ_BYTES, &read_bytes[lo..hi]);
+            }
+        });
     }
 }
