@@ -47,7 +47,7 @@ pub trait AsyncTruncate {
 
     type Mark: Unsigned;
 
-    async fn truncate(&mut self, idx: &Self::Mark) -> Result<(), Self::TruncError>;
+    async fn truncate(&mut self, pos: &Self::Mark) -> Result<(), Self::TruncError>;
 }
 
 #[async_trait(?Send)]
@@ -76,7 +76,7 @@ pub trait Storage:
 
     type Write: AsyncWrite + Unpin;
 
-    type Position;
+    type Position: Unsigned;
 
     type Error: std::error::Error;
 
@@ -94,10 +94,10 @@ pub trait Storage:
         write_fn: &mut W,
     ) -> Result<(Self::Position, T), Self::Error>
     where
-        W: FnMut(&'byte_stream mut S, &'storage mut Self::Write) -> F,
-        F: Future<Output = std::io::Result<T>>,
+        B: Buf,
         S: Stream<Item = B> + Unpin,
-        B: Buf;
+        F: Future<Output = std::io::Result<T>>,
+        W: FnMut(&'byte_stream mut S, &'storage mut Self::Write) -> F;
 
     /// Reads `size` number of bytes from the given `position`.
     async fn read(
