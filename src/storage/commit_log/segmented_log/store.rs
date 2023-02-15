@@ -18,7 +18,7 @@ pub mod common {
     use futures_core::Stream;
     use futures_lite::{AsyncWrite, AsyncWriteExt, StreamExt};
 
-    /// Extension used by backing files for [`Store`](super::Store)s.
+    /// Extension used by backing files for [`Store`](super::Store) instances.
     pub const STORE_FILE_EXTENSION: &str = "store";
 
     /// Number of bytes required for storing the record header.
@@ -44,7 +44,7 @@ pub mod common {
 
         pub fn write<W: Write>(&self, dest: &mut W) -> std::io::Result<()> {
             dest.write_u64::<LittleEndian>(self.checksum)?;
-            dest.write_u64::<LittleEndian>(self.length as u64)?;
+            dest.write_u64::<LittleEndian>(self.length)?;
 
             Ok(())
         }
