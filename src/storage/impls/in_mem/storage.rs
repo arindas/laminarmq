@@ -104,7 +104,7 @@ impl Storage for InMemStorage {
     }
 
     async fn read(
-        &mut self,
+        &self,
         position: &Self::Position,
         size: &Self::Size,
     ) -> Result<Self::Content, Self::Error> {

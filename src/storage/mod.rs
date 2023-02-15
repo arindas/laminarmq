@@ -101,7 +101,7 @@ pub trait Storage:
 
     /// Reads `size` number of bytes from the given `position`.
     async fn read(
-        &mut self,
+        &self,
         position: &Self::Position,
         size: &Self::Size,
     ) -> Result<Self::Content, Self::Error>;
