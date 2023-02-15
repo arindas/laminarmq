@@ -76,7 +76,7 @@ pub trait Storage:
 
     type Write: AsyncWrite + Unpin;
 
-    type Position: Unsigned;
+    type Position: Unsigned + FromPrimitive;
 
     type Error: std::error::Error;
 

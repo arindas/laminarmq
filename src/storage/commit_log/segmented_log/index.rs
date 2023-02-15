@@ -53,7 +53,7 @@ pub enum IndexError<StorageError> {
 }
 
 impl IndexRecord {
-    pub async fn read_from_storage<S>(
+    pub async fn read_from_storage_at<S>(
         source: &S,
         position: &S::Position,
     ) -> Result<IndexRecord, IndexError<S::Error>>
@@ -74,7 +74,7 @@ impl IndexRecord {
         IndexRecord::read(&mut cursor).map_err(IndexError::IoError)
     }
 
-    pub async fn write_to_storage<S>(
+    pub async fn append_to_storage<S>(
         &self,
         dest: &mut S,
     ) -> Result<S::Position, IndexError<S::Error>>
@@ -95,4 +95,27 @@ impl IndexRecord {
 
         Ok(position)
     }
+}
+
+pub async fn index_records_in_storage<S>(
+    source: &S,
+) -> Result<(Option<u64>, Vec<IndexRecord>), IndexError<S::Error>>
+where
+    S: Storage,
+{
+    let mut position = 0 as u64;
+    let mut index_records = Vec::<IndexRecord>::new();
+
+    while let Ok(index_record) = IndexRecord::read_from_storage_at(
+        source,
+        &<S::Position as FromPrimitive>::from_u64(position)
+            .ok_or(IndexError::IncompatibleSizeType)?,
+    )
+    .await
+    {
+        index_records.push(index_record);
+        position += INDEX_RECORD_LENGTH as u64;
+    }
+
+    Ok((index_records.first().map(|x| x.index), index_records))
 }
