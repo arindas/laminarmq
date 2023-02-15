@@ -101,6 +101,21 @@ pub struct Store<S, H> {
     _phantom_data: PhantomData<H>,
 }
 
+impl<S: Default, H> Default for Store<S, H> {
+    fn default() -> Self {
+        Self::new(S::default())
+    }
+}
+
+impl<S, H> Store<S, H> {
+    pub fn new(storage: S) -> Self {
+        Self {
+            storage,
+            _phantom_data: PhantomData,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum StoreError<StorageError> {
     StorageError(StorageError),
