@@ -47,7 +47,7 @@ pub trait AsyncTruncate {
 
     type Mark: Unsigned;
 
-    async fn truncate(&mut self, pos: &Self::Mark) -> Result<(), Self::TruncError>;
+    async fn truncate(&mut self, mark: &Self::Mark) -> Result<(), Self::TruncError>;
 }
 
 #[async_trait(?Send)]

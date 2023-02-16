@@ -24,7 +24,7 @@ pub mod common {
     /// Number of bytes required for storing the record header.
     pub const RECORD_HEADER_LENGTH: usize = 16;
 
-    #[derive(Debug, Default, PartialEq, Eq)]
+    #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
     pub struct RecordHeader {
         pub checksum: u64,
         pub length: u64,
