@@ -286,10 +286,10 @@ where
     Idx: Unsigned + ToPrimitive + Copy,
 {
     pub async fn append(&mut self, index_record: IndexRecord) -> Result<Idx, IndexError<S::Error>> {
-        let (base_index, next_index) = (self.base_index, self.next_index);
+        let next_index = self.next_index;
 
         let index_record = match index_record.index {
-            Some(idx) if idx != idx_as_u64!(base_index, Idx)? => {
+            Some(idx) if idx != idx_as_u64!(next_index, Idx)? => {
                 Err(IndexError::<S::Error>::InvalidAppendIdx)
             }
             _ => Ok(IndexRecord {
@@ -319,17 +319,7 @@ where
     type Mark = Idx;
 
     async fn truncate(&mut self, idx: &Self::Mark) -> Result<(), Self::TruncError> {
-        let vec_index = self
-            .normalize_index(idx)
-            .ok_or(IndexError::IndexOutOfBounds)?
-            .to_usize()
-            .ok_or(IndexError::IncompatibleIdxType)?;
-
-        let index_record = self
-            .index_records
-            .get(vec_index)
-            .ok_or(IndexError::IndexGapEncountered)
-            .map(|&x| x)?;
+        let index_record = self.read(idx).await?;
 
         let position = index_record.position;
         let position = u64_as_position!(position, S::Position)?;
@@ -338,6 +328,12 @@ where
             .truncate(&position)
             .await
             .map_err(IndexError::StorageError)?;
+
+        let vec_index = self
+            .normalize_index(idx)
+            .ok_or(IndexError::IndexOutOfBounds)?
+            .to_usize()
+            .ok_or(IndexError::IncompatibleIdxType)?;
 
         self.index_records.truncate(vec_index);
 
