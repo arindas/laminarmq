@@ -18,9 +18,9 @@ pub const INDEX_RECORD_LENGTH: usize = 32;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct IndexRecord {
-    record_header: RecordHeader,
-    index: Option<u64>,
-    position: u64,
+    pub record_header: RecordHeader,
+    pub index: Option<u64>,
+    pub position: u64,
 }
 
 impl IndexRecord {

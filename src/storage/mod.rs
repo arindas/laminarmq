@@ -34,6 +34,10 @@ pub trait AsyncIndexedRead {
             .unwrap_or(num::zero())
     }
 
+    fn is_empty(&self) -> bool {
+        self.len() == num::zero()
+    }
+
     fn normalize_index(&self, idx: &Self::Idx) -> Option<Self::Idx> {
         self.has_index(idx)
             .then_some(idx)

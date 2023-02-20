@@ -143,7 +143,7 @@ where
     H: Hasher + Default,
 {
     pub async fn read(
-        &mut self,
+        &self,
         position: &S::Position,
         record_header: &RecordHeader,
     ) -> Result<S::Content, StoreError<S::Error>> {
