@@ -1,7 +1,7 @@
 use super::{
     super::super::{
         super::common::{serde::SerDeFmt, split::SplitAt},
-        AsyncIndexedRead, Sizable, Storage,
+        AsyncConsume, AsyncIndexedRead, AsyncTruncate, Sizable, Storage,
     },
     index::{Index, IndexError, IndexRecord},
     store::{Store, StoreError},
@@ -188,5 +188,71 @@ where
             .map_err(SegmentError::IndexError)?;
 
         Ok(write_index)
+    }
+}
+
+#[async_trait(?Send)]
+impl<S, M, H, Idx, SerDe> AsyncTruncate for Segment<S, M, H, Idx, S::Size, SerDe>
+where
+    S: Storage,
+    Idx: Unsigned + CheckedSub + ToPrimitive + Ord + Copy,
+    SerDe: SerDeFmt,
+{
+    type Mark = Idx;
+
+    type TruncError = SegmentError<S::Error, SerDe::Error>;
+
+    async fn truncate(&mut self, mark: &Self::Mark) -> Result<(), Self::TruncError> {
+        let index_record = self
+            .index
+            .read(mark)
+            .await
+            .map_err(SegmentError::IndexError)?;
+
+        let position = S::Position::from_u64(index_record.position)
+            .ok_or(SegmentError::IncompatiblePositionType)?;
+
+        self.store
+            .truncate(&position)
+            .await
+            .map_err(SegmentError::StoreError)?;
+
+        self.index
+            .truncate(mark)
+            .await
+            .map_err(SegmentError::IndexError)?;
+
+        Ok(())
+    }
+}
+
+#[async_trait(?Send)]
+impl<S, M, H, Idx, SerDe> AsyncConsume for Segment<S, M, H, Idx, S::Size, SerDe>
+where
+    S: Storage,
+    SerDe: SerDeFmt,
+{
+    type ConsumeError = SegmentError<S::Error, SerDe::Error>;
+
+    async fn remove(self) -> Result<(), Self::ConsumeError> {
+        self.store
+            .remove()
+            .await
+            .map_err(SegmentError::StoreError)?;
+
+        self.index
+            .remove()
+            .await
+            .map_err(SegmentError::IndexError)?;
+
+        Ok(())
+    }
+
+    async fn close(self) -> Result<(), Self::ConsumeError> {
+        self.store.close().await.map_err(SegmentError::StoreError)?;
+
+        self.index.close().await.map_err(SegmentError::IndexError)?;
+
+        Ok(())
     }
 }
