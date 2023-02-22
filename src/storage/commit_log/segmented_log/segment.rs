@@ -1,19 +1,19 @@
-use std::{hash::Hasher, marker::PhantomData};
-
-use async_trait::async_trait;
-use bytes::Buf;
-use futures_core::Stream;
-use num::{CheckedSub, FromPrimitive, ToPrimitive, Unsigned};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
-
-use crate::{common::split::SplitAt, storage::Sizable};
-
 use super::{
-    super::super::{AsyncIndexedRead, Storage},
+    super::super::{
+        super::common::{serde::SerDeFmt, split::SplitAt},
+        AsyncIndexedRead, Sizable, Storage,
+    },
     index::{Index, IndexError, IndexRecord},
     store::{Store, StoreError},
     MetaWithIdx, Record,
 };
+use async_trait::async_trait;
+use bytes::Buf;
+use futures_core::Stream;
+use futures_lite::StreamExt;
+use num::{CheckedSub, FromPrimitive, ToPrimitive, Unsigned};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use std::{hash::Hasher, marker::PhantomData};
 
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
 pub struct Config<Size> {
@@ -21,16 +21,16 @@ pub struct Config<Size> {
     pub max_index_size: Size,
 }
 
-pub struct Segment<S, M, H, Idx, Size> {
+pub struct Segment<S, M, H, Idx, Size, SerDe> {
     index: Index<S, Idx>,
     store: Store<S, H>,
 
     config: Config<Size>,
 
-    _phantom_date: PhantomData<M>,
+    _phantom_date: PhantomData<(M, SerDe)>,
 }
 
-impl<S, M, H, Idx> Segment<S, M, H, Idx, S::Size>
+impl<S, M, H, Idx, SerDe> Segment<S, M, H, Idx, S::Size, SerDe>
 where
     S: Storage,
 {
@@ -41,35 +41,45 @@ where
 }
 
 #[derive(Debug)]
-pub enum SegmentError<StorageError> {
+pub enum SegmentError<StorageError, SerDeError> {
     StoreError(StoreError<StorageError>),
     IndexError(IndexError<StorageError>),
     IncompatiblePositionType,
-    SerializationError,
+    SerializationError(SerDeError),
+    RecordMetadataNotFound,
     InvalidAppendIdx,
     SegmentMaxed,
-    DummyError,
 }
 
-impl<StorageError: std::error::Error> std::fmt::Display for SegmentError<StorageError> {
+impl<StorageError, SerDeError> std::fmt::Display for SegmentError<StorageError, SerDeError>
+where
+    StorageError: std::error::Error,
+    SerDeError: std::error::Error,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self)
     }
 }
 
-impl<StorageError: std::error::Error> std::error::Error for SegmentError<StorageError> {}
+impl<StorageError, SerDeError> std::error::Error for SegmentError<StorageError, SerDeError>
+where
+    StorageError: std::error::Error,
+    SerDeError: std::error::Error,
+{
+}
 
 #[async_trait(?Send)]
-impl<S, M, H, Idx> AsyncIndexedRead for Segment<S, M, H, Idx, S::Size>
+impl<S, M, H, Idx, SerDe> AsyncIndexedRead for Segment<S, M, H, Idx, S::Size, SerDe>
 where
     S: Storage,
     S::Content: SplitAt<u8>,
+    SerDe: SerDeFmt,
     H: Hasher + Default,
     Idx: Unsigned + CheckedSub + ToPrimitive + Ord + Copy,
     Idx: Serialize + DeserializeOwned,
     M: Default + Serialize + DeserializeOwned,
 {
-    type ReadError = SegmentError<S::Error>;
+    type ReadError = SegmentError<S::Error, SerDe::Error>;
 
     type Idx = Idx;
 
@@ -99,37 +109,39 @@ where
             .await
             .map_err(SegmentError::StoreError)?;
 
-        let metadata_size = bincode::serialized_size(&MetaWithIdx::<M, Idx> {
+        let metadata_size = SerDe::serialized_size(&MetaWithIdx::<M, Idx> {
             index: None,
             metadata: M::default(),
         })
-        .map_err(|_| SegmentError::SerializationError)? as usize;
+        .map_err(SegmentError::SerializationError)? as usize;
 
         let (metadata_bytes, value) = record_content
             .split_at(metadata_size)
-            .ok_or(SegmentError::SerializationError)?;
+            .ok_or(SegmentError::RecordMetadataNotFound)?;
 
         let metadata =
-            bincode::deserialize(&metadata_bytes).map_err(|_| SegmentError::SerializationError)?;
+            SerDe::deserialize(&metadata_bytes).map_err(SegmentError::SerializationError)?;
 
         Ok(Record { metadata, value })
     }
 }
 
-impl<S, M, H, Idx> Segment<S, M, H, Idx, S::Size>
+impl<S, M, H, Idx, SerDe> Segment<S, M, H, Idx, S::Size, SerDe>
 where
     S: Storage,
     S::Position: ToPrimitive,
-    H: Hasher + Default + Serialize,
+    H: Hasher + Default,
+    SerDe: SerDeFmt,
+    M: Serialize,
     Idx: Unsigned + CheckedSub + ToPrimitive + Ord + Copy,
     Idx: Serialize,
 {
     pub async fn append<XBuf, X>(
         &mut self,
         record: Record<M, Idx, X>,
-    ) -> Result<Idx, SegmentError<S::Error>>
+    ) -> Result<Idx, SegmentError<S::Error, SerDe::Error>>
     where
-        XBuf: Buf,
+        XBuf: Buf + From<SerDe::SerBytes>,
         X: Stream<Item = XBuf> + Unpin,
     {
         if self.is_maxed() {
@@ -138,8 +150,10 @@ where
 
         let write_index = self.index.highest_index();
 
-        let mut record = match record.metadata.index {
-            Some(idx) if write_index != idx => Err(SegmentError::<S::Error>::InvalidAppendIdx),
+        let record = match record.metadata.index {
+            Some(idx) if write_index != idx => {
+                Err(SegmentError::<S::Error, SerDe::Error>::InvalidAppendIdx)
+            }
             _ => Ok(Record {
                 metadata: MetaWithIdx {
                     index: Some(write_index),
@@ -149,9 +163,15 @@ where
             }),
         }?;
 
+        let metadata_bytes =
+            SerDe::serialize(&record.metadata).map_err(SegmentError::SerializationError)?;
+
+        let stream = futures_lite::stream::once(XBuf::from(metadata_bytes));
+        let mut stream = stream.chain(record.value);
+
         let (position, record_header) = self
             .store
-            .append(&mut record.value)
+            .append(&mut stream)
             .await
             .map_err(SegmentError::StoreError)?;
 

@@ -43,3 +43,60 @@ pub mod split {
         }
     }
 }
+
+pub mod serde {
+    use std::ops::Deref;
+
+    use serde::{Deserialize, Serialize};
+
+    pub trait SerDeFmt {
+        type Error: std::error::Error;
+
+        type SerBytes: Deref<Target = [u8]>;
+
+        fn serialize<T>(value: &T) -> Result<Self::SerBytes, Self::Error>
+        where
+            T: Serialize;
+
+        fn serialized_size<T>(value: &T) -> Result<usize, Self::Error>
+        where
+            T: Serialize;
+
+        fn deserialize<'a, T>(bytes: &'a [u8]) -> Result<T, Self::Error>
+        where
+            T: Deserialize<'a>;
+    }
+
+    pub mod bincode {
+        use super::SerDeFmt;
+
+        pub struct BinCode;
+
+        impl SerDeFmt for BinCode {
+            type Error = bincode::Error;
+
+            type SerBytes = Vec<u8>;
+
+            fn serialize<T>(value: &T) -> Result<Self::SerBytes, Self::Error>
+            where
+                T: serde::Serialize,
+            {
+                bincode::serialize(value)
+            }
+
+            fn serialized_size<T>(value: &T) -> Result<usize, Self::Error>
+            where
+                T: serde::Serialize,
+            {
+                bincode::serialized_size(value).map(|x| x as usize)
+            }
+
+            fn deserialize<'a, T>(bytes: &'a [u8]) -> Result<T, Self::Error>
+            where
+                T: serde::Deserialize<'a>,
+            {
+                bincode::deserialize(bytes)
+            }
+        }
+    }
+}
