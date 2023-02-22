@@ -1,6 +1,6 @@
 use super::{
     super::super::{
-        super::common::{serde::SerDeFmt, split::SplitAt},
+        super::common::{serde::SerDe, split::SplitAt},
         AsyncConsume, AsyncIndexedRead, AsyncTruncate, Sizable, Storage,
     },
     index::{Index, IndexError, IndexRecord},
@@ -21,16 +21,16 @@ pub struct Config<Size> {
     pub max_index_size: Size,
 }
 
-pub struct Segment<S, M, H, Idx, Size, SerDe> {
+pub struct Segment<S, M, H, Idx, Size, SD> {
     index: Index<S, Idx>,
     store: Store<S, H>,
 
     config: Config<Size>,
 
-    _phantom_date: PhantomData<(M, SerDe)>,
+    _phantom_date: PhantomData<(M, SD)>,
 }
 
-impl<S, M, H, Idx, SerDe> Segment<S, M, H, Idx, S::Size, SerDe>
+impl<S, M, H, Idx, SD> Segment<S, M, H, Idx, S::Size, SD>
 where
     S: Storage,
 {
@@ -69,17 +69,17 @@ where
 }
 
 #[async_trait(?Send)]
-impl<S, M, H, Idx, SerDe> AsyncIndexedRead for Segment<S, M, H, Idx, S::Size, SerDe>
+impl<S, M, H, Idx, SD> AsyncIndexedRead for Segment<S, M, H, Idx, S::Size, SD>
 where
     S: Storage,
     S::Content: SplitAt<u8>,
-    SerDe: SerDeFmt,
+    SD: SerDe,
     H: Hasher + Default,
     Idx: Unsigned + CheckedSub + ToPrimitive + Ord + Copy,
     Idx: Serialize + DeserializeOwned,
     M: Default + Serialize + DeserializeOwned,
 {
-    type ReadError = SegmentError<S::Error, SerDe::Error>;
+    type ReadError = SegmentError<S::Error, SD::Error>;
 
     type Idx = Idx;
 
@@ -109,7 +109,7 @@ where
             .await
             .map_err(SegmentError::StoreError)?;
 
-        let metadata_size = SerDe::serialized_size(&MetaWithIdx::<M, Idx> {
+        let metadata_size = SD::serialized_size(&MetaWithIdx::<M, Idx> {
             index: None,
             metadata: M::default(),
         })
@@ -120,18 +120,18 @@ where
             .ok_or(SegmentError::RecordMetadataNotFound)?;
 
         let metadata =
-            SerDe::deserialize(&metadata_bytes).map_err(SegmentError::SerializationError)?;
+            SD::deserialize(&metadata_bytes).map_err(SegmentError::SerializationError)?;
 
         Ok(Record { metadata, value })
     }
 }
 
-impl<S, M, H, Idx, SerDe> Segment<S, M, H, Idx, S::Size, SerDe>
+impl<S, M, H, Idx, SD> Segment<S, M, H, Idx, S::Size, SD>
 where
     S: Storage,
     S::Position: ToPrimitive,
     H: Hasher + Default,
-    SerDe: SerDeFmt,
+    SD: SerDe,
     M: Serialize,
     Idx: Unsigned + CheckedSub + ToPrimitive + Ord + Copy,
     Idx: Serialize,
@@ -139,9 +139,9 @@ where
     pub async fn append<XBuf, X>(
         &mut self,
         record: Record<M, Idx, X>,
-    ) -> Result<Idx, SegmentError<S::Error, SerDe::Error>>
+    ) -> Result<Idx, SegmentError<S::Error, SD::Error>>
     where
-        XBuf: Buf + From<SerDe::SerBytes>,
+        XBuf: Buf + From<SD::SerBytes>,
         X: Stream<Item = XBuf> + Unpin,
     {
         if self.is_maxed() {
@@ -152,7 +152,7 @@ where
 
         let record = match record.metadata.index {
             Some(idx) if write_index != idx => {
-                Err(SegmentError::<S::Error, SerDe::Error>::InvalidAppendIdx)
+                Err(SegmentError::<S::Error, SD::Error>::InvalidAppendIdx)
             }
             _ => Ok(Record {
                 metadata: MetaWithIdx {
@@ -164,7 +164,7 @@ where
         }?;
 
         let metadata_bytes =
-            SerDe::serialize(&record.metadata).map_err(SegmentError::SerializationError)?;
+            SD::serialize(&record.metadata).map_err(SegmentError::SerializationError)?;
 
         let stream = futures_lite::stream::once(XBuf::from(metadata_bytes));
         let mut stream = stream.chain(record.value);
@@ -192,15 +192,15 @@ where
 }
 
 #[async_trait(?Send)]
-impl<S, M, H, Idx, SerDe> AsyncTruncate for Segment<S, M, H, Idx, S::Size, SerDe>
+impl<S, M, H, Idx, SD> AsyncTruncate for Segment<S, M, H, Idx, S::Size, SD>
 where
     S: Storage,
     Idx: Unsigned + CheckedSub + ToPrimitive + Ord + Copy,
-    SerDe: SerDeFmt,
+    SD: SerDe,
 {
     type Mark = Idx;
 
-    type TruncError = SegmentError<S::Error, SerDe::Error>;
+    type TruncError = SegmentError<S::Error, SD::Error>;
 
     async fn truncate(&mut self, mark: &Self::Mark) -> Result<(), Self::TruncError> {
         let index_record = self
@@ -227,12 +227,12 @@ where
 }
 
 #[async_trait(?Send)]
-impl<S, M, H, Idx, SerDe> AsyncConsume for Segment<S, M, H, Idx, S::Size, SerDe>
+impl<S, M, H, Idx, SD> AsyncConsume for Segment<S, M, H, Idx, S::Size, SD>
 where
     S: Storage,
-    SerDe: SerDeFmt,
+    SD: SerDe,
 {
-    type ConsumeError = SegmentError<S::Error, SerDe::Error>;
+    type ConsumeError = SegmentError<S::Error, SD::Error>;
 
     async fn remove(self) -> Result<(), Self::ConsumeError> {
         self.store

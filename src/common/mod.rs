@@ -49,7 +49,7 @@ pub mod serde {
 
     use serde::{Deserialize, Serialize};
 
-    pub trait SerDeFmt {
+    pub trait SerDe {
         type Error: std::error::Error;
 
         type SerBytes: Deref<Target = [u8]>;
@@ -68,11 +68,11 @@ pub mod serde {
     }
 
     pub mod bincode {
-        use super::SerDeFmt;
+        use super::SerDe;
 
         pub struct BinCode;
 
-        impl SerDeFmt for BinCode {
+        impl SerDe for BinCode {
             type Error = bincode::Error;
 
             type SerBytes = Vec<u8>;
