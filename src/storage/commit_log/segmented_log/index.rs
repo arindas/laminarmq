@@ -1,4 +1,5 @@
 use crate::storage::common::write_stream;
+use crate::storage::Sizable;
 
 use super::super::super::{AsyncConsume, AsyncIndexedRead, AsyncTruncate};
 use super::{super::super::Storage, store::common::RecordHeader};
@@ -131,7 +132,38 @@ macro_rules! position_as_u64 {
     };
 }
 
+#[doc(hidden)]
+macro_rules! u64_as_idx {
+    ($value:ident, $IdxType:ty) => {
+        <$IdxType as FromPrimitive>::from_u64($value).ok_or(IndexError::IncompatibleIdxType)
+    };
+}
+
+#[doc(hidden)]
+macro_rules! idx_as_u64 {
+    ($value:ident, $IdxType:ty) => {
+        <$IdxType as ToPrimitive>::to_u64(&$value).ok_or(IndexError::IncompatibleIdxType)
+    };
+}
+
 impl IndexRecord {
+    pub fn with_position_index_and_record_header<Pos, Idx, Error>(
+        position: Pos,
+        index: Idx,
+        record_header: RecordHeader,
+    ) -> Result<Self, IndexError<Error>>
+    where
+        Pos: ToPrimitive,
+        Idx: ToPrimitive,
+        Error: std::error::Error,
+    {
+        Ok(IndexRecord {
+            record_header,
+            index: Some(idx_as_u64!(index, Idx)?),
+            position: position_as_u64!(position, Pos)?,
+        })
+    }
+
     pub fn with_position_and_record_header<Pos, Error>(
         position: Pos,
         record_header: RecordHeader,
@@ -174,20 +206,6 @@ pub struct Index<S, Idx> {
     base_index: Idx,
     next_index: Idx,
     storage: S,
-}
-
-#[doc(hidden)]
-macro_rules! u64_as_idx {
-    ($value:ident, $IdxType:ty) => {
-        <$IdxType as FromPrimitive>::from_u64($value).ok_or(IndexError::IncompatibleIdxType)
-    };
-}
-
-#[doc(hidden)]
-macro_rules! idx_as_u64 {
-    ($value:ident, $IdxType:ty) => {
-        <$IdxType as ToPrimitive>::to_u64(&$value).ok_or(IndexError::IncompatibleIdxType)
-    };
 }
 
 impl<S, Idx> Index<S, Idx>
@@ -243,6 +261,14 @@ where
             next_index: base_index,
             storage: S::default(),
         }
+    }
+}
+
+impl<S: Storage, Idx> Sizable for Index<S, Idx> {
+    type Size = S::Size;
+
+    fn size(&self) -> Self::Size {
+        self.storage.size()
     }
 }
 

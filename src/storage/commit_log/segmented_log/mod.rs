@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MetaWithIdx<M, Idx> {
     pub metadata: M,
-    pub index: Idx,
+    pub index: Option<Idx>,
 }
 
 pub type Record<M, Idx, T> = super::Record<MetaWithIdx<M, Idx>, T>;
