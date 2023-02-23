@@ -68,6 +68,8 @@ where
 {
 }
 
+pub type SegmentOpError<S, SD> = SegmentError<<S as Storage>::Error, <SD as SerDe>::Error>;
+
 #[async_trait(?Send)]
 impl<S, M, H, Idx, SD> AsyncIndexedRead for Segment<S, M, H, Idx, S::Size, SD>
 where
@@ -79,7 +81,7 @@ where
     Idx: Serialize + DeserializeOwned,
     M: Default + Serialize + DeserializeOwned,
 {
-    type ReadError = SegmentError<S::Error, SD::Error>;
+    type ReadError = SegmentOpError<S, SD>;
 
     type Idx = Idx;
 
@@ -130,16 +132,16 @@ impl<S, M, H, Idx, SD> Segment<S, M, H, Idx, S::Size, SD>
 where
     S: Storage,
     S::Position: ToPrimitive,
-    H: Hasher + Default,
-    SD: SerDe,
     M: Serialize,
+    H: Hasher + Default,
     Idx: Unsigned + CheckedSub + ToPrimitive + Ord + Copy,
     Idx: Serialize,
+    SD: SerDe,
 {
     pub async fn append<XBuf, X>(
         &mut self,
         record: Record<M, Idx, X>,
-    ) -> Result<Idx, SegmentError<S::Error, SD::Error>>
+    ) -> Result<Idx, SegmentOpError<S, SD>>
     where
         XBuf: Buf + From<SD::SerBytes>,
         X: Stream<Item = XBuf> + Unpin,
@@ -150,23 +152,17 @@ where
 
         let write_index = self.index.highest_index();
 
-        let record = match record.metadata.index {
-            Some(idx) if write_index != idx => {
-                Err(SegmentError::<S::Error, SD::Error>::InvalidAppendIdx)
-            }
-            _ => Ok(Record {
-                metadata: MetaWithIdx {
-                    index: Some(write_index),
-                    ..record.metadata
-                },
-                ..record
-            }),
-        }?;
+        let metadata = record
+            .metadata
+            .anchored_with_index(write_index)
+            .ok_or(SegmentOpError::<S, SD>::InvalidAppendIdx)?;
+
+        let record = Record { metadata, ..record };
 
         let metadata_bytes =
             SD::serialize(&record.metadata).map_err(SegmentError::SerializationError)?;
 
-        let stream = futures_lite::stream::once(XBuf::from(metadata_bytes));
+        let stream = futures_lite::stream::once(metadata_bytes.into());
         let mut stream = stream.chain(record.value);
 
         let (position, record_header) = self
@@ -250,9 +246,7 @@ where
 
     async fn close(self) -> Result<(), Self::ConsumeError> {
         self.store.close().await.map_err(SegmentError::StoreError)?;
-
         self.index.close().await.map_err(SegmentError::IndexError)?;
-
         Ok(())
     }
 }

@@ -20,7 +20,7 @@ pub const INDEX_RECORD_LENGTH: usize = 32;
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct IndexRecord {
     pub record_header: RecordHeader,
-    pub index: Option<u64>,
+    pub index: u64,
     pub position: u64,
 }
 
@@ -33,7 +33,7 @@ impl IndexRecord {
 
         Ok(IndexRecord {
             record_header,
-            index: Some(index),
+            index,
             position,
         })
     }
@@ -41,7 +41,7 @@ impl IndexRecord {
     pub fn write<W: Write>(&self, dest: &mut W) -> std::io::Result<()> {
         self.record_header.write(dest)?;
 
-        dest.write_u64::<LittleEndian>(self.index.unwrap_or_default())?;
+        dest.write_u64::<LittleEndian>(self.index)?;
         dest.write_u64::<LittleEndian>(self.position)?;
 
         Ok(())
@@ -159,26 +159,9 @@ impl IndexRecord {
     {
         Ok(IndexRecord {
             record_header,
-            index: Some(idx_as_u64!(index, Idx)?),
+            index: idx_as_u64!(index, Idx)?,
             position: position_as_u64!(position, Pos)?,
         })
-    }
-
-    pub fn with_position_and_record_header<Pos, Error>(
-        position: Pos,
-        record_header: RecordHeader,
-    ) -> Result<Self, IndexError<Error>>
-    where
-        Pos: ToPrimitive,
-        Error: std::error::Error,
-    {
-        let index_record = IndexRecord {
-            record_header,
-            index: None,
-            position: position_as_u64!(position, Pos)?,
-        };
-
-        Ok(index_record)
     }
 }
 
@@ -198,7 +181,7 @@ where
         position += INDEX_RECORD_LENGTH as u64;
     }
 
-    Ok((index_records.first().and_then(|x| x.index), index_records))
+    Ok((index_records.first().map(|x| x.index), index_records))
 }
 
 pub struct Index<S, Idx> {
@@ -312,25 +295,17 @@ where
     Idx: Unsigned + ToPrimitive + Copy,
 {
     pub async fn append(&mut self, index_record: IndexRecord) -> Result<Idx, IndexError<S::Error>> {
-        let next_index = self.next_index;
+        let write_index = self.next_index;
 
-        let index_record = match index_record.index {
-            Some(idx) if idx != idx_as_u64!(next_index, Idx)? => {
-                Err(IndexError::<S::Error>::InvalidAppendIdx)
-            }
-            _ => Ok(IndexRecord {
-                index: Some(idx_as_u64!(next_index, Idx)?),
-                ..index_record
-            }),
-        }?;
+        if index_record.index != idx_as_u64!(write_index, Idx)? {
+            return Err(IndexError::<S::Error>::InvalidAppendIdx);
+        }
 
         index_record.append_to_storage(&mut self.storage).await?;
         self.index_records.push(index_record);
 
-        let write_idx = next_index;
-        self.next_index = next_index + Idx::one();
-
-        Ok(write_idx)
+        self.next_index = write_index + Idx::one();
+        Ok(write_index)
     }
 }
 
