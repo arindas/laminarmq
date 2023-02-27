@@ -4,7 +4,7 @@ pub mod store;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct MetaWithIdx<M, Idx> {
     pub metadata: M,
     pub index: Option<Idx>,

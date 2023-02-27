@@ -13,7 +13,7 @@ use futures_core::Stream;
 use futures_lite::StreamExt;
 use num::{CheckedSub, FromPrimitive, ToPrimitive, Unsigned};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::{hash::Hasher, marker::PhantomData};
+use std::{hash::Hasher, marker::PhantomData, ops::Deref};
 
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
 pub struct Config<Size> {
@@ -138,36 +138,19 @@ where
     Idx: Serialize,
     SD: SerDe,
 {
-    pub async fn append<XBuf, X>(
+    async fn append_serialized_record<XBuf, X>(
         &mut self,
-        record: Record<M, Idx, X>,
+        stream: &mut X,
     ) -> Result<Idx, SegmentOpError<S, SD>>
     where
-        XBuf: Buf + From<SD::SerBytes>,
+        XBuf: Buf,
         X: Stream<Item = XBuf> + Unpin,
     {
-        if self.is_maxed() {
-            return Err(SegmentError::SegmentMaxed);
-        }
-
         let write_index = self.index.highest_index();
-
-        let metadata = record
-            .metadata
-            .anchored_with_index(write_index)
-            .ok_or(SegmentOpError::<S, SD>::InvalidAppendIdx)?;
-
-        let record = Record { metadata, ..record };
-
-        let metadata_bytes =
-            SD::serialize(&record.metadata).map_err(SegmentError::SerializationError)?;
-
-        let stream = futures_lite::stream::once(metadata_bytes.into());
-        let mut stream = stream.chain(record.value);
 
         let (position, record_header) = self
             .store
-            .append(&mut stream)
+            .append(stream)
             .await
             .map_err(SegmentError::StoreError)?;
 
@@ -184,6 +167,68 @@ where
             .map_err(SegmentError::IndexError)?;
 
         Ok(write_index)
+    }
+
+    pub async fn append<XBuf, X>(
+        &mut self,
+        record: Record<M, Idx, X>,
+    ) -> Result<Idx, SegmentOpError<S, SD>>
+    where
+        XBuf: Buf + From<SD::SerBytes>,
+        X: Stream<Item = XBuf> + Unpin,
+    {
+        if self.is_maxed() {
+            return Err(SegmentError::SegmentMaxed);
+        }
+
+        let metadata = record
+            .metadata
+            .anchored_with_index(self.index.highest_index())
+            .ok_or(SegmentOpError::<S, SD>::InvalidAppendIdx)?;
+
+        let metadata_bytes = SD::serialize(&metadata).map_err(SegmentError::SerializationError)?;
+
+        let stream = futures_lite::stream::once(metadata_bytes.into());
+        let mut stream = stream.chain(record.value);
+
+        self.append_serialized_record(&mut stream).await
+    }
+}
+
+impl<S, M, H, Idx, SD> Segment<S, M, H, Idx, S::Size, SD>
+where
+    S: Storage,
+    S::Position: ToPrimitive,
+    M: Serialize + Clone,
+    H: Hasher + Default,
+    Idx: Unsigned + CheckedSub + ToPrimitive + Ord + Copy,
+    Idx: Serialize,
+    SD: SerDe,
+{
+    pub async fn append_record_with_contiguous_bytes<X>(
+        &mut self,
+        record: &Record<M, Idx, X>,
+    ) -> Result<Idx, SegmentOpError<S, SD>>
+    where
+        X: Deref<Target = [u8]>,
+    {
+        if self.is_maxed() {
+            return Err(SegmentError::SegmentMaxed);
+        }
+
+        let metadata = record
+            .metadata
+            .clone()
+            .anchored_with_index(self.index.highest_index())
+            .ok_or(SegmentOpError::<S, SD>::InvalidAppendIdx)?;
+
+        let metadata_bytes = SD::serialize(&metadata).map_err(SegmentError::SerializationError)?;
+
+        let metadata_stream = futures_lite::stream::once(metadata_bytes.deref());
+        let value_stream = futures_lite::stream::once(record.value.deref());
+        let mut stream = metadata_stream.chain(value_stream);
+
+        self.append_serialized_record(&mut stream).await
     }
 }
 
