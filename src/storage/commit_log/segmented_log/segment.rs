@@ -295,3 +295,20 @@ where
         Ok(())
     }
 }
+
+#[async_trait(?Send)]
+pub trait SegmentBuilder {
+    type Error: std::error::Error;
+
+    type Idx;
+
+    type Config;
+
+    type Segment;
+
+    async fn build(
+        &self,
+        base_index: &Self::Idx,
+        config: &Self::Config,
+    ) -> Result<Self::Segment, Self::Error>;
+}
