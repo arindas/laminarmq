@@ -312,10 +312,12 @@ pub struct SegmentStorage<S> {
 }
 
 #[async_trait(?Send)]
-pub trait StorageProvider<S, Idx>
+pub trait SegmentStorageProvider<S, Idx>
 where
     S: Storage,
 {
+    async fn base_indices_of_stored_segments(&self) -> Result<Vec<Idx>, S::Error>;
+
     async fn obtain(&self, idx: &Idx) -> Result<SegmentStorage<S>, S::Error>;
 }
 
@@ -332,7 +334,7 @@ where
         base_index: Idx,
     ) -> Result<Self, SegmentError<S::Error, SD::Error>>
     where
-        SP: StorageProvider<S, Idx>,
+        SP: SegmentStorageProvider<S, Idx>,
     {
         let segment_storage = storage_provider
             .obtain(&base_index)

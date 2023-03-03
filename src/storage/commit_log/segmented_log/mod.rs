@@ -36,6 +36,7 @@ pub type Record<M, Idx, T> = super::Record<MetaWithIdx<M, Idx>, T>;
 
 #[derive(Debug)]
 pub enum SegmentedLogError<SE, SDE> {
+    StorageError(SE),
     SegmentError(segment::SegmentError<SE, SDE>),
     NoSegmentsCreated,
 }
@@ -62,32 +63,34 @@ pub struct Config<Idx, Size> {
     pub initial_index: Idx,
 }
 
-pub struct SegmentedLog<S, M, H, Idx, Size, SD, SP> {
+pub struct SegmentedLog<S, M, H, Idx, Size, SD, SSP> {
     _write_segment: Option<segment::Segment<S, M, H, Idx, Size, SD>>,
     _read_segments: Vec<segment::Segment<S, M, H, Idx, Size, SD>>,
 
     _config: Config<Idx, Size>,
 
-    _storage_provider: SP,
+    _segment_storage_provider: SSP,
 }
 
 pub type LogError<S, SD> = SegmentedLogError<<S as Storage>::Error, <SD as SerDe>::Error>;
 
-impl<S, M, H, Idx, SD, SP> SegmentedLog<S, M, H, Idx, S::Size, SD, SP>
+impl<S, M, H, Idx, SD, SSP> SegmentedLog<S, M, H, Idx, S::Size, SD, SSP>
 where
     S: Storage,
     S::Size: Copy,
     H: Default,
     Idx: FromPrimitive + Copy + Ord,
     SD: SerDe,
-    SP: segment::StorageProvider<S, Idx>,
+    SSP: segment::SegmentStorageProvider<S, Idx>,
 {
     pub async fn new(
         config: Config<Idx, S::Size>,
-        segment_base_indices: Vec<Idx>,
-        storage_provider: SP,
+        segment_storage_provider: SSP,
     ) -> Result<Self, LogError<S, SD>> {
-        let mut segment_base_indices = segment_base_indices;
+        let mut segment_base_indices = segment_storage_provider
+            .base_indices_of_stored_segments()
+            .await
+            .map_err(SegmentedLogError::StorageError)?;
 
         if segment_base_indices.is_empty() {
             segment_base_indices.push(config.initial_index);
@@ -98,7 +101,7 @@ where
         for segment_base_index in segment_base_indices {
             read_segments.push(
                 Segment::with_storage_provider_config_and_base_index(
-                    &storage_provider,
+                    &segment_storage_provider,
                     config.segment_config,
                     segment_base_index,
                 )
@@ -115,7 +118,7 @@ where
             _write_segment: Some(write_segment),
             _read_segments: read_segments,
             _config: config,
-            _storage_provider: storage_provider,
+            _segment_storage_provider: segment_storage_provider,
         })
     }
 }
