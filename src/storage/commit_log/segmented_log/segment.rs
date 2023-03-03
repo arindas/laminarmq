@@ -34,6 +34,15 @@ impl<S, M, H, Idx, SD> Segment<S, M, H, Idx, S::Size, SD>
 where
     S: Storage,
 {
+    pub fn new(index: Index<S, Idx>, store: Store<S, H>, config: Config<S::Size>) -> Self {
+        Self {
+            index,
+            store,
+            config,
+            _phantom_date: PhantomData,
+        }
+    }
+
     pub fn is_maxed(&self) -> bool {
         self.store.size() >= self.config.max_store_size
             || self.index.size() >= self.config.max_index_size
@@ -42,6 +51,7 @@ where
 
 #[derive(Debug)]
 pub enum SegmentError<StorageError, SerDeError> {
+    StorageError(StorageError),
     StoreError(StoreError<StorageError>),
     IndexError(IndexError<StorageError>),
     IncompatiblePositionType,
@@ -296,19 +306,45 @@ where
     }
 }
 
+pub struct SegmentStorage<S> {
+    pub store: S,
+    pub index: S,
+}
+
 #[async_trait(?Send)]
-pub trait SegmentBuilder {
-    type Error: std::error::Error;
+pub trait StorageProvider<S, Idx>
+where
+    S: Storage,
+{
+    async fn obtain(&self, idx: &Idx) -> Result<SegmentStorage<S>, S::Error>;
+}
 
-    type Idx;
+impl<S, M, H, Idx, SD> Segment<S, M, H, Idx, S::Size, SD>
+where
+    S: Storage,
+    H: Default,
+    Idx: FromPrimitive + Copy + Ord,
+    SD: SerDe,
+{
+    pub async fn with_storage_provider_config_and_base_index<SP>(
+        storage_provider: &SP,
+        config: Config<S::Size>,
+        base_index: Idx,
+    ) -> Result<Self, SegmentError<S::Error, SD::Error>>
+    where
+        SP: StorageProvider<S, Idx>,
+    {
+        let segment_storage = storage_provider
+            .obtain(&base_index)
+            .await
+            .map_err(SegmentError::StorageError)?;
 
-    type Config;
+        let index = Index::with_storage_and_base_index(segment_storage.index, base_index)
+            .await
+            .map_err(SegmentError::IndexError)?;
 
-    type Segment;
+        let store = Store::<S, H>::new(segment_storage.store);
 
-    async fn build(
-        &self,
-        base_index: &Self::Idx,
-        config: &Self::Config,
-    ) -> Result<Self::Segment, Self::Error>;
+        Ok(Self::new(index, store, config))
+    }
 }

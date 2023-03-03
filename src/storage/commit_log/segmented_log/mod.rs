@@ -2,7 +2,10 @@ pub mod index;
 pub mod segment;
 pub mod store;
 
+use num::FromPrimitive;
 use serde::{Deserialize, Serialize};
+
+use self::segment::Segment;
 
 use super::super::super::{common::serde::SerDe, storage::Storage};
 
@@ -32,30 +35,25 @@ where
 pub type Record<M, Idx, T> = super::Record<MetaWithIdx<M, Idx>, T>;
 
 #[derive(Debug)]
-pub enum SegmentedLogError<StorageError, SerDeEror, BuilderError> {
-    SegmentError(segment::SegmentError<StorageError, SerDeEror>),
-    SegmentBuilderError(BuilderError),
-    DummyError,
+pub enum SegmentedLogError<SE, SDE> {
+    SegmentError(segment::SegmentError<SE, SDE>),
+    NoSegmentsCreated,
 }
 
-impl<StorageError, SerDeError, BuilderError> std::fmt::Display
-    for SegmentedLogError<StorageError, SerDeError, BuilderError>
+impl<SE, SDE> std::fmt::Display for SegmentedLogError<SE, SDE>
 where
-    StorageError: std::error::Error,
-    SerDeError: std::error::Error,
-    BuilderError: std::error::Error,
+    SE: std::error::Error,
+    SDE: std::error::Error,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self)
     }
 }
 
-impl<StorageError, SerDeError, BuilderError> std::error::Error
-    for SegmentedLogError<StorageError, SerDeError, BuilderError>
+impl<SE, SDE> std::error::Error for SegmentedLogError<SE, SDE>
 where
-    StorageError: std::error::Error,
-    SerDeError: std::error::Error,
-    BuilderError: std::error::Error,
+    SE: std::error::Error,
+    SDE: std::error::Error,
 {
 }
 
@@ -64,45 +62,60 @@ pub struct Config<Idx, Size> {
     pub initial_index: Idx,
 }
 
-pub struct SegmentedLog<S, M, H, Idx, Size, SD, SB> {
+pub struct SegmentedLog<S, M, H, Idx, Size, SD, SP> {
     _write_segment: Option<segment::Segment<S, M, H, Idx, Size, SD>>,
     _read_segments: Vec<segment::Segment<S, M, H, Idx, Size, SD>>,
 
     _config: Config<Idx, Size>,
 
-    _segment_builder: SB,
+    _storage_provider: SP,
 }
 
-pub type SegmentedLogOpError<S, SD, SB> = SegmentedLogError<
-    <S as Storage>::Error,
-    <SD as SerDe>::Error,
-    <SB as segment::SegmentBuilder>::Error,
->;
+pub type LogError<S, SD> = SegmentedLogError<<S as Storage>::Error, <SD as SerDe>::Error>;
 
-impl<S, M, H, Idx, SD, SB> SegmentedLog<S, M, H, Idx, S::Size, SD, SB>
+impl<S, M, H, Idx, SD, SP> SegmentedLog<S, M, H, Idx, S::Size, SD, SP>
 where
     S: Storage,
+    S::Size: Copy,
+    H: Default,
+    Idx: FromPrimitive + Copy + Ord,
     SD: SerDe,
-    SB: segment::SegmentBuilder<
-        Idx = Idx,
-        Config = segment::Config<S::Size>,
-        Segment = segment::Segment<S, M, H, Idx, S::Size, SD>,
-    >,
+    SP: segment::StorageProvider<S, Idx>,
 {
     pub async fn new(
         config: Config<Idx, S::Size>,
-        segment_builder: SB,
-    ) -> Result<Self, SegmentedLogOpError<S, SD, SB>> {
-        let write_segment = segment_builder
-            .build(&config.initial_index, &config.segment_config)
-            .await
-            .map_err(SegmentedLogError::SegmentBuilderError)?;
+        segment_base_indices: Vec<Idx>,
+        storage_provider: SP,
+    ) -> Result<Self, LogError<S, SD>> {
+        let mut segment_base_indices = segment_base_indices;
+
+        if segment_base_indices.is_empty() {
+            segment_base_indices.push(config.initial_index);
+        }
+
+        let mut read_segments = Vec::<Segment<S, M, H, Idx, S::Size, SD>>::new();
+
+        for segment_base_index in segment_base_indices {
+            read_segments.push(
+                Segment::with_storage_provider_config_and_base_index(
+                    &storage_provider,
+                    config.segment_config,
+                    segment_base_index,
+                )
+                .await
+                .map_err(SegmentedLogError::SegmentError)?,
+            );
+        }
+
+        let write_segment = read_segments
+            .pop()
+            .ok_or(SegmentedLogError::NoSegmentsCreated)?;
 
         Ok(Self {
             _write_segment: Some(write_segment),
-            _read_segments: Vec::new(),
+            _read_segments: read_segments,
             _config: config,
-            _segment_builder: segment_builder,
+            _storage_provider: storage_provider,
         })
     }
 }

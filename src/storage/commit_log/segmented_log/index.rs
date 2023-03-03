@@ -59,7 +59,7 @@ pub enum IndexError<StorageError> {
     IndexGapEncountered,
     InvalidAppendIdx,
     NoBaseIndexFound,
-    BaseIndexMismatch,
+    BaseIndexReadLesserThanProvided,
 }
 
 impl<StorageError> std::fmt::Display for IndexError<StorageError>
@@ -194,7 +194,7 @@ pub struct Index<S, Idx> {
 impl<S, Idx> Index<S, Idx>
 where
     S: Storage,
-    Idx: FromPrimitive + Copy + Eq,
+    Idx: FromPrimitive + Copy + Ord,
 {
     async fn with_storage_and_base_index_option(
         storage: S,
@@ -206,8 +206,8 @@ where
             (None, None) => Err(IndexError::NoBaseIndexFound),
             (None, Some(base_index)) => Ok(base_index),
             (Some(base_index), None) => u64_as_idx!(base_index, Idx),
-            (Some(read), Some(provided)) if u64_as_idx!(read, Idx)? != provided => {
-                Err(IndexError::BaseIndexMismatch)
+            (Some(read), Some(provided)) if u64_as_idx!(read, Idx)? < provided => {
+                Err(IndexError::BaseIndexReadLesserThanProvided)
             }
             (Some(_), Some(provided)) => Ok(provided),
         }?;
