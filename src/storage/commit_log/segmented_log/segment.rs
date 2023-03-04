@@ -325,7 +325,7 @@ impl<S, M, H, Idx, SD> Segment<S, M, H, Idx, S::Size, SD>
 where
     S: Storage,
     H: Default,
-    Idx: FromPrimitive + Copy + Ord,
+    Idx: FromPrimitive + Copy + Eq,
     SD: SerDe,
 {
     pub async fn with_storage_provider_config_and_base_index<SP>(

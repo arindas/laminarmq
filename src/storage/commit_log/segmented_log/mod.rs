@@ -38,6 +38,7 @@ pub type Record<M, Idx, T> = super::Record<MetaWithIdx<M, Idx>, T>;
 pub enum SegmentedLogError<SE, SDE> {
     StorageError(SE),
     SegmentError(segment::SegmentError<SE, SDE>),
+    BaseIndexLesserThanInitialIndex,
     NoSegmentsCreated,
 }
 
@@ -92,9 +93,13 @@ where
             .await
             .map_err(SegmentedLogError::StorageError)?;
 
-        if segment_base_indices.is_empty() {
-            segment_base_indices.push(config.initial_index);
-        }
+        match segment_base_indices.first() {
+            Some(base_index) if base_index < &config.initial_index => {
+                return Err(SegmentedLogError::BaseIndexLesserThanInitialIndex);
+            }
+            None => segment_base_indices.push(config.initial_index),
+            _ => (),
+        };
 
         let mut read_segments = Vec::<Segment<S, M, H, Idx, S::Size, SD>>::new();
 

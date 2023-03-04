@@ -59,7 +59,7 @@ pub enum IndexError<StorageError> {
     IndexGapEncountered,
     InvalidAppendIdx,
     NoBaseIndexFound,
-    BaseIndexReadLesserThanProvided,
+    BaseIndexMismatch,
 }
 
 impl<StorageError> std::fmt::Display for IndexError<StorageError>
@@ -167,7 +167,7 @@ impl IndexRecord {
 
 pub async fn index_records_in_storage<S>(
     source: &S,
-) -> Result<(Option<u64>, Vec<IndexRecord>), IndexError<S::Error>>
+) -> Result<Vec<IndexRecord>, IndexError<S::Error>>
 where
     S: Storage,
 {
@@ -181,7 +181,7 @@ where
         position += INDEX_RECORD_LENGTH as u64;
     }
 
-    Ok((index_records.first().map(|x| x.index), index_records))
+    Ok(index_records)
 }
 
 pub struct Index<S, Idx> {
@@ -194,28 +194,37 @@ pub struct Index<S, Idx> {
 impl<S, Idx> Index<S, Idx>
 where
     S: Storage,
-    Idx: FromPrimitive + Copy + Ord,
+    Idx: FromPrimitive + Copy + Eq,
 {
     async fn with_storage_and_base_index_option(
         storage: S,
         base_index: Option<Idx>,
     ) -> Result<Self, IndexError<S::Error>> {
-        let (read_base_index, index_records) = index_records_in_storage(&storage).await?;
+        let index_records = index_records_in_storage(&storage).await?;
+        let read_base_index = index_records.first().map(|x| x.index);
 
         let base_index = match (read_base_index, base_index) {
             (None, None) => Err(IndexError::NoBaseIndexFound),
             (None, Some(base_index)) => Ok(base_index),
             (Some(base_index), None) => u64_as_idx!(base_index, Idx),
-            (Some(read), Some(provided)) if u64_as_idx!(read, Idx)? < provided => {
-                Err(IndexError::BaseIndexReadLesserThanProvided)
+            (Some(read), Some(provided)) if u64_as_idx!(read, Idx)? != provided => {
+                Err(IndexError::BaseIndexMismatch)
             }
             (Some(_), Some(provided)) => Ok(provided),
+        }?;
+
+        let next_index = match index_records.last() {
+            Some(index_record) => {
+                let idx = index_record.index + 1;
+                u64_as_idx!(idx, Idx)
+            }
+            None => Ok(base_index),
         }?;
 
         Ok(Self {
             index_records,
             base_index,
-            next_index: base_index,
+            next_index,
             storage,
         })
     }
