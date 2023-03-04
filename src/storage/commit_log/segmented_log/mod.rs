@@ -105,7 +105,7 @@ where
 
         for segment_base_index in segment_base_indices {
             read_segments.push(
-                Segment::with_storage_provider_config_and_base_index(
+                Segment::with_segment_storage_provider_config_and_base_index(
                     &segment_storage_provider,
                     config.segment_config,
                     segment_base_index,

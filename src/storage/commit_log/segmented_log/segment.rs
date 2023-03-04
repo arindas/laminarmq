@@ -328,15 +328,15 @@ where
     Idx: FromPrimitive + Copy + Eq,
     SD: SerDe,
 {
-    pub async fn with_storage_provider_config_and_base_index<SP>(
-        storage_provider: &SP,
+    pub async fn with_segment_storage_provider_config_and_base_index<SSP>(
+        segment_storage_provider: &SSP,
         config: Config<S::Size>,
         base_index: Idx,
     ) -> Result<Self, SegmentError<S::Error, SD::Error>>
     where
-        SP: SegmentStorageProvider<S, Idx>,
+        SSP: SegmentStorageProvider<S, Idx>,
     {
-        let segment_storage = storage_provider
+        let segment_storage = segment_storage_provider
             .obtain(&base_index)
             .await
             .map_err(SegmentError::StorageError)?;
