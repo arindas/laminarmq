@@ -59,7 +59,7 @@ where
     SDE: std::error::Error,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
+        write!(f, "{self:?}")
     }
 }
 
@@ -281,7 +281,7 @@ where
     ) -> Result<Idx, LogError<S, SD>> {
         let next_index = self.highest_index();
 
-        let mut segments = std::mem::replace(&mut self._read_segments, Vec::new());
+        let mut segments = std::mem::take(&mut self._read_segments);
         segments.push(take_write_segment!(self)?);
 
         let segment_pos_in_vec = segments

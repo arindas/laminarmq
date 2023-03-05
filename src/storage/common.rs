@@ -13,7 +13,7 @@ where
     S: Stream<Item = B> + Unpin,
     W: AsyncWrite + Unpin,
 {
-    let mut length = 0 as usize;
+    let mut length = 0_usize;
     while let Some(mut buf) = stream.next().await {
         while buf.has_remaining() {
             let chunk = buf.chunk();

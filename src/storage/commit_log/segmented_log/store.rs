@@ -74,7 +74,7 @@ pub mod common {
         W: AsyncWrite + Unpin,
         H: Hasher + Default,
     {
-        let (mut hasher, mut length) = (H::default(), 0 as usize);
+        let (mut hasher, mut length) = (H::default(), 0_usize);
         while let Some(mut buf) = buf_stream.next().await {
             while buf.has_remaining() {
                 let chunk = buf.chunk();
@@ -128,7 +128,7 @@ where
     StorageError: std::error::Error,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
+        write!(f, "{self:?}")
     }
 }
 

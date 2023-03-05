@@ -90,7 +90,7 @@ where
     SerDeError: std::error::Error,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
+        write!(f, "{self:?}")
     }
 }
 
@@ -148,7 +148,7 @@ where
             index: None,
             metadata: M::default(),
         })
-        .map_err(SegmentError::SerializationError)? as usize;
+        .map_err(SegmentError::SerializationError)?;
 
         let (metadata_bytes, value) = record_content
             .split_at(metadata_size)

@@ -67,7 +67,7 @@ where
     StorageError: std::error::Error,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
+        write!(f, "{self:?}")
     }
 }
 
@@ -102,7 +102,7 @@ impl IndexRecord {
     where
         S: Storage,
     {
-        let mut buffer = [0 as u8; INDEX_RECORD_LENGTH];
+        let mut buffer = [0_u8; INDEX_RECORD_LENGTH];
         let mut cursor = Cursor::new(&mut buffer as &mut [u8]);
 
         self.write(&mut cursor).map_err(IndexError::IoError)?;
@@ -171,7 +171,7 @@ pub async fn index_records_in_storage<S>(
 where
     S: Storage,
 {
-    let mut position = 0 as u64;
+    let mut position = 0_u64;
     let mut index_records = Vec::<IndexRecord>::new();
 
     while let Ok(index_record) =
