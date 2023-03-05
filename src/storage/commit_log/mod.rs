@@ -14,7 +14,9 @@ pub trait CommitLog<M, X, T>:
 {
     type Error: std::error::Error;
 
-    async fn append(&mut self, record: &mut Record<M, X>) -> Result<Self::Size, Self::Error>;
+    async fn append(&mut self, record: Record<M, X>) -> Result<Self::Idx, Self::Error>
+    where
+        X: 'async_trait;
 
     async fn remove_expired(
         &mut self,

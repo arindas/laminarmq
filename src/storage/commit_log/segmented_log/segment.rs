@@ -13,7 +13,12 @@ use futures_core::Stream;
 use futures_lite::StreamExt;
 use num::{CheckedSub, FromPrimitive, ToPrimitive, Unsigned};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::{hash::Hasher, marker::PhantomData, ops::Deref};
+use std::{
+    hash::Hasher,
+    marker::PhantomData,
+    ops::Deref,
+    time::{Duration, Instant},
+};
 
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
 pub struct Config<Size> {
@@ -27,6 +32,8 @@ pub struct Segment<S, M, H, Idx, Size, SD> {
 
     config: Config<Size>,
 
+    created_at: Instant,
+
     _phantom_date: PhantomData<(M, SD)>,
 }
 
@@ -39,6 +46,7 @@ where
             index,
             store,
             config,
+            created_at: Instant::now(),
             _phantom_date: PhantomData,
         }
     }
@@ -46,6 +54,21 @@ where
     pub fn is_maxed(&self) -> bool {
         self.store.size() >= self.config.max_store_size
             || self.index.size() >= self.config.max_index_size
+    }
+
+    pub fn has_expired(&self, expiry_duration: Duration) -> bool {
+        self.created_at.elapsed() >= expiry_duration
+    }
+}
+
+impl<S, M, H, Idx, SD> Sizable for Segment<S, M, H, Idx, S::Size, SD>
+where
+    S: Storage,
+{
+    type Size = S::Size;
+
+    fn size(&self) -> Self::Size {
+        self.index.size() + self.store.size()
     }
 }
 

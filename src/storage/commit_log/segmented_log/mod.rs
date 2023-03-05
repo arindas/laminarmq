@@ -2,12 +2,20 @@ pub mod index;
 pub mod segment;
 pub mod store;
 
-use num::FromPrimitive;
-use serde::{Deserialize, Serialize};
-
-use self::segment::Segment;
-
-use super::super::super::{common::serde::SerDe, storage::Storage};
+use self::segment::{Segment, SegmentStorageProvider};
+use super::{
+    super::super::{
+        common::{serde::SerDe, split::SplitAt},
+        storage::{AsyncConsume, AsyncIndexedRead, AsyncTruncate, Sizable, Storage},
+    },
+    CommitLog,
+};
+use async_trait::async_trait;
+use bytes::Buf;
+use futures_core::Stream;
+use num::{CheckedSub, FromPrimitive, ToPrimitive, Unsigned};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use std::{hash::Hasher, ops::Deref, time::Duration};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct MetaWithIdx<M, Idx> {
@@ -40,6 +48,9 @@ pub enum SegmentedLogError<SE, SDE> {
     SegmentError(segment::SegmentError<SE, SDE>),
     BaseIndexLesserThanInitialIndex,
     NoSegmentsCreated,
+    WriteSegmentLost,
+    IndexOutOfBounds,
+    IndexGapEncountered,
 }
 
 impl<SE, SDE> std::fmt::Display for SegmentedLogError<SE, SDE>
@@ -65,8 +76,8 @@ pub struct Config<Idx, Size> {
 }
 
 pub struct SegmentedLog<S, M, H, Idx, Size, SD, SSP> {
-    _write_segment: Option<segment::Segment<S, M, H, Idx, Size, SD>>,
-    _read_segments: Vec<segment::Segment<S, M, H, Idx, Size, SD>>,
+    _write_segment: Option<Segment<S, M, H, Idx, Size, SD>>,
+    _read_segments: Vec<Segment<S, M, H, Idx, Size, SD>>,
 
     _config: Config<Idx, Size>,
 
@@ -75,6 +86,21 @@ pub struct SegmentedLog<S, M, H, Idx, Size, SD, SSP> {
 
 pub type LogError<S, SD> = SegmentedLogError<<S as Storage>::Error, <SD as SerDe>::Error>;
 
+impl<S, M, H, Idx, SD, SSP> Sizable for SegmentedLog<S, M, H, Idx, S::Size, SD, SSP>
+where
+    S: Storage,
+{
+    type Size = S::Size;
+
+    fn size(&self) -> Self::Size {
+        self._read_segments
+            .iter()
+            .chain(self._write_segment.iter())
+            .map(|x| x.size())
+            .sum()
+    }
+}
+
 impl<S, M, H, Idx, SD, SSP> SegmentedLog<S, M, H, Idx, S::Size, SD, SSP>
 where
     S: Storage,
@@ -82,7 +108,7 @@ where
     H: Default,
     Idx: FromPrimitive + Copy + Ord,
     SD: SerDe,
-    SSP: segment::SegmentStorageProvider<S, Idx>,
+    SSP: SegmentStorageProvider<S, Idx>,
 {
     pub async fn new(
         config: Config<Idx, S::Size>,
@@ -125,5 +151,327 @@ where
             _config: config,
             _segment_storage_provider: segment_storage_provider,
         })
+    }
+}
+
+macro_rules! new_segment {
+    ($segmented_log:ident, $base_index:ident) => {
+        Segment::with_segment_storage_provider_config_and_base_index(
+            &$segmented_log._segment_storage_provider,
+            $segmented_log._config.segment_config,
+            $base_index,
+        )
+        .await
+        .map_err(SegmentedLogError::SegmentError)
+    };
+}
+
+macro_rules! consume_segment {
+    ($segment:ident, $consume_method:ident) => {
+        $segment
+            .$consume_method()
+            .await
+            .map_err(SegmentedLogError::SegmentError)
+    };
+}
+
+macro_rules! take_write_segment {
+    ($segmented_log:ident) => {
+        $segmented_log
+            ._write_segment
+            .take()
+            .ok_or(SegmentedLogError::WriteSegmentLost)
+    };
+}
+
+macro_rules! write_segment_ref {
+    ($segmented_log:ident, $ref_method:ident) => {
+        $segmented_log
+            ._write_segment
+            .$ref_method()
+            .ok_or(SegmentedLogError::WriteSegmentLost)
+    };
+}
+
+#[async_trait(?Send)]
+impl<S, M, H, Idx, SD, SSP> AsyncIndexedRead for SegmentedLog<S, M, H, Idx, S::Size, SD, SSP>
+where
+    S: Storage,
+    S::Content: SplitAt<u8>,
+    SD: SerDe,
+    H: Hasher + Default,
+    Idx: Unsigned + CheckedSub + ToPrimitive + Ord + Copy,
+    Idx: Serialize + DeserializeOwned,
+    M: Default + Serialize + DeserializeOwned,
+{
+    type ReadError = LogError<S, SD>;
+
+    type Idx = Idx;
+
+    type Value = Record<M, Idx, S::Content>;
+
+    fn highest_index(&self) -> Self::Idx {
+        self._write_segment
+            .as_ref()
+            .map(|segment| segment.highest_index())
+            .unwrap_or(self._config.initial_index)
+    }
+
+    fn lowest_index(&self) -> Self::Idx {
+        self._read_segments
+            .first()
+            .map(|segment| segment.lowest_index())
+            .unwrap_or(self._config.initial_index)
+    }
+
+    async fn read(&self, idx: &Self::Idx) -> Result<Self::Value, Self::ReadError> {
+        if !self.has_index(idx) {
+            return Err(SegmentedLogError::IndexOutOfBounds);
+        }
+
+        self._read_segments
+            .iter()
+            .chain(self._write_segment.iter())
+            .find(|segment| segment.has_index(idx))
+            .ok_or(SegmentedLogError::IndexGapEncountered)?
+            .read(idx)
+            .await
+            .map_err(SegmentedLogError::SegmentError)
+    }
+}
+
+impl<S, M, H, Idx, SD, SSP> SegmentedLog<S, M, H, Idx, S::Size, SD, SSP>
+where
+    S: Storage,
+    S::Content: SplitAt<u8>,
+    S::Size: Copy,
+    H: Hasher + Default,
+    Idx: FromPrimitive + ToPrimitive + Unsigned + CheckedSub,
+    Idx: Copy + Ord + Serialize + DeserializeOwned,
+    M: Default + Serialize + DeserializeOwned,
+    SD: SerDe,
+    SSP: SegmentStorageProvider<S, Idx>,
+{
+    pub async fn rotate_new_write_segment(&mut self) -> Result<(), LogError<S, SD>> {
+        self.reopen_write_segment().await?;
+
+        let write_segment = take_write_segment!(self)?;
+        let next_index = write_segment.highest_index();
+
+        self._read_segments.push(write_segment);
+        self._write_segment = Some(new_segment!(self, next_index)?);
+
+        Ok(())
+    }
+
+    pub async fn reopen_write_segment(&mut self) -> Result<(), LogError<S, SD>> {
+        let write_segment = take_write_segment!(self)?;
+        let write_segment_base_index = write_segment.lowest_index();
+
+        consume_segment!(write_segment, close)?;
+
+        self._write_segment = Some(new_segment!(self, write_segment_base_index)?);
+
+        Ok(())
+    }
+
+    pub async fn remove_expired_segments(
+        &mut self,
+        expiry_duration: Duration,
+    ) -> Result<Idx, LogError<S, SD>> {
+        let next_index = self.highest_index();
+
+        let mut segments = std::mem::replace(&mut self._read_segments, Vec::new());
+        segments.push(take_write_segment!(self)?);
+
+        let segment_pos_in_vec = segments
+            .iter()
+            .position(|segment| !segment.has_expired(expiry_duration));
+
+        let (mut to_remove, mut to_keep) = if let Some(pos) = segment_pos_in_vec {
+            let non_expired_segments = segments.split_off(pos);
+            (segments, non_expired_segments)
+        } else {
+            (segments, Vec::new())
+        };
+
+        let write_segment = if let Some(write_segment) = to_keep.pop() {
+            write_segment
+        } else {
+            new_segment!(self, next_index)?
+        };
+
+        self._read_segments = to_keep;
+        self._write_segment = Some(write_segment);
+
+        let mut num_records_removed = <Idx as num::Zero>::zero();
+        for segment in to_remove.drain(..) {
+            num_records_removed = num_records_removed + segment.len();
+            consume_segment!(segment, remove)?;
+        }
+        Ok(num_records_removed)
+    }
+}
+
+impl<S, M, H, Idx, SD, SSP> SegmentedLog<S, M, H, Idx, S::Size, SD, SSP>
+where
+    S: Storage,
+    S::Position: ToPrimitive,
+    S::Content: SplitAt<u8>,
+    S::Size: Copy,
+    H: Hasher + Default,
+    Idx: FromPrimitive + ToPrimitive + Unsigned + CheckedSub,
+    Idx: Copy + Ord + Serialize + DeserializeOwned,
+    M: Default + Clone + Serialize + DeserializeOwned,
+    SD: SerDe,
+    SSP: SegmentStorageProvider<S, Idx>,
+{
+    pub async fn append_record_with_contiguous_bytes<X>(
+        &mut self,
+        record: &Record<M, Idx, X>,
+    ) -> Result<Idx, LogError<S, SD>>
+    where
+        X: Deref<Target = [u8]>,
+    {
+        if write_segment_ref!(self, as_ref)?.is_maxed() {
+            self.rotate_new_write_segment().await?;
+        }
+
+        write_segment_ref!(self, as_mut)?
+            .append_record_with_contiguous_bytes(record)
+            .await
+            .map_err(SegmentedLogError::SegmentError)
+    }
+}
+
+#[async_trait(?Send)]
+impl<S, M, H, Idx, SD, SSP> AsyncTruncate for SegmentedLog<S, M, H, Idx, S::Size, SD, SSP>
+where
+    S: Storage,
+    S::Content: SplitAt<u8>,
+    S::Size: Copy,
+    SD: SerDe,
+    H: Hasher + Default,
+    Idx: Unsigned + CheckedSub + FromPrimitive + ToPrimitive + Ord + Copy,
+    Idx: Serialize + DeserializeOwned,
+    M: Default + Serialize + DeserializeOwned,
+    SSP: SegmentStorageProvider<S, Idx>,
+{
+    type TruncError = LogError<S, SD>;
+
+    type Mark = Idx;
+
+    async fn truncate(&mut self, idx: &Self::Mark) -> Result<(), Self::TruncError> {
+        if !self.has_index(idx) {
+            return Err(SegmentedLogError::IndexOutOfBounds);
+        }
+
+        let write_segment = write_segment_ref!(self, as_mut)?;
+
+        if idx >= &write_segment.lowest_index() {
+            return write_segment
+                .truncate(idx)
+                .await
+                .map_err(SegmentedLogError::SegmentError);
+        }
+
+        let segment_pos_in_vec = self
+            ._read_segments
+            .iter()
+            .position(|seg| seg.has_index(idx))
+            .ok_or(SegmentedLogError::IndexGapEncountered)?;
+
+        let segment_to_truncate = self
+            ._read_segments
+            .get_mut(segment_pos_in_vec)
+            .ok_or(SegmentedLogError::IndexGapEncountered)?;
+
+        segment_to_truncate
+            .truncate(idx)
+            .await
+            .map_err(SegmentedLogError::SegmentError)?;
+
+        let next_index = segment_to_truncate.highest_index();
+
+        let mut segments_to_remove = self._read_segments.split_off(segment_pos_in_vec + 1);
+        segments_to_remove.push(take_write_segment!(self)?);
+
+        for segment in segments_to_remove.drain(..) {
+            consume_segment!(segment, remove)?;
+        }
+
+        self._write_segment = Some(new_segment!(self, next_index)?);
+
+        Ok(())
+    }
+}
+
+macro_rules! consume_segmented_log {
+    ($segmented_log:ident, $consume_method:ident) => {
+        let segments = &mut $segmented_log._read_segments;
+        segments.push(take_write_segment!($segmented_log)?);
+        for segment in segments.drain(..) {
+            consume_segment!(segment, $consume_method)?;
+        }
+    };
+}
+
+#[async_trait(?Send)]
+impl<S, M, H, Idx, SD, SSP> AsyncConsume for SegmentedLog<S, M, H, Idx, S::Size, SD, SSP>
+where
+    S: Storage,
+    SD: SerDe,
+{
+    type ConsumeError = LogError<S, SD>;
+
+    async fn remove(mut self) -> Result<(), Self::ConsumeError> {
+        consume_segmented_log!(self, remove);
+        Ok(())
+    }
+
+    async fn close(mut self) -> Result<(), Self::ConsumeError> {
+        consume_segmented_log!(self, close);
+        Ok(())
+    }
+}
+
+#[async_trait(?Send)]
+impl<S, M, H, Idx, SD, SSP, XBuf, X> CommitLog<MetaWithIdx<M, Idx>, X, S::Content>
+    for SegmentedLog<S, M, H, Idx, S::Size, SD, SSP>
+where
+    S: Storage,
+    S::Position: ToPrimitive,
+    S::Content: SplitAt<u8>,
+    S::Size: Copy,
+    H: Hasher + Default,
+    Idx: FromPrimitive + ToPrimitive + Unsigned + CheckedSub,
+    Idx: Copy + Ord + Serialize + DeserializeOwned,
+    M: Default + Serialize + DeserializeOwned,
+    SD: SerDe,
+    SSP: SegmentStorageProvider<S, Idx>,
+    XBuf: Buf + From<SD::SerBytes>,
+    X: Stream<Item = XBuf> + Unpin,
+{
+    type Error = LogError<S, SD>;
+
+    async fn remove_expired(
+        &mut self,
+        expiry_duration: std::time::Duration,
+    ) -> Result<Self::Idx, Self::Error> {
+        self.remove_expired_segments(expiry_duration).await
+    }
+
+    async fn append(&mut self, record: Record<M, Idx, X>) -> Result<Self::Idx, Self::Error>
+    where
+        X: 'async_trait,
+    {
+        if write_segment_ref!(self, as_ref)?.is_maxed() {
+            self.rotate_new_write_segment().await?;
+        }
+
+        write_segment_ref!(self, as_mut)?
+            .append(record)
+            .await
+            .map_err(SegmentedLogError::SegmentError)
     }
 }
