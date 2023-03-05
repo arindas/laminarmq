@@ -67,8 +67,8 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::SegmentError(err) => write!(f, "Segment error occurred: {}", err),
-            Self::IoError(err) => write!(f, "IO error occurred: {}", err),
+            Self::SegmentError(err) => write!(f, "Segment error occurred: {err}"),
+            Self::IoError(err) => write!(f, "IO error occurred: {err}"),
             Self::WriteSegmentLost => write!(f, "Write segment is None."),
             Self::OffsetOutOfBounds => write!(f, "Given offset is out of bounds."),
             Self::OffsetNotValidToAdvanceTo => {

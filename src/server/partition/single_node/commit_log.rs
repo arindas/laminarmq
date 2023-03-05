@@ -32,7 +32,7 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self {
-            PartitionError::CommitLog(error) => write!(f, "CommitLog error: {:?}", error),
+            PartitionError::CommitLog(error) => write!(f, "CommitLog error: {error:?}"),
             PartitionError::NotSupported => write!(f, "Operation not supported."),
         }
     }
