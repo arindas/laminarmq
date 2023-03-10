@@ -126,6 +126,10 @@ impl Storage for InMemStorage {
 
         Ok(vec)
     }
+
+    fn is_persistent() -> bool {
+        false
+    }
 }
 
 #[cfg(test)]

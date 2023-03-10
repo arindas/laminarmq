@@ -3,8 +3,7 @@ use super::super::super::{AsyncConsume, AsyncTruncate, Sizable, Storage};
 use async_trait::async_trait;
 use bytes::Buf;
 use futures_core::Stream;
-use num::FromPrimitive;
-use std::{hash::Hasher, marker::PhantomData};
+use std::{error::Error as StdError, hash::Hasher, marker::PhantomData};
 
 pub mod common {
     use std::{
@@ -117,24 +116,32 @@ impl<S, H> Store<S, H> {
 }
 
 #[derive(Debug)]
-pub enum StoreError<StorageError> {
-    StorageError(StorageError),
+pub enum StoreError<SE> {
+    StorageError(SE),
     IncompatibleSizeType,
     RecordHeaderMismatch,
+    ReadOnEmptyStore,
 }
 
-impl<StorageError> std::fmt::Display for StoreError<StorageError>
+impl<SE> std::fmt::Display for StoreError<SE>
 where
-    StorageError: std::error::Error,
+    SE: StdError,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{self:?}")
     }
 }
 
-impl<StorageError> std::error::Error for StoreError<StorageError> where
-    StorageError: std::error::Error
-{
+impl<SE> StdError for StoreError<SE> where SE: StdError {}
+
+macro_rules! u64_as_size {
+    ($size:ident, $Size:ty) => {
+        <$Size as num::FromPrimitive>::from_u64($size).ok_or(StoreError::IncompatibleSizeType)
+    };
+
+    ($size:literal, $Size:ty) => {
+        <$Size as num::FromPrimitive>::from_u64($size).ok_or(StoreError::IncompatibleSizeType)
+    };
 }
 
 impl<S, H> Store<S, H>
@@ -147,8 +154,12 @@ where
         position: &S::Position,
         record_header: &RecordHeader,
     ) -> Result<S::Content, StoreError<S::Error>> {
-        let record_size =
-            S::Size::from_u64(record_header.length).ok_or(StoreError::IncompatibleSizeType)?;
+        if self.size() == u64_as_size!(0_u64, S::Size)? {
+            return Err(StoreError::ReadOnEmptyStore);
+        }
+
+        let record_length = record_header.length;
+        let record_size = u64_as_size!(record_length, S::Size)?;
 
         let record_bytes = self
             .storage
@@ -216,5 +227,111 @@ impl<S: Storage, H> Sizable for Store<S, H> {
 
     fn size(&self) -> Self::Size {
         self.storage.size()
+    }
+}
+
+pub(crate) mod test {
+    use crate::storage::AsyncTruncate;
+
+    use super::{super::super::super::AsyncConsume, RecordHeader, Storage, Store, StoreError};
+    use std::{future::Future, hash::Hasher, marker::PhantomData, ops::Deref};
+
+    const _RECORDS: [&[u8; 129]; 20] = [
+                    b"T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77t",
+                    b"9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9YxuipjdD",
+                    b"zjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMsW",
+                    b"9cOGqwqc9cOGqwqc9cOGqwqc9cOGqwqc9cOGqwqc9cOGqwqc9cOGqwqc9cOGqwqc9cOGqwqc9cOGqwqc9cOGqwqc9cOGqwqc9cOGqwqc9cOGqwqc9cOGqwqc9cOGqwqcw",
+                    b"ZXI6B7XcZXI6B7XcZXI6B7XcZXI6B7XcZXI6B7XcZXI6B7XcZXI6B7XcZXI6B7XcZXI6B7XcZXI6B7XcZXI6B7XcZXI6B7XcZXI6B7XcZXI6B7XcZXI6B7XcZXI6B7Xco",
+                    b"9sjES6nO9sjES6nO9sjES6nO9sjES6nO9sjES6nO9sjES6nO9sjES6nO9sjES6nO9sjES6nO9sjES6nO9sjES6nO9sjES6nO9sjES6nO9sjES6nO9sjES6nO9sjES6nOi",
+                    b"KZq1Egx3KZq1Egx3KZq1Egx3KZq1Egx3KZq1Egx3KZq1Egx3KZq1Egx3KZq1Egx3KZq1Egx3KZq1Egx3KZq1Egx3KZq1Egx3KZq1Egx3KZq1Egx3KZq1Egx3KZq1Egx3A",
+                    b"cJQv6uykcJQv6uykcJQv6uykcJQv6uykcJQv6uykcJQv6uykcJQv6uykcJQv6uykcJQv6uykcJQv6uykcJQv6uykcJQv6uykcJQv6uykcJQv6uykcJQv6uykcJQv6uykL",
+                    b"6BKwSxL76BKwSxL76BKwSxL76BKwSxL76BKwSxL76BKwSxL76BKwSxL76BKwSxL76BKwSxL76BKwSxL76BKwSxL76BKwSxL76BKwSxL76BKwSxL76BKwSxL76BKwSxL7O",
+                    b"h5FxA3eKh5FxA3eKh5FxA3eKh5FxA3eKh5FxA3eKh5FxA3eKh5FxA3eKh5FxA3eKh5FxA3eKh5FxA3eKh5FxA3eKh5FxA3eKh5FxA3eKh5FxA3eKh5FxA3eKh5FxA3eKe",
+                    b"DNNs0NpcDNNs0NpcDNNs0NpcDNNs0NpcDNNs0NpcDNNs0NpcDNNs0NpcDNNs0NpcDNNs0NpcDNNs0NpcDNNs0NpcDNNs0NpcDNNs0NpcDNNs0NpcDNNs0NpcDNNs0Npc8",
+                    b"6lHRDBOh6lHRDBOh6lHRDBOh6lHRDBOh6lHRDBOh6lHRDBOh6lHRDBOh6lHRDBOh6lHRDBOh6lHRDBOh6lHRDBOh6lHRDBOh6lHRDBOh6lHRDBOh6lHRDBOh6lHRDBOhu",
+                    b"0emonuBO0emonuBO0emonuBO0emonuBO0emonuBO0emonuBO0emonuBO0emonuBO0emonuBO0emonuBO0emonuBO0emonuBO0emonuBO0emonuBO0emonuBO0emonuBO6",
+                    b"BXn8YHM1BXn8YHM1BXn8YHM1BXn8YHM1BXn8YHM1BXn8YHM1BXn8YHM1BXn8YHM1BXn8YHM1BXn8YHM1BXn8YHM1BXn8YHM1BXn8YHM1BXn8YHM1BXn8YHM1BXn8YHM1V",
+                    b"VWa0VnRcVWa0VnRcVWa0VnRcVWa0VnRcVWa0VnRcVWa0VnRcVWa0VnRcVWa0VnRcVWa0VnRcVWa0VnRcVWa0VnRcVWa0VnRcVWa0VnRcVWa0VnRcVWa0VnRcVWa0VnRcX",
+                    b"RaiNfDSVRaiNfDSVRaiNfDSVRaiNfDSVRaiNfDSVRaiNfDSVRaiNfDSVRaiNfDSVRaiNfDSVRaiNfDSVRaiNfDSVRaiNfDSVRaiNfDSVRaiNfDSVRaiNfDSVRaiNfDSVc",
+                    b"ujz06A7Pujz06A7Pujz06A7Pujz06A7Pujz06A7Pujz06A7Pujz06A7Pujz06A7Pujz06A7Pujz06A7Pujz06A7Pujz06A7Pujz06A7Pujz06A7Pujz06A7Pujz06A7PE",
+                    b"6q4fzIbs6q4fzIbs6q4fzIbs6q4fzIbs6q4fzIbs6q4fzIbs6q4fzIbs6q4fzIbs6q4fzIbs6q4fzIbs6q4fzIbs6q4fzIbs6q4fzIbs6q4fzIbs6q4fzIbs6q4fzIbs9",
+                    b"28qu1qcv28qu1qcv28qu1qcv28qu1qcv28qu1qcv28qu1qcv28qu1qcv28qu1qcv28qu1qcv28qu1qcv28qu1qcv28qu1qcv28qu1qcv28qu1qcv28qu1qcv28qu1qcvW",
+                    b"j9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSD",
+                ];
+
+    pub(crate) async fn _test_store_read_append_truncate_consistent<SP, F, S, H>(
+        storage_provider: SP,
+    ) where
+        F: Future<Output = (S, PhantomData<H>)>,
+        SP: Fn() -> F,
+        S: Storage,
+        S::Position: num::Zero,
+        H: Hasher + Default,
+    {
+        let mut store = Store::<S, H>::new(storage_provider().await.0);
+
+        match store.read(&num::zero(), &RecordHeader::default()).await {
+            Err(StoreError::ReadOnEmptyStore) => {}
+            _ => assert!(false, "Wrong result returned for read on empty store"),
+        }
+
+        let mut record_append_info_vec =
+            Vec::<(S::Position, RecordHeader)>::with_capacity(_RECORDS.len());
+
+        for record in _RECORDS {
+            let record: &[u8] = record;
+
+            let record_append_info = store
+                .append(&mut futures_lite::stream::once(record))
+                .await
+                .unwrap();
+
+            record_append_info_vec.push(record_append_info);
+        }
+
+        let store = if S::is_persistent() {
+            store.close().await.unwrap();
+            Store::<S, H>::new(storage_provider().await.0)
+        } else {
+            store
+        };
+
+        for i in 0..record_append_info_vec.len() {
+            let record_info = &record_append_info_vec[i];
+            assert_eq!(
+                store
+                    .read(&record_info.0, &record_info.1)
+                    .await
+                    .unwrap()
+                    .deref(),
+                _RECORDS[i]
+            );
+        }
+
+        let truncate_index = record_append_info_vec.len() / 2;
+        let mut store = store;
+
+        store
+            .truncate(&record_append_info_vec[truncate_index].0)
+            .await
+            .unwrap();
+
+        let mut i = 0;
+
+        loop {
+            let record_info = &record_append_info_vec[i];
+            match store.read(&record_info.0, &record_info.1).await {
+                Ok(record_content) => {
+                    assert_eq!(record_content.deref(), _RECORDS[i]);
+                }
+                Err(_) => break,
+            }
+
+            i += 1;
+        }
+
+        assert_eq!(i, truncate_index);
+
+        store.remove().await.unwrap();
     }
 }
