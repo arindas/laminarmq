@@ -4,9 +4,9 @@ mod tests {
     use std::marker::PhantomData;
 
     #[test]
-    fn test_store_read_append_truncate_consistent() {
+    fn test_store_read_append_truncate_consistency() {
         futures_lite::future::block_on(async {
-            store::test::_test_store_read_append_truncate_consistent(|| async {
+            store::test::_test_store_read_append_truncate_consistency(|| async {
                 (InMemStorage::default(), PhantomData::<crc32fast::Hasher>)
             })
             .await;

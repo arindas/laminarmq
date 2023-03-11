@@ -3,7 +3,10 @@ use glommio::TaskQueueHandle as TaskQ;
 use std::{fmt::Debug, ops::Deref};
 use tracing::{Instrument, Level};
 
-pub struct ConsumeHandle<C: AsyncConsume + 'static> {
+pub struct ConsumeHandle<C>
+where
+    C: AsyncConsume + 'static,
+{
     consumable: Option<C>,
     method: ConsumeMethod,
     task_q: Option<TaskQ>,
@@ -15,7 +18,10 @@ pub enum ConsumeMethod {
     Close,
 }
 
-impl<C: AsyncConsume> ConsumeHandle<C> {
+impl<C> ConsumeHandle<C>
+where
+    C: AsyncConsume,
+{
     pub async fn consume(consumable: Option<C>, method: ConsumeMethod) {
         async move {
             let result = if let Some(consumable) = consumable {
@@ -64,7 +70,10 @@ impl<C: AsyncConsume> ConsumeHandle<C> {
     }
 }
 
-impl<C: AsyncConsume> Deref for ConsumeHandle<C> {
+impl<C> Deref for ConsumeHandle<C>
+where
+    C: AsyncConsume,
+{
     type Target = C;
 
     fn deref(&self) -> &Self::Target {
@@ -72,7 +81,10 @@ impl<C: AsyncConsume> Deref for ConsumeHandle<C> {
     }
 }
 
-impl<C: AsyncConsume + 'static> Drop for ConsumeHandle<C> {
+impl<C> Drop for ConsumeHandle<C>
+where
+    C: AsyncConsume + 'static,
+{
     fn drop(&mut self) {
         let task_q = self.task_q;
         let consumable = self.consumable.take();
@@ -124,7 +136,7 @@ mod mock {
     }
 
     #[test]
-    fn test_mock() {
+    fn test_mock_async_consume_drop_with_consume_handle() {
         use super::ConsumeHandle;
         use super::ConsumeMethod;
 

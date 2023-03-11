@@ -231,12 +231,13 @@ impl<S: Storage, H> Sizable for Store<S, H> {
 }
 
 pub(crate) mod test {
-    use crate::storage::AsyncTruncate;
-
-    use super::{super::super::super::AsyncConsume, RecordHeader, Storage, Store, StoreError};
+    use super::{
+        super::super::super::{AsyncConsume, AsyncTruncate},
+        RecordHeader, Storage, Store, StoreError,
+    };
     use std::{future::Future, hash::Hasher, marker::PhantomData, ops::Deref};
 
-    const _RECORDS: [&[u8; 129]; 20] = [
+    pub(crate) const _RECORDS: [&[u8; 129]; 20] = [
                     b"T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77t",
                     b"9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9YxuipjdD",
                     b"zjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMsW",
@@ -259,7 +260,7 @@ pub(crate) mod test {
                     b"j9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSD",
                 ];
 
-    pub(crate) async fn _test_store_read_append_truncate_consistent<SP, F, S, H>(
+    pub(crate) async fn _test_store_read_append_truncate_consistency<SP, F, S, H>(
         storage_provider: SP,
     ) where
         F: Future<Output = (S, PhantomData<H>)>,

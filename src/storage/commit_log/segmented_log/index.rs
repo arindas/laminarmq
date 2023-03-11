@@ -366,3 +366,128 @@ impl<S: Storage, Idx> AsyncConsume for Index<S, Idx> {
         self.storage.close().await.map_err(IndexError::StorageError)
     }
 }
+
+pub(crate) mod test {
+    use futures_lite::StreamExt;
+    use num::{CheckedSub, FromPrimitive, ToPrimitive, Unsigned, Zero};
+
+    use crate::storage::AsyncTruncate;
+
+    use super::{
+        super::super::super::{common::indexed_read_stream, AsyncConsume, AsyncIndexedRead},
+        Index, IndexError, IndexRecord, RecordHeader, Storage,
+    };
+    use std::{future::Future, hash::Hasher, marker::PhantomData, ops::Deref};
+
+    use super::super::store::test::_RECORDS;
+
+    fn _index_records_test_data<H, IE>() -> impl Iterator<Item = IndexRecord>
+    where
+        H: Hasher + Default,
+        IE: std::error::Error,
+    {
+        _RECORDS
+            .iter()
+            .map(|x| RecordHeader::compute::<H>(x.deref()))
+            .scan((0, 0), |(index, position), record_header| {
+                let index_record =
+                    IndexRecord::with_position_index_and_record_header::<u32, u32, IE>(
+                        *position,
+                        *index,
+                        record_header,
+                    )
+                    .unwrap();
+
+                *index = *index + 1;
+                *position = *position + record_header.length as u32;
+
+                Some(index_record)
+            })
+    }
+
+    async fn _test_index_contains_records<S, Idx, I>(
+        index: &Index<S, Idx>,
+        index_records: I,
+        expected_record_count: usize,
+    ) where
+        S: Storage,
+        I: Iterator<Item = IndexRecord>,
+        Idx: Copy + Ord,
+        Idx: Unsigned + CheckedSub + ToPrimitive,
+    {
+        let count = futures_lite::stream::iter(index_records)
+            .zip(indexed_read_stream(index, ..).await)
+            .map(|(x, y)| {
+                assert_eq!(x, y);
+                Some(())
+            })
+            .count()
+            .await;
+        assert_eq!(count, expected_record_count);
+    }
+
+    pub(crate) async fn _test_index_read_append_truncate_consistency<SP, F, S, H, Idx>(
+        storage_provider: SP,
+    ) where
+        F: Future<Output = (S, PhantomData<(H, Idx)>)>,
+        SP: Fn() -> F,
+        S: Storage,
+        S::Position: Zero,
+        H: Hasher + Default,
+        Idx: Copy + Ord,
+        Idx: Unsigned + CheckedSub,
+        Idx: ToPrimitive + FromPrimitive,
+    {
+        let mut index = Index::with_storage_and_base_index(storage_provider().await.0, Idx::zero())
+            .await
+            .unwrap();
+
+        match index.read(&Idx::zero()).await {
+            Err(IndexError::IndexOutOfBounds) => {}
+            _ => assert!(false, "Wrong result returned for read on empty Index."),
+        }
+
+        for index_record in _index_records_test_data::<H, IndexError<S::Error>>() {
+            index.append(index_record).await.unwrap();
+        }
+
+        _test_index_contains_records(
+            &index,
+            _index_records_test_data::<H, IndexError<S::Error>>(),
+            _RECORDS.len(),
+        )
+        .await;
+
+        let mut index = if S::is_persistent() {
+            index.close().await.unwrap();
+            Index::with_storage_and_base_index(storage_provider().await.0, Idx::zero())
+                .await
+                .unwrap()
+        } else {
+            index
+        };
+
+        _test_index_contains_records(
+            &index,
+            _index_records_test_data::<H, IndexError<S::Error>>(),
+            _RECORDS.len(),
+        )
+        .await;
+
+        let truncate_index = _RECORDS.len() / 2;
+
+        index
+            .truncate(&Idx::from_usize(truncate_index).unwrap())
+            .await
+            .unwrap();
+
+        _test_index_contains_records(
+            &index,
+            _index_records_test_data::<H, IndexError<S::Error>>().take(truncate_index),
+            truncate_index,
+        )
+        .await;
+
+        index.remove().await.unwrap();
+    }
+}

@@ -142,7 +142,7 @@ mod tests {
     use futures_lite::stream;
 
     #[test]
-    fn test_in_mem_storage_read_write_consistency() {
+    fn test_in_mem_storage_read_append_consistency() {
         futures_lite::future::block_on(async {
             const REQ_BYTES: &[u8] = b"Hello World!";
             let mut req_body = stream::iter(std::iter::once(REQ_BYTES));
