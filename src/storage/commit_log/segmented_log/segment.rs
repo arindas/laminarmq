@@ -81,6 +81,7 @@ pub enum SegmentError<StorageError, SerDeError> {
     SerializationError(SerDeError),
     RecordMetadataNotFound,
     InvalidAppendIdx,
+    InvalidIndexRecordGenerated,
     SegmentMaxed,
 }
 
@@ -192,7 +193,7 @@ where
             write_index,
             record_header,
         )
-        .map_err(SegmentError::IndexError)?;
+        .ok_or(SegmentError::InvalidIndexRecordGenerated)?;
 
         self.index
             .append(index_record)

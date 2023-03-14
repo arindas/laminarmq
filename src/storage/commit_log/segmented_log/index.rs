@@ -126,13 +126,6 @@ macro_rules! u64_as_position {
 }
 
 #[doc(hidden)]
-macro_rules! position_as_u64 {
-    ($value:ident, $PosType:ty) => {
-        <$PosType as ToPrimitive>::to_u64(&$value).ok_or(IndexError::IncompatiblePositionType)
-    };
-}
-
-#[doc(hidden)]
 macro_rules! u64_as_idx {
     ($value:ident, $IdxType:ty) => {
         <$IdxType as FromPrimitive>::from_u64($value).ok_or(IndexError::IncompatibleIdxType)
@@ -147,20 +140,19 @@ macro_rules! idx_as_u64 {
 }
 
 impl IndexRecord {
-    pub fn with_position_index_and_record_header<Pos, Idx, Error>(
-        position: Pos,
+    pub fn with_position_index_and_record_header<Position, Idx>(
+        position: Position,
         index: Idx,
         record_header: RecordHeader,
-    ) -> Result<Self, IndexError<Error>>
+    ) -> Option<IndexRecord>
     where
-        Pos: ToPrimitive,
+        Position: ToPrimitive,
         Idx: ToPrimitive,
-        Error: std::error::Error,
     {
-        Ok(IndexRecord {
+        Some(IndexRecord {
             record_header,
-            index: idx_as_u64!(index, Idx)?,
-            position: position_as_u64!(position, Pos)?,
+            index: Idx::to_u64(&index)?,
+            position: Position::to_u64(&position)?,
         })
     }
 }
@@ -189,6 +181,12 @@ pub struct Index<S, Idx> {
     base_index: Idx,
     next_index: Idx,
     storage: S,
+}
+
+impl<S, Idx> Index<S, Idx> {
+    pub fn into_storage(self) -> S {
+        self.storage
+    }
 }
 
 impl<S, Idx> Index<S, Idx>
@@ -381,22 +379,20 @@ pub(crate) mod test {
 
     use super::super::store::test::_RECORDS;
 
-    fn _index_records_test_data<H, IE>() -> impl Iterator<Item = IndexRecord>
+    fn _index_records_test_data<H>() -> impl Iterator<Item = IndexRecord>
     where
         H: Hasher + Default,
-        IE: std::error::Error,
     {
         _RECORDS
             .iter()
             .map(|x| RecordHeader::compute::<H>(x.deref()))
             .scan((0, 0), |(index, position), record_header| {
-                let index_record =
-                    IndexRecord::with_position_index_and_record_header::<u32, u32, IE>(
-                        *position,
-                        *index,
-                        record_header,
-                    )
-                    .unwrap();
+                let index_record = IndexRecord::with_position_index_and_record_header::<u32, u32>(
+                    *position,
+                    *index,
+                    record_header,
+                )
+                .unwrap();
 
                 *index = *index + 1;
                 *position = *position + record_header.length as u32;
@@ -447,32 +443,22 @@ pub(crate) mod test {
             _ => assert!(false, "Wrong result returned for read on empty Index."),
         }
 
-        for index_record in _index_records_test_data::<H, IndexError<S::Error>>() {
+        for index_record in _index_records_test_data::<H>() {
             index.append(index_record).await.unwrap();
         }
 
-        _test_index_contains_records(
-            &index,
-            _index_records_test_data::<H, IndexError<S::Error>>(),
-            _RECORDS.len(),
-        )
-        .await;
+        _test_index_contains_records(&index, _index_records_test_data::<H>(), _RECORDS.len()).await;
 
         let mut index = if S::is_persistent() {
             index.close().await.unwrap();
-            Index::with_storage_and_base_index(storage_provider().await.0, Idx::zero())
+            Index::with_storage(storage_provider().await.0)
                 .await
                 .unwrap()
         } else {
-            index
+            Index::with_storage(index.into_storage()).await.unwrap()
         };
 
-        _test_index_contains_records(
-            &index,
-            _index_records_test_data::<H, IndexError<S::Error>>(),
-            _RECORDS.len(),
-        )
-        .await;
+        _test_index_contains_records(&index, _index_records_test_data::<H>(), _RECORDS.len()).await;
 
         let truncate_index = _RECORDS.len() / 2;
 
@@ -483,7 +469,7 @@ pub(crate) mod test {
 
         _test_index_contains_records(
             &index,
-            _index_records_test_data::<H, IndexError<S::Error>>().take(truncate_index),
+            _index_records_test_data::<H>().take(truncate_index),
             truncate_index,
         )
         .await;
