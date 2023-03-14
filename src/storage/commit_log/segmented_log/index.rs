@@ -409,7 +409,8 @@ pub(crate) mod test {
         S: Storage,
         I: Iterator<Item = IndexRecord>,
         Idx: Copy + Ord,
-        Idx: Unsigned + CheckedSub + ToPrimitive,
+        Idx: Unsigned + CheckedSub,
+        Idx: ToPrimitive,
     {
         let count = futures_lite::stream::iter(index_records)
             .zip(indexed_read_stream(index, ..).await)
@@ -434,6 +435,11 @@ pub(crate) mod test {
         Idx: Unsigned + CheckedSub,
         Idx: ToPrimitive + FromPrimitive,
     {
+        match Index::<S, Idx>::with_storage(storage_provider().await.0).await {
+            Err(IndexError::NoBaseIndexFound) => {},
+            _ => assert!(false, "Wrong result returned when creating from empty storage without providing base index"),
+        }
+
         let mut index = Index::with_storage_and_base_index(storage_provider().await.0, Idx::zero())
             .await
             .unwrap();
@@ -447,16 +453,31 @@ pub(crate) mod test {
             index.append(index_record).await.unwrap();
         }
 
+        match index.append(IndexRecord::default()).await {
+            Err(IndexError::InvalidAppendIdx) => {}
+            _ => assert!(
+                false,
+                "Wrong result returned when appending IndexRecord with invalid append index"
+            ),
+        }
+
         _test_index_contains_records(&index, _index_records_test_data::<H>(), _RECORDS.len()).await;
 
-        let mut index = if S::is_persistent() {
+        let index = if S::is_persistent() {
             index.close().await.unwrap();
-            Index::with_storage(storage_provider().await.0)
+            Index::<S, Idx>::with_storage(storage_provider().await.0)
                 .await
                 .unwrap()
         } else {
-            Index::with_storage(index.into_storage()).await.unwrap()
+            Index::<S, Idx>::with_storage(index.into_storage())
+                .await
+                .unwrap()
         };
+
+        let mut index =
+            Index::<S, Idx>::with_storage_and_base_index(index.into_storage(), Idx::zero())
+                .await
+                .unwrap();
 
         _test_index_contains_records(&index, _index_records_test_data::<H>(), _RECORDS.len()).await;
 
