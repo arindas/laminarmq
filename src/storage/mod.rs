@@ -1,9 +1,8 @@
 use async_trait::async_trait;
 use bytes::Buf;
-use futures_core::{Future, Stream};
-use futures_lite::AsyncWrite;
-use num::{cast::FromPrimitive, CheckedSub, ToPrimitive, Unsigned};
-use std::{iter::Sum, ops::Deref};
+use futures_lite::{AsyncWrite, Stream, StreamExt};
+use num::{cast::FromPrimitive, CheckedSub, ToPrimitive, Unsigned, Zero};
+use std::{future::Future, iter::Sum, ops::Deref};
 
 #[async_trait(?Send)]
 pub trait AsyncIndexedRead {
@@ -104,6 +103,53 @@ pub trait Storage:
         W: FnMut(&'byte_stream mut S, &'storage mut Self::Write) -> F;
 
     /// Reads `size` number of bytes from the given `position`.
+    async fn read(
+        &self,
+        position: &Self::Position,
+        size: &Self::Size,
+    ) -> Result<Self::Content, Self::Error>;
+
+    fn is_persistent() -> bool;
+}
+
+#[async_trait(?Send)]
+pub trait AsyncStorage:
+    AsyncTruncate<Mark = Self::Position, TruncError = Self::Error>
+    + AsyncConsume<ConsumeError = Self::Error>
+    + Sizable<Size = Self::Position>
+{
+    type Content: Buf;
+
+    type Position: Unsigned + FromPrimitive + Sum + Ord;
+
+    type Error: std::error::Error;
+
+    async fn append_slice(
+        &mut self,
+        slice: &[u8],
+    ) -> Result<(Self::Position, Self::Size), Self::Error>;
+
+    async fn append<XBuf, XE, X>(
+        &mut self,
+        buf_stream: &mut X,
+    ) -> Result<(Self::Position, Self::Size), Self::Error>
+    where
+        XBuf: Deref<Target = [u8]>,
+        X: Stream<Item = Result<XBuf, XE>> + Unpin,
+        Self::Error: From<XE>,
+    {
+        let (mut bytes_written, position) = (Self::Size::zero(), self.size().into());
+
+        while let Some(buf) = buf_stream.next().await {
+            let (_, buf_bytes_written) =
+                self.append_slice(buf.map_err(Into::into)?.deref()).await?;
+
+            bytes_written = bytes_written + buf_bytes_written;
+        }
+
+        Ok((position, bytes_written))
+    }
+
     async fn read(
         &self,
         position: &Self::Position,
