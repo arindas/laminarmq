@@ -1,7 +1,8 @@
+use super::common::stream::StreamBroken;
 use async_trait::async_trait;
 use bytes::Buf;
 use futures_lite::{AsyncWrite, Stream, StreamExt};
-use num::{cast::FromPrimitive, CheckedSub, ToPrimitive, Unsigned, Zero};
+use num::{cast::FromPrimitive, CheckedSub, ToPrimitive, Unsigned};
 use std::{future::Future, iter::Sum, ops::Deref};
 
 #[async_trait(?Send)]
@@ -122,7 +123,7 @@ pub trait AsyncStorage:
 
     type Position: Unsigned + FromPrimitive + Sum + Ord;
 
-    type Error: std::error::Error;
+    type Error: std::error::Error + From<StreamBroken>;
 
     async fn append_slice(
         &mut self,
@@ -136,18 +137,25 @@ pub trait AsyncStorage:
     where
         XBuf: Deref<Target = [u8]>,
         X: Stream<Item = Result<XBuf, XE>> + Unpin,
-        Self::Error: From<XE>,
     {
-        let (mut bytes_written, position) = (Self::Size::zero(), self.size().into());
+        let (mut bytes_written, pos) = (num::zero(), self.size());
 
         while let Some(buf) = buf_stream.next().await {
-            let (_, buf_bytes_written) =
-                self.append_slice(buf.map_err(Into::into)?.deref()).await?;
-
-            bytes_written = bytes_written + buf_bytes_written;
+            match match buf {
+                Ok(buf) => self.append_slice(buf.deref()).await,
+                _ => Err(StreamBroken.into()),
+            } {
+                Ok((_, buf_bytes_w)) => {
+                    bytes_written = bytes_written + buf_bytes_w;
+                }
+                Err(error) => {
+                    self.truncate(&pos).await?;
+                    return Err(error);
+                }
+            };
         }
 
-        Ok((position, bytes_written))
+        Ok((pos, bytes_written))
     }
 
     async fn read(

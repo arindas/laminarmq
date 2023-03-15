@@ -3,6 +3,19 @@
 #[doc(hidden)]
 pub mod cache;
 
+pub mod stream {
+    #[derive(Debug)]
+    pub struct StreamBroken;
+
+    impl std::fmt::Display for StreamBroken {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{self:?}")
+        }
+    }
+
+    impl std::error::Error for StreamBroken {}
+}
+
 pub mod split {
     //! Module providing a splittable slice abstraction.
     use std::ops::Deref;
