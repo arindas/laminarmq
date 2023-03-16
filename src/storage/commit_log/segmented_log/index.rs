@@ -1,10 +1,8 @@
-use crate::storage::common::write_stream;
-use crate::storage::Sizable;
-
-use super::super::super::{AsyncConsume, AsyncIndexedRead, AsyncTruncate};
-use super::{super::super::Storage, store::common::RecordHeader};
+use super::{
+    super::super::{AsyncConsume, AsyncIndexedRead, AsyncTruncate, Sizable, Storage},
+    store::common::RecordHeader,
+};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use futures_util::stream;
 use num::{CheckedSub, FromPrimitive, ToPrimitive, Unsigned};
 use std::{
     io::{Cursor, Read, Write},
@@ -107,10 +105,8 @@ impl IndexRecord {
 
         self.write(&mut cursor).map_err(IndexError::IoError)?;
 
-        let mut stream = stream::iter(std::iter::once(&buffer as &[u8]));
-
         let (position, _) = dest
-            .append(&mut stream, &mut write_stream)
+            .append_slice(&buffer)
             .await
             .map_err(IndexError::StorageError)?;
 

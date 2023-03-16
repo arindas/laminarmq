@@ -70,7 +70,7 @@ where
 }
 
 pub(crate) mod test {
-    use super::{super::Storage, write_stream};
+    use super::super::Storage;
     use futures_lite::stream;
     use num::{FromPrimitive, One, Zero};
     use std::{fmt::Debug, future::Future, ops::Deref};
@@ -81,12 +81,11 @@ pub(crate) mod test {
         F: Future<Output = S>,
         SP: Fn() -> F,
         S: Storage,
-        S::Position: Zero,
-        S::Size: One + Zero + Debug,
-        S::Position: From<S::Size> + Debug,
+        S::Position: One + Zero,
+        S::Position: Debug,
     {
         const REQ_BYTES: &[u8] = b"Hello World!";
-        let mut req_body = stream::iter(std::iter::once(REQ_BYTES));
+        let mut req_body = stream::iter(std::iter::once(Ok::<&[u8], ()>(REQ_BYTES)));
 
         let mut storage = storage_provider().await;
 
@@ -105,30 +104,32 @@ pub(crate) mod test {
 
         let write_position: S::Position = storage.size().into();
 
-        let (position_0, bytes_written_0) = storage
-            .append(&mut req_body, &mut write_stream)
-            .await
-            .unwrap();
+        let (position_0, bytes_written_0) = storage.append(&mut req_body).await.unwrap();
 
         assert_eq!(position_0, write_position);
-        assert_eq!(bytes_written_0, REQ_BYTES.len());
+        assert_eq!(
+            bytes_written_0,
+            S::Position::from_usize(REQ_BYTES.len()).unwrap()
+        );
 
         const REPEAT: usize = 5;
-        let mut repeated_req_body = stream::iter([REQ_BYTES; REPEAT]);
+        let mut repeated_req_body = stream::iter([Ok::<&[u8], ()>(REQ_BYTES); REPEAT]);
 
         let write_position: S::Position = storage.size().into();
 
-        let (position_1, bytes_written_1) = storage
-            .append(&mut repeated_req_body, &mut write_stream)
-            .await
-            .unwrap();
+        let (position_1, bytes_written_1) = storage.append(&mut repeated_req_body).await.unwrap();
 
         assert_eq!(position_1, write_position);
-        assert_eq!(bytes_written_1, REQ_BYTES.len() * REPEAT);
+        let expected_bytes_written = REQ_BYTES.len() * REPEAT;
+        assert_eq!(
+            bytes_written_1,
+            S::Position::from_usize(expected_bytes_written).unwrap()
+        );
 
+        let expected_storage_size = REQ_BYTES.len() * (1 + REPEAT);
         assert_eq!(
             storage.size(),
-            S::Size::from_usize(REQ_BYTES.len() * (1 + REPEAT)).unwrap()
+            S::Size::from_usize(expected_storage_size).unwrap()
         );
 
         let mut storage = if S::is_persistent() {
@@ -138,29 +139,21 @@ pub(crate) mod test {
             storage
         };
 
-        let read_bytes = storage
-            .read(&position_0, &S::Size::from_usize(bytes_written_0).unwrap())
-            .await
-            .unwrap();
+        let read_bytes = storage.read(&position_0, &bytes_written_0).await.unwrap();
         assert_eq!(read_bytes.deref(), REQ_BYTES);
 
-        let read_bytes = storage
-            .read(&position_1, &S::Size::from_usize(bytes_written_1).unwrap())
-            .await
-            .unwrap();
+        let read_bytes = storage.read(&position_1, &bytes_written_1).await.unwrap();
+        let read_bytes_buf = read_bytes.deref();
         for i in 0..REPEAT {
             let (lo, hi) = (i * REQ_BYTES.len(), (i + 1) * REQ_BYTES.len());
-            assert_eq!(REQ_BYTES, &read_bytes[lo..hi]);
+            assert_eq!(REQ_BYTES, &read_bytes_buf[lo..hi]);
         }
 
         storage.truncate(&position_1).await.unwrap();
 
         assert!(storage.read(&position_1, &S::Size::one()).await.is_err());
 
-        let read_bytes = storage
-            .read(&position_0, &S::Size::from_usize(bytes_written_0).unwrap())
-            .await
-            .unwrap();
+        let read_bytes = storage.read(&position_0, &bytes_written_0).await.unwrap();
         assert_eq!(read_bytes.deref(), REQ_BYTES);
 
         assert_eq!(

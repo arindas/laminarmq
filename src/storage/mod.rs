@@ -1,9 +1,8 @@
 use super::common::stream::StreamBroken;
 use async_trait::async_trait;
-use bytes::Buf;
-use futures_lite::{AsyncWrite, Stream, StreamExt};
+use futures_lite::{Stream, StreamExt};
 use num::{cast::FromPrimitive, CheckedSub, ToPrimitive, Unsigned};
-use std::{future::Future, iter::Sum, ops::Deref};
+use std::{iter::Sum, ops::Deref};
 
 #[async_trait(?Send)]
 pub trait AsyncIndexedRead {
@@ -69,59 +68,15 @@ pub trait Sizable {
     fn size(&self) -> Self::Size;
 }
 
-/// A storage media. This abstraction supports random reads and linear writes.
 #[async_trait(?Send)]
 pub trait Storage:
     AsyncTruncate<Mark = Self::Position, TruncError = Self::Error>
     + AsyncConsume<ConsumeError = Self::Error>
-    + Sizable
+    + Sizable<Size = Self::Position>
 {
     type Content: Deref<Target = [u8]>;
 
-    type Write: AsyncWrite + Unpin;
-
-    type Position: Unsigned + FromPrimitive;
-
-    type Error: std::error::Error;
-
-    /// Appends a stream of byte buffers at the end of the storage. Using streams enable us to
-    /// append data when all of the data is not available all at once. (e.g. when parsing a
-    /// HTTP request body).
-    ///
-    /// ## Params:
-    /// - `byte_stream`: Stream of byte buffers to write.
-    /// - `write_fn`: function to use for writing the provided stream to our underlying
-    /// [`AsyncWrite`] implementation.
-    async fn append<'storage, 'byte_stream, B, S, W, F, T>(
-        &'storage mut self,
-        byte_stream: &'byte_stream mut S,
-        write_fn: &mut W,
-    ) -> Result<(Self::Position, T), Self::Error>
-    where
-        B: Buf,
-        S: Stream<Item = B> + Unpin,
-        F: Future<Output = std::io::Result<T>>,
-        W: FnMut(&'byte_stream mut S, &'storage mut Self::Write) -> F;
-
-    /// Reads `size` number of bytes from the given `position`.
-    async fn read(
-        &self,
-        position: &Self::Position,
-        size: &Self::Size,
-    ) -> Result<Self::Content, Self::Error>;
-
-    fn is_persistent() -> bool;
-}
-
-#[async_trait(?Send)]
-pub trait AsyncStorage:
-    AsyncTruncate<Mark = Self::Position, TruncError = Self::Error>
-    + AsyncConsume<ConsumeError = Self::Error>
-    + Sizable<Size = Self::Position>
-{
-    type Content: Buf;
-
-    type Position: Unsigned + FromPrimitive + Sum + Ord;
+    type Position: Unsigned + FromPrimitive + ToPrimitive + Sum + Ord;
 
     type Error: std::error::Error + From<StreamBroken>;
 

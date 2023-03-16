@@ -1,9 +1,9 @@
-use self::common::{write_record_bytes, RecordHeader};
+use self::common::RecordHeader;
 use super::super::super::{AsyncConsume, AsyncTruncate, Sizable, Storage};
 use async_trait::async_trait;
-use bytes::Buf;
 use futures_core::Stream;
-use std::{error::Error as StdError, hash::Hasher, marker::PhantomData};
+use futures_lite::StreamExt;
+use std::{error::Error as StdError, hash::Hasher, marker::PhantomData, ops::Deref};
 
 pub mod common {
     use std::{
@@ -144,6 +144,12 @@ macro_rules! u64_as_size {
     };
 }
 
+macro_rules! size_as_u64 {
+    ($size:ident, $Size:ty) => {
+        <$Size as num::ToPrimitive>::to_u64(&$size).ok_or(StoreError::IncompatibleSizeType)
+    };
+}
+
 impl<S, H> Store<S, H>
 where
     S: Storage,
@@ -174,21 +180,36 @@ where
         Ok(record_bytes)
     }
 
-    pub async fn append<ReqBuf, ReqBody>(
+    pub async fn append<XBuf, X, XE>(
         &mut self,
-        stream: &mut ReqBody,
+        stream: X,
     ) -> Result<(S::Position, RecordHeader), StoreError<S::Error>>
     where
-        ReqBuf: Buf,
-        ReqBody: Stream<Item = ReqBuf> + Unpin,
+        XBuf: Deref<Target = [u8]>,
+        X: Stream<Item = Result<XBuf, XE>> + Unpin,
     {
-        self.storage
-            .append(
-                stream,
-                &mut write_record_bytes::<H, ReqBuf, ReqBody, S::Write>,
-            )
+        let mut hasher = H::default();
+
+        let mut stream = stream.map(|x| match x {
+            Ok(x) => {
+                hasher.write(&x);
+                Ok(x)
+            }
+            Err(e) => Err(e),
+        });
+
+        let (position, bytes_written) = self
+            .storage
+            .append(&mut stream)
             .await
-            .map_err(StoreError::StorageError)
+            .map_err(StoreError::StorageError)?;
+
+        let record_header = RecordHeader {
+            checksum: hasher.finish(),
+            length: size_as_u64!(bytes_written, S::Size)?,
+        };
+
+        Ok((position, record_header))
     }
 }
 
@@ -283,7 +304,7 @@ pub(crate) mod test {
             let record: &[u8] = record;
 
             let record_append_info = store
-                .append(&mut futures_lite::stream::once(record))
+                .append(futures_lite::stream::once(Ok::<&[u8], ()>(record)))
                 .await
                 .unwrap();
 

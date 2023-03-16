@@ -11,7 +11,6 @@ use super::{
     CommitLog,
 };
 use async_trait::async_trait;
-use bytes::Buf;
 use futures_core::Stream;
 use num::{CheckedSub, FromPrimitive, ToPrimitive, Unsigned};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -436,7 +435,7 @@ where
 }
 
 #[async_trait(?Send)]
-impl<S, M, H, Idx, SD, SSP, XBuf, X> CommitLog<MetaWithIdx<M, Idx>, X, S::Content>
+impl<S, M, H, Idx, SD, SSP, XBuf, X, XE> CommitLog<MetaWithIdx<M, Idx>, X, S::Content>
     for SegmentedLog<S, M, H, Idx, S::Size, SD, SSP>
 where
     S: Storage,
@@ -449,8 +448,8 @@ where
     M: Default + Serialize + DeserializeOwned,
     SD: SerDe,
     SSP: SegmentStorageProvider<S, Idx>,
-    XBuf: Buf + From<SD::SerBytes>,
-    X: Stream<Item = XBuf> + Unpin,
+    XBuf: Deref<Target = [u8]>,
+    X: Stream<Item = Result<XBuf, XE>> + Unpin,
 {
     type Error = LogError<S, SD>;
 

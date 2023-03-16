@@ -8,7 +8,6 @@ use super::{
     MetaWithIdx, Record,
 };
 use async_trait::async_trait;
-use bytes::Buf;
 use futures_core::Stream;
 use futures_lite::StreamExt;
 use num::{CheckedSub, FromPrimitive, ToPrimitive, Unsigned};
@@ -172,13 +171,13 @@ where
     Idx: Serialize,
     SD: SerDe,
 {
-    async fn append_serialized_record<XBuf, X>(
+    async fn append_serialized_record<XBuf, X, XE>(
         &mut self,
-        stream: &mut X,
+        stream: X,
     ) -> Result<Idx, SegmentOpError<S, SD>>
     where
-        XBuf: Buf,
-        X: Stream<Item = XBuf> + Unpin,
+        XBuf: Deref<Target = [u8]>,
+        X: Stream<Item = Result<XBuf, XE>> + Unpin,
     {
         let write_index = self.index.highest_index();
 
@@ -203,13 +202,13 @@ where
         Ok(write_index)
     }
 
-    pub async fn append<XBuf, X>(
+    pub async fn append<XBuf, X, XE>(
         &mut self,
         record: Record<M, Idx, X>,
     ) -> Result<Idx, SegmentOpError<S, SD>>
     where
-        XBuf: Buf + From<SD::SerBytes>,
-        X: Stream<Item = XBuf> + Unpin,
+        XBuf: Deref<Target = [u8]>,
+        X: Stream<Item = Result<XBuf, XE>> + Unpin,
     {
         if self.is_maxed() {
             return Err(SegmentError::SegmentMaxed);
@@ -222,10 +221,34 @@ where
 
         let metadata_bytes = SD::serialize(&metadata).map_err(SegmentError::SerializationError)?;
 
-        let stream = futures_lite::stream::once(metadata_bytes.into());
-        let mut stream = stream.chain(record.value);
+        enum SBuf<XBuf, YBuf> {
+            XBuf(XBuf),
+            YBuf(YBuf),
+        }
 
-        self.append_serialized_record(&mut stream).await
+        impl<XBuf, YBuf> Deref for SBuf<XBuf, YBuf>
+        where
+            XBuf: Deref<Target = [u8]>,
+            YBuf: Deref<Target = [u8]>,
+        {
+            type Target = [u8];
+
+            fn deref(&self) -> &Self::Target {
+                match &self {
+                    SBuf::XBuf(x_buf) => x_buf.deref(),
+                    SBuf::YBuf(y_buf) => y_buf.deref(),
+                }
+            }
+        }
+
+        let stream = futures_lite::stream::once(Ok(SBuf::YBuf(metadata_bytes)));
+        let stream = stream.chain(
+            record
+                .value
+                .map(|x_buf| x_buf.map(|x_buf| SBuf::XBuf(x_buf))),
+        );
+
+        self.append_serialized_record(stream).await
     }
 }
 
@@ -258,11 +281,11 @@ where
 
         let metadata_bytes = SD::serialize(&metadata).map_err(SegmentError::SerializationError)?;
 
-        let metadata_stream = futures_lite::stream::once(metadata_bytes.deref());
-        let value_stream = futures_lite::stream::once(record.value.deref());
-        let mut stream = metadata_stream.chain(value_stream);
+        let metadata_stream = futures_lite::stream::once(Ok::<&[u8], ()>(metadata_bytes.deref()));
+        let value_stream = futures_lite::stream::once(Ok::<&[u8], ()>(record.value.deref()));
+        let stream = metadata_stream.chain(value_stream);
 
-        self.append_serialized_record(&mut stream).await
+        self.append_serialized_record(stream).await
     }
 }
 

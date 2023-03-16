@@ -1,12 +1,10 @@
-use super::super::super::{AsyncConsume, AsyncTruncate, Sizable, Storage};
+use super::super::super::{AsyncConsume, AsyncTruncate, Sizable, Storage, StreamBroken};
 use async_trait::async_trait;
-use bytes::Buf;
-use futures_core::{Future, Stream};
 use std::{
     io::{
         self, Cursor,
         ErrorKind::{self, UnexpectedEof},
-        Read, Seek, SeekFrom,
+        Read, Seek, SeekFrom, Write,
     },
     ops::Deref,
 };
@@ -33,6 +31,7 @@ impl Sizable for InMemStorage {
 #[derive(Debug)]
 pub enum InMemStorageError {
     IoError(io::Error),
+    StreamBroken,
 }
 
 impl std::fmt::Display for InMemStorageError {
@@ -45,6 +44,12 @@ impl std::error::Error for InMemStorageError {}
 impl From<ErrorKind> for InMemStorageError {
     fn from(kind: ErrorKind) -> Self {
         Self::IoError(io::Error::from(kind))
+    }
+}
+
+impl From<StreamBroken> for InMemStorageError {
+    fn from(_: StreamBroken) -> Self {
+        Self::StreamBroken
     }
 }
 
@@ -78,29 +83,21 @@ impl AsyncConsume for InMemStorage {
 impl Storage for InMemStorage {
     type Content = Vec<u8>;
 
-    type Write = Vec<u8>;
-
     type Position = usize;
 
     type Error = InMemStorageError;
 
-    async fn append<'storage, 'byte_stream, B, S, W, F, T>(
-        &'storage mut self,
-        byte_stream: &'byte_stream mut S,
-        write_fn: &mut W,
-    ) -> Result<(Self::Position, T), Self::Error>
-    where
-        B: Buf,
-        S: Stream<Item = B> + Unpin,
-        F: Future<Output = io::Result<T>>,
-        W: FnMut(&'byte_stream mut S, &'storage mut Self::Write) -> F,
-    {
+    async fn append_slice(
+        &mut self,
+        slice: &[u8],
+    ) -> Result<(Self::Position, Self::Size), Self::Error> {
         let position = self.size();
-        let write_fn_returned_value = write_fn(byte_stream, &mut self.storage)
-            .await
+
+        self.storage
+            .write_all(slice)
             .map_err(InMemStorageError::IoError)?;
 
-        Ok((position, write_fn_returned_value))
+        Ok((position, slice.len()))
     }
 
     async fn read(
