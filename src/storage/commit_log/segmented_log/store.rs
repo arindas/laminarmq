@@ -12,10 +12,6 @@ pub mod common {
     };
 
     use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-    use bytes::Buf;
-
-    use futures_core::Stream;
-    use futures_lite::{AsyncWrite, AsyncWriteExt, StreamExt};
 
     /// Extension used by backing files for [`Store`](super::Store) instances.
     pub const STORE_FILE_EXTENSION: &str = "store";
@@ -61,36 +57,6 @@ pub mod common {
                 length: record_bytes.len() as u64,
             }
         }
-    }
-
-    pub async fn write_record_bytes<H, B, S, W>(
-        buf_stream: &mut S,
-        writer: &mut W,
-    ) -> std::io::Result<RecordHeader>
-    where
-        B: Buf,
-        S: Stream<Item = B> + Unpin,
-        W: AsyncWrite + Unpin,
-        H: Hasher + Default,
-    {
-        let (mut hasher, mut length) = (H::default(), 0_usize);
-        while let Some(mut buf) = buf_stream.next().await {
-            while buf.has_remaining() {
-                let chunk = buf.chunk();
-
-                writer.write_all(chunk).await?;
-                hasher.write(chunk);
-
-                let chunk_len = chunk.len();
-                buf.advance(chunk_len);
-                length += chunk_len;
-            }
-        }
-
-        Ok(RecordHeader {
-            checksum: hasher.finish(),
-            length: length as u64,
-        })
     }
 }
 
