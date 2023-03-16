@@ -13,6 +13,7 @@ use futures_lite::StreamExt;
 use num::{CheckedSub, FromPrimitive, ToPrimitive, Unsigned};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
+    convert::Infallible,
     hash::Hasher,
     marker::PhantomData,
     ops::Deref,
@@ -281,8 +282,10 @@ where
 
         let metadata_bytes = SD::serialize(&metadata).map_err(SegmentError::SerializationError)?;
 
-        let metadata_stream = futures_lite::stream::once(Ok::<&[u8], ()>(metadata_bytes.deref()));
-        let value_stream = futures_lite::stream::once(Ok::<&[u8], ()>(record.value.deref()));
+        let metadata_stream =
+            futures_lite::stream::once(Ok::<&[u8], Infallible>(metadata_bytes.deref()));
+        let value_stream =
+            futures_lite::stream::once(Ok::<&[u8], Infallible>(record.value.deref()));
         let stream = metadata_stream.chain(value_stream);
 
         self.append_serialized_record(stream).await
