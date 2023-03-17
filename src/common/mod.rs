@@ -99,7 +99,7 @@ pub mod http {
     where
         T: Deref<Target = [u8]>,
     {
-        pub fn with_deref(deref_value: T) -> Self {
+        pub fn with_deref_value(deref_value: T) -> Self {
             BufToHttpBody::new(Cursor::new(DerefToAsRef::new(deref_value)))
         }
     }
@@ -112,7 +112,7 @@ pub mod http {
 
         struct A;
 
-        const VALUE: &[u8] = b"Hello World from common::http!";
+        const VALUE: &[u8] = b"Hello World from common::http::test!";
 
         impl Deref for A {
             type Target = [u8];
@@ -126,7 +126,7 @@ pub mod http {
         fn test_buf_to_http_body() {
             futures_lite::future::block_on(async {
                 assert_eq!(
-                    to_bytes(BufToHttpBody::with_deref(A))
+                    to_bytes(BufToHttpBody::with_deref_value(A))
                         .await
                         .unwrap()
                         .deref(),
