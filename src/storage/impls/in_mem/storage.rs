@@ -1,22 +1,30 @@
 use super::super::super::{AsyncConsume, AsyncTruncate, Sizable, Storage, StreamBroken};
 use async_trait::async_trait;
 use std::{
+    cell::RefCell,
     io::{
         self, Cursor,
         ErrorKind::{self, UnexpectedEof},
         Read, Seek, SeekFrom, Write,
     },
     ops::Deref,
+    rc::Rc,
 };
 
 #[derive(Default)]
 pub struct InMemStorage {
-    storage: Vec<u8>,
+    storage: Rc<RefCell<Vec<u8>>>,
+    size: usize,
 }
 
 impl InMemStorage {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(storage: Rc<RefCell<Vec<u8>>>) -> Result<Self, InMemStorageError> {
+        let size = storage
+            .try_borrow()
+            .map_err(|_| InMemStorageError::BorrowError)?
+            .len();
+
+        Ok(Self { storage, size })
     }
 }
 
@@ -24,7 +32,7 @@ impl Sizable for InMemStorage {
     type Size = usize;
 
     fn size(&self) -> Self::Size {
-        self.storage.len()
+        self.size
     }
 }
 
@@ -32,6 +40,8 @@ impl Sizable for InMemStorage {
 pub enum InMemStorageError {
     IoError(io::Error),
     StreamBroken,
+    BorrowError,
+    StorageNotFound,
 }
 
 impl std::fmt::Display for InMemStorageError {
@@ -59,8 +69,15 @@ impl AsyncTruncate for InMemStorage {
 
     type TruncError = InMemStorageError;
 
-    async fn truncate(&mut self, pos: &Self::Mark) -> Result<(), Self::TruncError> {
-        self.storage.truncate(*pos);
+    async fn truncate(&mut self, position: &Self::Mark) -> Result<(), Self::TruncError> {
+        let mut storage_vec = self
+            .storage
+            .try_borrow_mut()
+            .map_err(|_| InMemStorageError::BorrowError)?;
+
+        storage_vec.truncate(*position);
+
+        self.size = storage_vec.len();
 
         Ok(())
     }
@@ -91,11 +108,18 @@ impl Storage for InMemStorage {
         &mut self,
         slice: &[u8],
     ) -> Result<(Self::Position, Self::Size), Self::Error> {
-        let position = self.size();
+        let position = self.size;
 
-        self.storage
+        let mut storage_vec = self
+            .storage
+            .try_borrow_mut()
+            .map_err(|_| InMemStorageError::BorrowError)?;
+
+        storage_vec
             .write_all(slice)
             .map_err(InMemStorageError::IoError)?;
+
+        self.size = storage_vec.len();
 
         Ok((position, slice.len()))
     }
@@ -105,7 +129,12 @@ impl Storage for InMemStorage {
         position: &Self::Position,
         size: &Self::Size,
     ) -> Result<Self::Content, Self::Error> {
-        let mut cursor = Cursor::new(self.storage.deref());
+        let storage_vec = self
+            .storage
+            .try_borrow()
+            .map_err(|_| InMemStorageError::BorrowError)?;
+
+        let mut cursor = Cursor::new(storage_vec.deref().deref());
 
         cursor
             .seek(SeekFrom::Start(*position as u64))

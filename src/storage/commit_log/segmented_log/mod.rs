@@ -111,7 +111,7 @@ where
 {
     pub async fn new(
         config: Config<Idx, S::Size>,
-        segment_storage_provider: SSP,
+        mut segment_storage_provider: SSP,
     ) -> Result<Self, LogError<S, SD>> {
         let mut segment_base_indices = segment_storage_provider
             .base_indices_of_stored_segments()
@@ -131,7 +131,7 @@ where
         for segment_base_index in segment_base_indices {
             read_segments.push(
                 Segment::with_segment_storage_provider_config_and_base_index(
-                    &segment_storage_provider,
+                    &mut segment_storage_provider,
                     config.segment_config,
                     segment_base_index,
                 )
@@ -156,7 +156,7 @@ where
 macro_rules! new_segment {
     ($segmented_log:ident, $base_index:ident) => {
         Segment::with_segment_storage_provider_config_and_base_index(
-            &$segmented_log._segment_storage_provider,
+            &mut $segmented_log._segment_storage_provider,
             $segmented_log._config.segment_config,
             $base_index,
         )

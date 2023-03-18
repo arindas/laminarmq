@@ -368,7 +368,7 @@ where
 {
     async fn base_indices_of_stored_segments(&self) -> Result<Vec<Idx>, S::Error>;
 
-    async fn obtain(&self, idx: &Idx) -> Result<SegmentStorage<S>, S::Error>;
+    async fn obtain(&mut self, idx: &Idx) -> Result<SegmentStorage<S>, S::Error>;
 }
 
 impl<S, M, H, Idx, SD> Segment<S, M, H, Idx, S::Size, SD>
@@ -379,7 +379,7 @@ where
     SD: SerDe,
 {
     pub async fn with_segment_storage_provider_config_and_base_index<SSP>(
-        segment_storage_provider: &SSP,
+        segment_storage_provider: &mut SSP,
         config: Config<S::Size>,
         base_index: Idx,
     ) -> Result<Self, SegmentError<S::Error, SD::Error>>
