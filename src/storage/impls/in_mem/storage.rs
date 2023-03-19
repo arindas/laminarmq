@@ -87,7 +87,12 @@ impl AsyncTruncate for InMemStorage {
 impl AsyncConsume for InMemStorage {
     type ConsumeError = InMemStorageError;
 
-    async fn remove(self) -> Result<(), Self::ConsumeError> {
+    async fn remove(mut self) -> Result<(), Self::ConsumeError> {
+        self.storage
+            .try_borrow_mut()
+            .map_err(|_| InMemStorageError::BorrowError)?
+            .clear();
+
         Ok(())
     }
 
