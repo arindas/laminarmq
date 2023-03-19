@@ -5,9 +5,11 @@ use super::{
 use async_trait::async_trait;
 use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
 
+type Mem = Rc<RefCell<Vec<u8>>>;
+
 #[derive(Default)]
 pub struct InMemSegmentStorageProvider<Idx> {
-    _storage_map: BTreeMap<Idx, (Rc<RefCell<Vec<u8>>>, Rc<RefCell<Vec<u8>>>)>,
+    _storage_map: BTreeMap<Idx, (Mem, Mem)>,
 }
 
 #[async_trait(?Send)]
@@ -42,5 +44,25 @@ where
             index: InMemStorage::new(index.clone())?,
             store: InMemStorage::new(store.clone())?,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        super::super::super::{super::common::serde, commit_log::segmented_log::segment},
+        *,
+    };
+    use std::marker::PhantomData;
+
+    #[test]
+    fn test_segment_read_append_truncate_consistency() {
+        futures_lite::future::block_on(async {
+            segment::test::_test_segment_read_append_truncate(
+                InMemSegmentStorageProvider::<u32>::default(),
+                PhantomData::<((), crc32fast::Hasher, serde::bincode::BinCode)>,
+            )
+            .await;
+        });
     }
 }

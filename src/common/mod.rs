@@ -31,7 +31,7 @@ pub mod ref_ops {
         T: std::ops::Deref<Target = [X]>,
     {
         fn as_ref(&self) -> &[X] {
-            self.0.deref().as_ref()
+            self.0.deref()
         }
     }
 }

@@ -47,7 +47,7 @@ pub(crate) mod test {
     use super::super::Storage;
     use futures_lite::stream;
     use num::{FromPrimitive, One, Zero};
-    use std::{fmt::Debug, future::Future, ops::Deref};
+    use std::{convert::Infallible, fmt::Debug, future::Future, ops::Deref};
 
     pub(crate) async fn _test_storage_read_append_truncate_consistency<SP, F, S>(
         storage_provider: SP,
@@ -59,7 +59,7 @@ pub(crate) mod test {
         S::Position: Debug,
     {
         const REQ_BYTES: &[u8] = b"Hello World!";
-        let mut req_body = stream::iter(std::iter::once(Ok::<&[u8], ()>(REQ_BYTES)));
+        let mut req_body = stream::iter(std::iter::once(Ok::<&[u8], Infallible>(REQ_BYTES)));
 
         let mut storage = storage_provider().await;
 
@@ -76,7 +76,7 @@ pub(crate) mod test {
             .await
             .is_err());
 
-        let write_position: S::Position = storage.size().into();
+        let write_position = storage.size();
 
         let (position_0, bytes_written_0) = storage.append(&mut req_body).await.unwrap();
 
@@ -87,9 +87,9 @@ pub(crate) mod test {
         );
 
         const REPEAT: usize = 5;
-        let mut repeated_req_body = stream::iter([Ok::<&[u8], ()>(REQ_BYTES); REPEAT]);
+        let mut repeated_req_body = stream::iter([Ok::<&[u8], Infallible>(REQ_BYTES); REPEAT]);
 
-        let write_position: S::Position = storage.size().into();
+        let write_position = storage.size();
 
         let (position_1, bytes_written_1) = storage.append(&mut repeated_req_body).await.unwrap();
 

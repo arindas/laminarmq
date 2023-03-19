@@ -14,6 +14,7 @@ use num::{CheckedSub, FromPrimitive, ToPrimitive, Unsigned};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
     convert::Infallible,
+    fmt::Debug,
     hash::Hasher,
     marker::PhantomData,
     ops::Deref,
@@ -146,7 +147,7 @@ where
             .map_err(SegmentError::StoreError)?;
 
         let metadata_size = SD::serialized_size(&MetaWithIdx::<M, Idx> {
-            index: None,
+            index: Some(self.lowest_index()),
             metadata: M::default(),
         })
         .map_err(SegmentError::SerializationError)?;
@@ -398,5 +399,190 @@ where
         let store = Store::<S, H>::new(segment_storage.store);
 
         Ok(Self::new(index, store, config))
+    }
+}
+
+pub(crate) mod test {
+
+    use super::{
+        super::{
+            super::super::common::indexed_read_stream, index::INDEX_RECORD_LENGTH,
+            store::test::_RECORDS,
+        },
+        *,
+    };
+    use num::Zero;
+    use std::fmt::Debug;
+
+    async fn _test_indexed_read_contains_expected_records<R, Idx, M, X, I, Y>(
+        indexed_read: &R,
+        expected_records: I,
+        expected_record_count: usize,
+    ) where
+        R: AsyncIndexedRead<Value = Record<M, Idx, X>>,
+        X: Deref<Target = [u8]>,
+        I: Iterator<Item = Y>,
+        Y: Deref<Target = [u8]>,
+    {
+        let count = futures_lite::stream::iter(expected_records)
+            .zip(indexed_read_stream(indexed_read, ..).await)
+            .map(|(y, record)| {
+                assert_eq!(y.deref(), record.value.deref());
+                Some(())
+            })
+            .count()
+            .await;
+
+        assert_eq!(count, expected_record_count);
+    }
+
+    pub(crate) async fn _test_segment_read_append_truncate<S, M, H, Idx, SD, SSP>(
+        mut _segment_storage_provider: SSP,
+        _: PhantomData<(M, H, SD)>,
+    ) where
+        S: Storage,
+        S::Size: FromPrimitive + Copy,
+        S::Content: SplitAt<u8>,
+        S::Position: ToPrimitive + Debug,
+        M: Default + Serialize + DeserializeOwned + Clone,
+        H: Hasher + Default,
+        Idx: Unsigned + CheckedSub + FromPrimitive + ToPrimitive + Zero,
+        Idx: Ord + Copy + Debug,
+        Idx: Serialize + DeserializeOwned,
+        SD: SerDe,
+        SSP: SegmentStorageProvider<S, Idx>,
+    {
+        let segment_base_index = Idx::zero();
+
+        let metadata_serialized_size = SD::serialized_size(&MetaWithIdx {
+            metadata: M::default(),
+            index: Some(segment_base_index),
+        })
+        .unwrap();
+
+        let expected_store_size = _RECORDS.len() * (metadata_serialized_size + _RECORDS[0].len());
+        let expected_index_size = _RECORDS.len() * INDEX_RECORD_LENGTH;
+
+        let config = Config {
+            max_store_size: S::Size::from_usize(expected_store_size).unwrap(),
+            max_index_size: S::Size::from_usize(expected_index_size).unwrap(),
+        };
+
+        let mut segment = Segment::<S, M, H, Idx, S::Size, SD>::with_segment_storage_provider_config_and_base_index(
+            &mut _segment_storage_provider,
+            config,
+            segment_base_index,
+        )
+        .await
+        .unwrap();
+
+        for record in _RECORDS {
+            let record_value: &[u8] = record;
+            let record = Record {
+                metadata: MetaWithIdx {
+                    metadata: M::default(),
+                    index: Option::<Idx>::None,
+                },
+                value: record_value,
+            };
+            segment
+                .append_record_with_contiguous_bytes(&record)
+                .await
+                .unwrap();
+        }
+
+        assert!(
+            segment.is_maxed(),
+            "segment not maxed even after filling to max index and store capacity"
+        );
+
+        segment.close().await.unwrap();
+
+        let mut segment = Segment::<S, M, H, Idx, S::Size, SD>::with_segment_storage_provider_config_and_base_index(
+            &mut _segment_storage_provider,
+            config,
+            segment_base_index,
+        )
+        .await
+        .unwrap();
+
+        segment.read(&segment.lowest_index()).await.unwrap();
+
+        _test_indexed_read_contains_expected_records(
+            &segment,
+            _RECORDS.iter().cloned().map(|x| {
+                let x: &[u8] = x;
+                x
+            }),
+            _RECORDS.len(),
+        )
+        .await;
+
+        let truncate_index =
+            (segment.lowest_index() + segment.highest_index()) / Idx::from_u64(2).unwrap();
+
+        let expected_length_after_truncate = truncate_index - segment.lowest_index();
+
+        segment.truncate(&truncate_index).await.unwrap();
+
+        assert!(!segment.is_maxed());
+
+        assert_eq!(segment.len(), expected_length_after_truncate);
+
+        _test_indexed_read_contains_expected_records(
+            &segment,
+            _RECORDS.iter().cloned().map(|x| {
+                let x: &[u8] = x;
+                x
+            }),
+            segment.len().to_usize().unwrap(),
+        )
+        .await;
+
+        assert!(
+            segment.has_expired(Duration::from_micros(0)),
+            "segment not older than 0 micro second"
+        );
+
+        const TEST_RECORD_VALUE: &[u8] = b"Hello World!";
+
+        segment
+            .append(Record {
+                metadata: MetaWithIdx {
+                    metadata: M::default(),
+                    index: Some(segment.highest_index()),
+                },
+                value: futures_lite::stream::once(Ok::<&[u8], Infallible>(TEST_RECORD_VALUE)),
+            })
+            .await
+            .unwrap();
+
+        if let Err(SegmentError::InvalidAppendIdx) = segment
+            .append_record_with_contiguous_bytes(&Record {
+                metadata: MetaWithIdx {
+                    metadata: M::default(),
+                    index: Some(segment.lowest_index()),
+                },
+                value: &[0_u8] as &[u8],
+            })
+            .await
+        {
+        } else {
+            unreachable!("Wrong result type returned on append with invalid append index")
+        }
+
+        segment.remove().await.unwrap();
+
+        let segment = Segment::<S, M, H, Idx, S::Size, SD>::with_segment_storage_provider_config_and_base_index(
+            &mut _segment_storage_provider,
+            config,
+            segment_base_index,
+        )
+        .await
+        .unwrap();
+
+        assert!(segment.is_empty(), "segment contains data after removal");
+
+        segment.remove().await.unwrap();
     }
 }

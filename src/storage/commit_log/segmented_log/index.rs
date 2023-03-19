@@ -323,23 +323,23 @@ where
     type Mark = Idx;
 
     async fn truncate(&mut self, idx: &Self::Mark) -> Result<(), Self::TruncError> {
-        let index_record = self.read(idx).await?;
-
-        let position = index_record.position;
-        let position = u64_as_position!(position, S::Position)?;
-
-        self.storage
-            .truncate(&position)
-            .await
-            .map_err(IndexError::StorageError)?;
-
         let vec_index = self
             .normalize_index(idx)
             .ok_or(IndexError::IndexOutOfBounds)?
             .to_usize()
             .ok_or(IndexError::IncompatibleIdxType)?;
 
+        let truncate_position = (INDEX_RECORD_LENGTH * vec_index) as u64;
+        let truncate_position = u64_as_position!(truncate_position, S::Position)?;
+
+        self.storage
+            .truncate(&truncate_position)
+            .await
+            .map_err(IndexError::StorageError)?;
+
         self.index_records.truncate(vec_index);
+
+        self.next_index = *idx;
 
         Ok(())
     }
@@ -390,8 +390,8 @@ pub(crate) mod test {
                 )
                 .unwrap();
 
-                *index = *index + 1;
-                *position = *position + record_header.length as u32;
+                *index += 1;
+                *position += record_header.length as u32;
 
                 Some(index_record)
             })
@@ -433,7 +433,7 @@ pub(crate) mod test {
     {
         match Index::<S, Idx>::with_storage(storage_provider().await.0).await {
             Err(IndexError::NoBaseIndexFound) => {},
-            _ => assert!(false, "Wrong result returned when creating from empty storage without providing base index"),
+            _ => unreachable!("Wrong result returned when creating from empty storage without providing base index"),
         }
 
         let mut index = Index::with_storage_and_base_index(storage_provider().await.0, Idx::zero())
@@ -442,7 +442,7 @@ pub(crate) mod test {
 
         match index.read(&Idx::zero()).await {
             Err(IndexError::IndexOutOfBounds) => {}
-            _ => assert!(false, "Wrong result returned for read on empty Index."),
+            _ => unreachable!("Wrong result returned for read on empty Index."),
         }
 
         for index_record in _index_records_test_data::<H>() {
@@ -451,8 +451,7 @@ pub(crate) mod test {
 
         match index.append(IndexRecord::default()).await {
             Err(IndexError::InvalidAppendIdx) => {}
-            _ => assert!(
-                false,
+            _ => unreachable!(
                 "Wrong result returned when appending IndexRecord with invalid append index"
             ),
         }
@@ -483,6 +482,8 @@ pub(crate) mod test {
             .truncate(&Idx::from_usize(truncate_index).unwrap())
             .await
             .unwrap();
+
+        assert_eq!(index.len().to_usize().unwrap(), truncate_index);
 
         _test_index_contains_records(
             &index,

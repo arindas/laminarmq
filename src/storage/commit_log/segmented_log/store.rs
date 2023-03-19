@@ -222,7 +222,7 @@ pub(crate) mod test {
         super::super::super::{AsyncConsume, AsyncTruncate},
         RecordHeader, Storage, Store, StoreError,
     };
-    use std::{future::Future, hash::Hasher, marker::PhantomData, ops::Deref};
+    use std::{convert::Infallible, future::Future, hash::Hasher, marker::PhantomData, ops::Deref};
 
     pub(crate) const _RECORDS: [&[u8; 129]; 20] = [
                     b"T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77t",
@@ -260,7 +260,7 @@ pub(crate) mod test {
 
         match store.read(&num::zero(), &RecordHeader::default()).await {
             Err(StoreError::ReadOnEmptyStore) => {}
-            _ => assert!(false, "Wrong result returned for read on empty store"),
+            _ => unreachable!("Wrong result returned for read on empty store"),
         }
 
         let mut record_append_info_vec =
@@ -270,7 +270,7 @@ pub(crate) mod test {
             let record: &[u8] = record;
 
             let record_append_info = store
-                .append(futures_lite::stream::once(Ok::<&[u8], ()>(record)))
+                .append(futures_lite::stream::once(Ok::<&[u8], Infallible>(record)))
                 .await
                 .unwrap();
 
