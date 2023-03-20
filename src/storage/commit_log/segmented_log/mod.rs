@@ -201,7 +201,7 @@ where
     H: Hasher + Default,
     Idx: Unsigned + CheckedSub + ToPrimitive + Ord + Copy,
     Idx: Serialize + DeserializeOwned,
-    M: Default + Serialize + DeserializeOwned,
+    M: Serialize + DeserializeOwned,
 {
     type ReadError = LogError<S, SD>;
 
@@ -247,7 +247,7 @@ where
     H: Hasher + Default,
     Idx: FromPrimitive + ToPrimitive + Unsigned + CheckedSub,
     Idx: Copy + Ord + Serialize + DeserializeOwned,
-    M: Default + Serialize + DeserializeOwned,
+    M: Serialize + DeserializeOwned,
     SD: SerDe,
     SSP: SegmentStorageProvider<S, Idx>,
 {
@@ -321,7 +321,7 @@ where
     H: Hasher + Default,
     Idx: FromPrimitive + ToPrimitive + Unsigned + CheckedSub,
     Idx: Copy + Ord + Serialize + DeserializeOwned,
-    M: Default + Clone + Serialize + DeserializeOwned,
+    M: Clone + Serialize + DeserializeOwned,
     SD: SerDe,
     SSP: SegmentStorageProvider<S, Idx>,
 {

@@ -114,7 +114,7 @@ where
     H: Hasher + Default,
     Idx: Unsigned + CheckedSub + ToPrimitive + Ord + Copy,
     Idx: Serialize + DeserializeOwned,
-    M: Default + Serialize + DeserializeOwned,
+    M: Serialize + DeserializeOwned,
 {
     type ReadError = SegmentOpError<S, SD>;
 
@@ -146,13 +146,17 @@ where
             .await
             .map_err(SegmentError::StoreError)?;
 
-        let metadata_size = SD::serialized_size(&MetaWithIdx::<M, Idx> {
-            index: Some(self.lowest_index()),
-            metadata: M::default(),
-        })
-        .map_err(SegmentError::SerializationError)?;
+        let metadata_bytes_len_bytes_len =
+            SD::serialized_size(&0_usize).map_err(SegmentError::SerializationError)?;
 
-        let (metadata_bytes, value) = record_content
+        let (metadata_bytes_len_bytes, metadata_with_value) = record_content
+            .split_at(metadata_bytes_len_bytes_len)
+            .ok_or(SegmentError::RecordMetadataNotFound)?;
+
+        let metadata_size =
+            SD::deserialize(&metadata_bytes_len_bytes).map_err(SegmentError::SerializationError)?;
+
+        let (metadata_bytes, value) = metadata_with_value
             .split_at(metadata_size)
             .ok_or(SegmentError::RecordMetadataNotFound)?;
 
@@ -223,6 +227,9 @@ where
 
         let metadata_bytes = SD::serialize(&metadata).map_err(SegmentError::SerializationError)?;
 
+        let metadata_bytes_len_bytes =
+            SD::serialize(&metadata_bytes.len()).map_err(SegmentError::SerializationError)?;
+
         enum SBuf<XBuf, YBuf> {
             XBuf(XBuf),
             YBuf(YBuf),
@@ -243,7 +250,10 @@ where
             }
         }
 
-        let stream = futures_lite::stream::once(Ok(SBuf::YBuf(metadata_bytes)));
+        let stream = futures_lite::stream::iter([
+            Ok(SBuf::YBuf(metadata_bytes_len_bytes)),
+            Ok(SBuf::YBuf(metadata_bytes)),
+        ]);
         let stream = stream.chain(
             record
                 .value
@@ -283,11 +293,14 @@ where
 
         let metadata_bytes = SD::serialize(&metadata).map_err(SegmentError::SerializationError)?;
 
-        let metadata_stream =
-            futures_lite::stream::once(Ok::<&[u8], Infallible>(metadata_bytes.deref()));
-        let value_stream =
-            futures_lite::stream::once(Ok::<&[u8], Infallible>(record.value.deref()));
-        let stream = metadata_stream.chain(value_stream);
+        let metadata_bytes_len_bytes =
+            SD::serialize(&metadata_bytes.len()).map_err(SegmentError::SerializationError)?;
+
+        let stream = futures_lite::stream::iter([
+            Ok::<&[u8], Infallible>(metadata_bytes_len_bytes.deref()),
+            Ok::<&[u8], Infallible>(metadata_bytes.deref()),
+            Ok::<&[u8], Infallible>(record.value.deref()),
+        ]);
 
         self.append_serialized_record(stream).await
     }
@@ -454,13 +467,18 @@ pub(crate) mod test {
     {
         let segment_base_index = Idx::zero();
 
+        let metadata_len_serialized_size = SD::serialized_size(&0_usize).unwrap();
+
         let metadata_serialized_size = SD::serialized_size(&MetaWithIdx {
             metadata: M::default(),
             index: Some(segment_base_index),
         })
         .unwrap();
 
-        let expected_store_size = _RECORDS.len() * (metadata_serialized_size + _RECORDS[0].len());
+        let expected_store_record_length =
+            metadata_len_serialized_size + metadata_serialized_size + _RECORDS[0].len();
+
+        let expected_store_size = _RECORDS.len() * expected_store_record_length;
         let expected_index_size = _RECORDS.len() * INDEX_RECORD_LENGTH;
 
         let config = Config {
