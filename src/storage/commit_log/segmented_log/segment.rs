@@ -416,40 +416,47 @@ where
 }
 
 pub(crate) mod test {
-
     use super::{
         super::{
-            super::super::common::indexed_read_stream, index::INDEX_RECORD_LENGTH,
-            store::test::_RECORDS,
+            super::super::commit_log::test::_test_indexed_read_contains_expected_records,
+            index::INDEX_RECORD_LENGTH, store::test::_RECORDS,
         },
         *,
     };
     use num::Zero;
     use std::fmt::Debug;
 
-    async fn _test_indexed_read_contains_expected_records<R, Idx, M, X, I, Y>(
-        indexed_read: &R,
-        expected_records: I,
-        expected_record_count: usize,
-    ) where
-        R: AsyncIndexedRead<Value = Record<M, Idx, X>>,
-        X: Deref<Target = [u8]>,
-        I: Iterator<Item = Y>,
-        Y: Deref<Target = [u8]>,
+    pub(crate) fn _segment_config<M, Idx, Size, SD>(
+        record_len: usize,
+        num_records: usize,
+    ) -> Option<Config<Size>>
+    where
+        M: Default + Serialize,
+        Idx: Serialize + Zero,
+        Size: FromPrimitive,
+        SD: SerDe,
     {
-        let count = futures_lite::stream::iter(expected_records)
-            .zip(indexed_read_stream(indexed_read, ..).await)
-            .map(|(y, record)| {
-                assert_eq!(y.deref(), record.value.deref());
-                Some(())
-            })
-            .count()
-            .await;
+        let metadata_len_serialized_size = SD::serialized_size(&0_usize).ok()?;
 
-        assert_eq!(count, expected_record_count);
+        let metadata_serialized_size = SD::serialized_size(&MetaWithIdx {
+            metadata: M::default(),
+            index: Some(Idx::zero()),
+        })
+        .ok()?;
+
+        let expected_store_record_length =
+            metadata_len_serialized_size + metadata_serialized_size + record_len;
+
+        let expected_store_size = num_records * expected_store_record_length;
+        let expected_index_size = num_records * INDEX_RECORD_LENGTH;
+
+        Some(Config {
+            max_store_size: Size::from_usize(expected_store_size)?,
+            max_index_size: Size::from_usize(expected_index_size)?,
+        })
     }
 
-    pub(crate) async fn _test_segment_read_append_truncate<S, M, H, Idx, SD, SSP>(
+    pub(crate) async fn _test_segment_read_append_truncate_consistency<S, M, H, Idx, SD, SSP>(
         mut _segment_storage_provider: SSP,
         _: PhantomData<(M, H, SD)>,
     ) where
@@ -467,24 +474,8 @@ pub(crate) mod test {
     {
         let segment_base_index = Idx::zero();
 
-        let metadata_len_serialized_size = SD::serialized_size(&0_usize).unwrap();
-
-        let metadata_serialized_size = SD::serialized_size(&MetaWithIdx {
-            metadata: M::default(),
-            index: Some(segment_base_index),
-        })
-        .unwrap();
-
-        let expected_store_record_length =
-            metadata_len_serialized_size + metadata_serialized_size + _RECORDS[0].len();
-
-        let expected_store_size = _RECORDS.len() * expected_store_record_length;
-        let expected_index_size = _RECORDS.len() * INDEX_RECORD_LENGTH;
-
-        let config = Config {
-            max_store_size: S::Size::from_usize(expected_store_size).unwrap(),
-            max_index_size: S::Size::from_usize(expected_index_size).unwrap(),
-        };
+        let config =
+            _segment_config::<M, Idx, S::Size, SD>(_RECORDS[0].len(), _RECORDS.len()).unwrap();
 
         let mut segment = Segment::<S, M, H, Idx, S::Size, SD>::with_segment_storage_provider_config_and_base_index(
             &mut _segment_storage_provider,

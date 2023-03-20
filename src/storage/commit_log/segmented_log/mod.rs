@@ -69,6 +69,7 @@ where
 {
 }
 
+#[derive(Default, Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Config<Idx, Size> {
     pub segment_config: segment::Config<Size>,
     pub initial_index: Idx,
@@ -472,5 +473,83 @@ where
             .append(record)
             .await
             .map_err(SegmentedLogError::SegmentError)
+    }
+}
+
+pub(crate) mod test {
+    use super::{
+        super::super::commit_log::test::_test_indexed_read_contains_expected_records,
+        segment::test::_segment_config, store::test::_RECORDS, *,
+    };
+
+    use num::Zero;
+    use std::{fmt::Debug, marker::PhantomData};
+
+    async fn _test_segmented_log_read_append_truncate_consistency<S, M, H, Idx, SD, SSP>(
+        _segment_storage_provider: SSP,
+        _: PhantomData<(M, H, SD)>,
+    ) where
+        S: Storage,
+        S::Size: FromPrimitive + Copy,
+        S::Content: SplitAt<u8>,
+        S::Position: ToPrimitive + Debug,
+        M: Default + Serialize + DeserializeOwned + Clone,
+        H: Hasher + Default,
+        Idx: Unsigned + CheckedSub + FromPrimitive + ToPrimitive + Zero,
+        Idx: Ord + Copy + Debug,
+        Idx: Serialize + DeserializeOwned,
+        SD: SerDe,
+        SSP: SegmentStorageProvider<S, Idx> + Clone,
+    {
+        // arbitrary initial index for testing purposes
+        let initial_index = Idx::from_usize(42).unwrap();
+
+        const NUM_SEGMENTS: usize = 10;
+
+        let config = Config {
+            segment_config: _segment_config::<M, Idx, S::Size, SD>(
+                _RECORDS[0].len(),
+                _RECORDS.len(),
+            )
+            .unwrap(),
+            initial_index,
+        };
+
+        let mut segmented_log = SegmentedLog::<S, M, H, Idx, S::Size, SD, SSP>::new(
+            config,
+            _segment_storage_provider.clone(),
+        )
+        .await
+        .unwrap();
+
+        let records = |num_segments: usize| {
+            _RECORDS
+                .iter()
+                .cycle()
+                .take(_RECORDS.len() * num_segments)
+                .cloned()
+        };
+
+        let x = records(NUM_SEGMENTS);
+
+        segmented_log.close().await.unwrap();
+
+        let segmented_log = SegmentedLog::<S, M, H, Idx, S::Size, SD, SSP>::new(
+            config,
+            _segment_storage_provider.clone(),
+        )
+        .await
+        .unwrap();
+
+        segmented_log.remove().await.unwrap();
+
+        let segmented_log = SegmentedLog::<S, M, H, Idx, S::Size, SD, SSP>::new(
+            config,
+            _segment_storage_provider.clone(),
+        )
+        .await
+        .unwrap();
+
+        segmented_log.remove().await.unwrap();
     }
 }

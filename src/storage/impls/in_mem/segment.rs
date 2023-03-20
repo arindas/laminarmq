@@ -7,9 +7,13 @@ use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
 
 type Mem = Rc<RefCell<Vec<u8>>>;
 
-#[derive(Default)]
+type Map<Idx> = BTreeMap<Idx, (Mem, Mem)>;
+
+type StorageMap<Idx> = Rc<RefCell<Map<Idx>>>;
+
+#[derive(Default, Clone)]
 pub struct InMemSegmentStorageProvider<Idx> {
-    _storage_map: BTreeMap<Idx, (Mem, Mem)>,
+    _storage_map: StorageMap<Idx>,
 }
 
 #[async_trait(?Send)]
@@ -18,25 +22,34 @@ where
     Idx: Clone + Ord,
 {
     async fn base_indices_of_stored_segments(&self) -> Result<Vec<Idx>, InMemStorageError> {
-        Ok(self._storage_map.keys().cloned().collect())
+        Ok(self
+            ._storage_map
+            .try_borrow()
+            .map_err(|_| InMemStorageError::BorrowError)?
+            .keys()
+            .cloned()
+            .collect())
     }
 
     async fn obtain(
         &mut self,
         segment_base_idx: &Idx,
     ) -> Result<SegmentStorage<InMemStorage>, InMemStorageError> {
-        if !self._storage_map.contains_key(segment_base_idx) {
+        let mut storage_map = self
+            ._storage_map
+            .try_borrow_mut()
+            .map_err(|_| InMemStorageError::BorrowError)?;
+
+        if !storage_map.contains_key(segment_base_idx) {
             let (index_storage, store_storage) = (
                 Rc::new(RefCell::new(Vec::<u8>::new())),
                 Rc::new(RefCell::new(Vec::<u8>::new())),
             );
 
-            self._storage_map
-                .insert(segment_base_idx.clone(), (index_storage, store_storage));
+            storage_map.insert(segment_base_idx.clone(), (index_storage, store_storage));
         }
 
-        let (index, store) = self
-            ._storage_map
+        let (index, store) = storage_map
             .get(segment_base_idx)
             .ok_or(InMemStorageError::StorageNotFound)?;
 
@@ -50,7 +63,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        super::super::super::{super::common::serde, commit_log::segmented_log::segment},
+        super::super::super::{super::common::serde::bincode, commit_log::segmented_log::segment},
         *,
     };
     use std::marker::PhantomData;
@@ -58,9 +71,9 @@ mod tests {
     #[test]
     fn test_segment_read_append_truncate_consistency() {
         futures_lite::future::block_on(async {
-            segment::test::_test_segment_read_append_truncate(
+            segment::test::_test_segment_read_append_truncate_consistency(
                 InMemSegmentStorageProvider::<u32>::default(),
-                PhantomData::<((), crc32fast::Hasher, serde::bincode::BinCode)>,
+                PhantomData::<((), crc32fast::Hasher, bincode::BinCode)>,
             )
             .await;
         });
