@@ -170,7 +170,6 @@ where
 impl<S, M, H, Idx, SD> Segment<S, M, H, Idx, S::Size, SD>
 where
     S: Storage,
-    S::Position: ToPrimitive,
     M: Serialize,
     H: Hasher + Default,
     Idx: Unsigned + CheckedSub + ToPrimitive + Ord + Copy,
@@ -187,9 +186,11 @@ where
     {
         let write_index = self.index.highest_index();
 
+        let remaining_store_capacity = self.config.max_store_size - self.store.size();
+
         let (position, record_header) = self
             .store
-            .append(stream)
+            .append(stream, Some(remaining_store_capacity))
             .await
             .map_err(SegmentError::StoreError)?;
 
@@ -267,7 +268,6 @@ where
 impl<S, M, H, Idx, SD> Segment<S, M, H, Idx, S::Size, SD>
 where
     S: Storage,
-    S::Position: ToPrimitive,
     M: Serialize + Clone,
     H: Hasher + Default,
     Idx: Unsigned + CheckedSub + ToPrimitive + Ord + Copy,

@@ -1,4 +1,4 @@
-use super::super::super::{AsyncConsume, AsyncTruncate, Sizable, Storage, StreamBroken};
+use super::super::super::{AsyncConsume, AsyncTruncate, Sizable, Storage, StreamUnexpectedLength};
 use async_trait::async_trait;
 use std::{
     cell::RefCell,
@@ -39,7 +39,7 @@ impl Sizable for InMemStorage {
 #[derive(Debug)]
 pub enum InMemStorageError {
     IoError(io::Error),
-    StreamBroken,
+    StreamUnexpctedLength,
     BorrowError,
     StorageNotFound,
 }
@@ -57,9 +57,9 @@ impl From<ErrorKind> for InMemStorageError {
     }
 }
 
-impl From<StreamBroken> for InMemStorageError {
-    fn from(_: StreamBroken) -> Self {
-        Self::StreamBroken
+impl From<StreamUnexpectedLength> for InMemStorageError {
+    fn from(_: StreamUnexpectedLength) -> Self {
+        Self::StreamUnexpctedLength
     }
 }
 

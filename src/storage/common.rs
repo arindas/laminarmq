@@ -78,7 +78,7 @@ pub(crate) mod test {
 
         let write_position = storage.size();
 
-        let (position_0, bytes_written_0) = storage.append(&mut req_body).await.unwrap();
+        let (position_0, bytes_written_0) = storage.append(&mut req_body, None).await.unwrap();
 
         assert_eq!(position_0, write_position);
         assert_eq!(
@@ -91,7 +91,8 @@ pub(crate) mod test {
 
         let write_position = storage.size();
 
-        let (position_1, bytes_written_1) = storage.append(&mut repeated_req_body).await.unwrap();
+        let (position_1, bytes_written_1) =
+            storage.append(&mut repeated_req_body, None).await.unwrap();
 
         assert_eq!(position_1, write_position);
         let expected_bytes_written = REQ_BYTES.len() * REPEAT;

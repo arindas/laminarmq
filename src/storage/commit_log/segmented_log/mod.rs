@@ -316,7 +316,6 @@ where
 impl<S, M, H, Idx, SD, SSP> SegmentedLog<S, M, H, Idx, S::Size, SD, SSP>
 where
     S: Storage,
-    S::Position: ToPrimitive,
     S::Content: SplitAt<u8>,
     S::Size: Copy,
     H: Hasher + Default,
@@ -440,7 +439,6 @@ impl<S, M, H, Idx, SD, SSP, XBuf, X, XE> CommitLog<MetaWithIdx<M, Idx>, X, S::Co
     for SegmentedLog<S, M, H, Idx, S::Size, SD, SSP>
 where
     S: Storage,
-    S::Position: ToPrimitive,
     S::Content: SplitAt<u8>,
     S::Size: Copy,
     H: Hasher + Default,
@@ -483,7 +481,7 @@ pub(crate) mod test {
     };
 
     use num::Zero;
-    use std::{fmt::Debug, marker::PhantomData};
+    use std::{convert::Infallible, fmt::Debug, marker::PhantomData};
 
     async fn _test_segmented_log_read_append_truncate_consistency<S, M, H, Idx, SD, SSP>(
         _segment_storage_provider: SSP,
@@ -522,15 +520,94 @@ pub(crate) mod test {
         .await
         .unwrap();
 
-        let records = |num_segments: usize| {
+        let records = |num_segments: usize, records_per_segment: usize| {
             _RECORDS
                 .iter()
                 .cycle()
-                .take(_RECORDS.len() * num_segments)
+                .take(records_per_segment * num_segments)
                 .cloned()
+                .map(|x| {
+                    let x: &[u8] = x;
+                    x
+                })
         };
 
-        let x = records(NUM_SEGMENTS);
+        for record in records(NUM_SEGMENTS, _RECORDS.len()) {
+            let record = Record {
+                metadata: MetaWithIdx {
+                    metadata: M::default(),
+                    index: Option::<Idx>::None,
+                },
+                value: record,
+            };
+            segmented_log
+                .append_record_with_contiguous_bytes(&record)
+                .await
+                .unwrap();
+        }
+
+        let expected_minimum_written_records =
+            Idx::from_usize(_RECORDS.len() * (NUM_SEGMENTS - 1)).unwrap();
+
+        assert!(
+            segmented_log.len() > expected_minimum_written_records,
+            "Maxed segments not rotated"
+        );
+
+        segmented_log.close().await.unwrap();
+
+        let mut segmented_log = SegmentedLog::<S, M, H, Idx, S::Size, SD, SSP>::new(
+            config,
+            _segment_storage_provider.clone(),
+        )
+        .await
+        .unwrap();
+
+        _test_indexed_read_contains_expected_records(
+            &segmented_log,
+            records(NUM_SEGMENTS, _RECORDS.len()),
+            _RECORDS.len() * NUM_SEGMENTS,
+        )
+        .await;
+
+        let truncate_index = NUM_SEGMENTS / 2 * _RECORDS.len() + _RECORDS.len() / 2;
+
+        let truncate_index = Idx::from_usize(truncate_index).unwrap();
+
+        let expected_length_after_truncate = truncate_index - segmented_log.lowest_index();
+
+        segmented_log.truncate(&truncate_index).await.unwrap();
+
+        assert_eq!(segmented_log.len(), expected_length_after_truncate);
+
+        segmented_log
+            .append(Record {
+                metadata: MetaWithIdx {
+                    metadata: M::default(),
+                    index: None,
+                },
+                value: futures_lite::stream::once(Ok::<&[u8], Infallible>(_RECORDS[0])),
+            })
+            .await
+            .unwrap();
+
+        if let Err(SegmentedLogError::SegmentError(_)) = segmented_log
+            .append(Record {
+                metadata: MetaWithIdx {
+                    metadata: M::default(),
+                    index: None,
+                },
+                value: futures_lite::stream::iter(
+                    records(1, _RECORDS.len() / 2).map(|x| Ok::<&[u8], Infallible>(x)),
+                ),
+            })
+            .await
+        {
+        } else {
+            unreachable!("Wrong result on exceeding max_store_bytes");
+        }
+
+        let len_before_close = segmented_log.len();
 
         segmented_log.close().await.unwrap();
 
@@ -541,6 +618,10 @@ pub(crate) mod test {
         .await
         .unwrap();
 
+        let len_after_close = segmented_log.len();
+
+        assert_eq!(len_before_close, len_after_close);
+
         segmented_log.remove().await.unwrap();
 
         let segmented_log = SegmentedLog::<S, M, H, Idx, S::Size, SD, SSP>::new(
@@ -549,6 +630,11 @@ pub(crate) mod test {
         )
         .await
         .unwrap();
+
+        assert!(
+            segmented_log.is_empty(),
+            "SegmentedLog not empty after removing."
+        );
 
         segmented_log.remove().await.unwrap();
     }

@@ -1,4 +1,4 @@
-use super::common::stream::StreamBroken;
+use super::common::stream::StreamUnexpectedLength;
 use async_trait::async_trait;
 use futures_lite::{Stream, StreamExt};
 use num::{cast::FromPrimitive, CheckedSub, ToPrimitive, Unsigned};
@@ -76,9 +76,9 @@ pub trait Storage:
 {
     type Content: Deref<Target = [u8]>;
 
-    type Position: Unsigned + FromPrimitive + ToPrimitive + Sum + Ord;
+    type Position: Unsigned + FromPrimitive + ToPrimitive + Sum + Ord + Copy;
 
-    type Error: std::error::Error + From<StreamBroken>;
+    type Error: std::error::Error + From<StreamUnexpectedLength>;
 
     async fn append_slice(
         &mut self,
@@ -88,6 +88,7 @@ pub trait Storage:
     async fn append<XBuf, XE, X>(
         &mut self,
         buf_stream: &mut X,
+        append_threshold: Option<Self::Size>,
     ) -> Result<(Self::Position, Self::Size), Self::Error>
     where
         XBuf: Deref<Target = [u8]>,
@@ -96,9 +97,12 @@ pub trait Storage:
         let (mut bytes_written, pos) = (num::zero(), self.size());
 
         while let Some(buf) = buf_stream.next().await {
-            match match buf {
-                Ok(buf) => self.append_slice(buf.deref()).await,
-                _ => Err(StreamBroken.into()),
+            match match (buf, append_threshold) {
+                (_, Some(write_capacity)) if bytes_written > write_capacity => {
+                    Err(StreamUnexpectedLength.into())
+                }
+                (Ok(buf), _) => self.append_slice(buf.deref()).await,
+                (Err(_), _) => Err(StreamUnexpectedLength.into()),
             } {
                 Ok((_, buf_bytes_w)) => {
                     bytes_written = bytes_written + buf_bytes_w;

@@ -5,15 +5,15 @@ pub mod cache;
 
 pub mod stream {
     #[derive(Debug)]
-    pub struct StreamBroken;
+    pub struct StreamUnexpectedLength;
 
-    impl std::fmt::Display for StreamBroken {
+    impl std::fmt::Display for StreamUnexpectedLength {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             write!(f, "{self:?}")
         }
     }
 
-    impl std::error::Error for StreamBroken {}
+    impl std::error::Error for StreamUnexpectedLength {}
 }
 
 pub mod ref_ops {

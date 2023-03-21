@@ -149,6 +149,7 @@ where
     pub async fn append<XBuf, X, XE>(
         &mut self,
         stream: X,
+        append_threshold: Option<S::Size>,
     ) -> Result<(S::Position, RecordHeader), StoreError<S::Error>>
     where
         XBuf: Deref<Target = [u8]>,
@@ -166,7 +167,7 @@ where
 
         let (position, bytes_written) = self
             .storage
-            .append(&mut stream)
+            .append(&mut stream, append_threshold)
             .await
             .map_err(StoreError::StorageError)?;
 
@@ -270,7 +271,10 @@ pub(crate) mod test {
             let record: &[u8] = record;
 
             let record_append_info = store
-                .append(futures_lite::stream::once(Ok::<&[u8], Infallible>(record)))
+                .append(
+                    futures_lite::stream::once(Ok::<&[u8], Infallible>(record)),
+                    None,
+                )
                 .await
                 .unwrap();
 
