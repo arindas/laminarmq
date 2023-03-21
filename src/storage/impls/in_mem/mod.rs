@@ -1,22 +1,5 @@
+pub mod commit_log;
 pub mod index;
 pub mod segment;
 pub mod storage;
 pub mod store;
-
-#[cfg(test)]
-pub mod tests {
-    use super::super::super::super::common::serde::bincode;
-    use super::{super::super::commit_log::segmented_log, segment::InMemSegmentStorageProvider};
-    use std::marker::PhantomData;
-
-    #[test]
-    fn test_segmented_log_read_append_truncate_consistency() {
-        futures_lite::future::block_on(async {
-            segmented_log::test::_test_segmented_log_read_append_truncate_consistency(
-                InMemSegmentStorageProvider::<u32>::default(),
-                PhantomData::<((), crc32fast::Hasher, bincode::BinCode)>,
-            )
-            .await;
-        });
-    }
-}
