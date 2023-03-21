@@ -55,11 +55,12 @@ pub(crate) mod test {
         F: Future<Output = S>,
         SP: Fn() -> F,
         S: Storage,
+        S::Size: Zero,
         S::Position: One + Zero,
         S::Position: Debug,
     {
         const REQ_BYTES: &[u8] = b"Hello World!";
-        let mut req_body = stream::iter(std::iter::once(Ok::<&[u8], Infallible>(REQ_BYTES)));
+        let mut req_body = stream::once(Ok::<&[u8], Infallible>(REQ_BYTES));
 
         let mut storage = storage_provider().await;
 
@@ -75,6 +76,17 @@ pub(crate) mod test {
             .read(&S::Position::zero(), &S::Size::one())
             .await
             .is_err());
+
+        assert!(
+            storage
+                .append(
+                    &mut stream::once(Ok::<&[u8], Infallible>(&[0_u8])),
+                    Some(S::Size::zero())
+                )
+                .await
+                .is_err(),
+            "Append threshold crossed."
+        );
 
         let write_position = storage.size();
 

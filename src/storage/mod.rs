@@ -97,12 +97,21 @@ pub trait Storage:
         let (mut bytes_written, pos) = (num::zero(), self.size());
 
         while let Some(buf) = buf_stream.next().await {
-            match match (buf, append_threshold) {
-                (_, Some(write_capacity)) if bytes_written > write_capacity => {
-                    Err(StreamUnexpectedLength.into())
+            match match match (buf, append_threshold) {
+                (Ok(buf), Some(write_capacity)) => {
+                    match Self::Size::from_usize(buf.deref().len()) {
+                        Some(buf_len) if buf_len + bytes_written > write_capacity => {
+                            Err::<XBuf, Self::Error>(StreamUnexpectedLength.into())
+                        }
+                        Some(_) => Ok(buf),
+                        None => Err(StreamUnexpectedLength.into()),
+                    }
                 }
-                (Ok(buf), _) => self.append_slice(buf.deref()).await,
+                (Ok(buf), None) => Ok(buf),
                 (Err(_), _) => Err(StreamUnexpectedLength.into()),
+            } {
+                Ok(buf) => self.append_slice(buf.deref()).await,
+                Err(_) => Err(StreamUnexpectedLength.into()),
             } {
                 Ok((_, buf_bytes_w)) => {
                     bytes_written = bytes_written + buf_bytes_w;
