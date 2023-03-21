@@ -21,7 +21,36 @@ impl<Idx> SegmentStorageProvider<InMemStorage, Idx> for InMemSegmentStorageProvi
 where
     Idx: Clone + Ord,
 {
-    async fn base_indices_of_stored_segments(&self) -> Result<Vec<Idx>, InMemStorageError> {
+    async fn obtain_base_indices_of_stored_segments(
+        &mut self,
+    ) -> Result<Vec<Idx>, InMemStorageError> {
+        loop {
+            let mut storage_map = self
+                ._storage_map
+                .try_borrow_mut()
+                .map_err(|_| InMemStorageError::BorrowError)?;
+
+            if storage_map.is_empty() {
+                break;
+            }
+
+            let (_, (index, _)) = storage_map
+                .last_key_value()
+                .ok_or(InMemStorageError::StorageNotFound)?;
+
+            if !index
+                .try_borrow()
+                .map_err(|_| InMemStorageError::BorrowError)?
+                .is_empty()
+            {
+                break;
+            }
+
+            storage_map
+                .pop_last()
+                .ok_or(InMemStorageError::StorageNotFound)?;
+        }
+
         Ok(self
             ._storage_map
             .try_borrow()

@@ -115,7 +115,7 @@ where
         mut segment_storage_provider: SSP,
     ) -> Result<Self, LogError<S, SD>> {
         let mut segment_base_indices = segment_storage_provider
-            .base_indices_of_stored_segments()
+            .obtain_base_indices_of_stored_segments()
             .await
             .map_err(SegmentedLogError::StorageError)?;
 
@@ -483,7 +483,14 @@ pub(crate) mod test {
     use num::Zero;
     use std::{convert::Infallible, fmt::Debug, marker::PhantomData};
 
-    async fn _test_segmented_log_read_append_truncate_consistency<S, M, H, Idx, SD, SSP>(
+    pub(crate) async fn _test_segmented_log_read_append_truncate_consistency<
+        S,
+        M,
+        H,
+        Idx,
+        SD,
+        SSP,
+    >(
         _segment_storage_provider: SSP,
         _: PhantomData<(M, H, SD)>,
     ) where
@@ -499,8 +506,9 @@ pub(crate) mod test {
         SD: SerDe,
         SSP: SegmentStorageProvider<S, Idx> + Clone,
     {
-        // arbitrary initial index for testing purposes
-        let initial_index = Idx::from_usize(42).unwrap();
+        const INITIAL_INDEX: usize = 42;
+
+        let initial_index = Idx::from_usize(INITIAL_INDEX).unwrap();
 
         const NUM_SEGMENTS: usize = 10;
 
@@ -570,7 +578,7 @@ pub(crate) mod test {
         )
         .await;
 
-        let truncate_index = NUM_SEGMENTS / 2 * _RECORDS.len() + _RECORDS.len() / 2;
+        let truncate_index = INITIAL_INDEX + NUM_SEGMENTS / 2 * _RECORDS.len() + _RECORDS.len() / 2;
 
         let truncate_index = Idx::from_usize(truncate_index).unwrap();
 
@@ -591,14 +599,14 @@ pub(crate) mod test {
             .await
             .unwrap();
 
-        if let Err(SegmentedLogError::SegmentError(_)) = segmented_log
+        if let Err(_) = segmented_log
             .append(Record {
                 metadata: MetaWithIdx {
                     metadata: M::default(),
                     index: None,
                 },
                 value: futures_lite::stream::iter(
-                    records(1, _RECORDS.len() / 2).map(|x| Ok::<&[u8], Infallible>(x)),
+                    records(2, _RECORDS.len()).map(|x| Ok::<&[u8], Infallible>(x)),
                 ),
             })
             .await

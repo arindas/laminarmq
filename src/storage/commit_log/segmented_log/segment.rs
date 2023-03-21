@@ -380,7 +380,7 @@ pub trait SegmentStorageProvider<S, Idx>
 where
     S: Storage,
 {
-    async fn base_indices_of_stored_segments(&self) -> Result<Vec<Idx>, S::Error>;
+    async fn obtain_base_indices_of_stored_segments(&mut self) -> Result<Vec<Idx>, S::Error>;
 
     async fn obtain(&mut self, idx: &Idx) -> Result<SegmentStorage<S>, S::Error>;
 }
