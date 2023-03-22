@@ -17,6 +17,7 @@ jobs:
           toolchain: stable
           override: true
           profile: minimal
+          components: llvm-tools-preview
 
       - name: Clean artefacts
         uses: actions-rs/cargo@v1
