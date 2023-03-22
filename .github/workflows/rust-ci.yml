@@ -1,0 +1,60 @@
+name: rust-ci
+on:
+  workflow_dispatch:
+
+jobs:
+  code-coverage:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Install toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+          profile: minimal
+
+      - name: Clean artefacts
+        uses: actions-rs/cargo@v1
+        with:
+          command: clean
+
+      - name: Execute tests
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+        env:
+          CARGO_INCREMENTAL: 0
+          RUSTFLAGS: '-Cinstrument-coverage'
+
+      - name: Collect code ccoverage
+        id: coverage
+        uses: actions-rs/grcov@v0.1
+
+      - name: Upload coverage to codecov.io
+        uses: codecov/codecov-action@v3
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ${{ steps.coverage.outputs.report }}
+
+
+  clippy-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          components: clippy
+          profile: minimal
+          override: true
+
+      - uses: actions-rs/clippy-check@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          args: --all-features
+
