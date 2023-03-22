@@ -1,6 +1,7 @@
 name: rust-ci
 on:
   workflow_dispatch:
+  push:
 
 jobs:
   code-coverage:
