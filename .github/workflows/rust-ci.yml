@@ -1,7 +1,6 @@
 name: rust-ci
 on:
   workflow_dispatch:
-  push:
 
 jobs:
   code-coverage:
@@ -22,6 +21,9 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: clean
+
+      - name: Increase memlock limit
+        run: sudo ulimit -l 65536
 
       - name: Execute tests
         uses: actions-rs/cargo@v1
