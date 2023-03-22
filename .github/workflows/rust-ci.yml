@@ -39,18 +39,18 @@ jobs:
           wget https://github.com/mozilla/grcov/releases/latest/download/grcov-x86_64-unknown-linux-gnu.tar.bz2
           tar -xf grcov-x86_64-unknown-linux-gnu.tar.bz2
 
-      - name: Collect code ccoverage
+      - name: Collect code coverage
         run: |
           ./grcov ./target/coverage.prof --binary-path \
           ./target/debug/deps/ -s . \
           -t lcov --branch --ignore-not-existing --ignore '../*' \
-          --ignore "/*" -o ./target/coverage/tests.lcov
+          --ignore "/*" -o ./coverage.lcov
 
       - name: Upload coverage to codecov.io
         uses: codecov/codecov-action@v3
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./target/coverage/tests.lcov
+          files: ./coverage.lcov
 
 
   clippy-check:
