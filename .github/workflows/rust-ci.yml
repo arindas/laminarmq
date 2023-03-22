@@ -33,11 +33,7 @@ jobs:
           LLVM_PROFILE_FILE: './target/coverage.prof/cargo-test-%p-%m.profraw'
 
       - name: Install grcov
-        uses: actions-rs/install@v0.1
-        with:
-          crate: grcov
-          version: latest
-          use-tool-cache: true
+        run: cargo install grcov
 
       - name: Collect code ccoverage
         run: |
