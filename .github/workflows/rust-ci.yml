@@ -24,7 +24,7 @@ jobs:
           command: clean
 
       - name: Increase memlock limit
-        run: sudo ulimit -l 65536
+        run: ulimit -l 65536 && ulimit -a
 
       - name: Execute tests
         uses: actions-rs/cargo@v1
