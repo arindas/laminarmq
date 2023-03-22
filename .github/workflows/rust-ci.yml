@@ -3,16 +3,15 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - main
-      - develop
+      - 'feature/**'
     paths:
-      - src/**
+      - 'src/**'
   pull_request:
     branches:
       - main
       - develop
     paths:
-      - src/**
+      - 'src/**'
 
 jobs:
   code-coverage:
