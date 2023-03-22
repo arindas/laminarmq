@@ -30,16 +30,27 @@ jobs:
         env:
           CARGO_INCREMENTAL: 0
           RUSTFLAGS: '-Cinstrument-coverage'
+          LLVM_PROFILE_FILE: './target/coverage.prof/cargo-test-%p-%m.profraw'
+
+      - name: Install grcov
+        uses: actions-rs/install@v0.1
+        with:
+          crate: grcov
+          version: latest
+          use-tool-cache: true
 
       - name: Collect code ccoverage
-        id: coverage
-        uses: actions-rs/grcov@v0.1
+        run: |
+          grcov ./target/coverage.prof --binary-path \
+          ./target/debug/deps/ -s . \
+          -t lcov --branch --ignore-not-existing --ignore '../*' \
+          --ignore "/*" -o ./target/coverage/tests.lcov
 
       - name: Upload coverage to codecov.io
         uses: codecov/codecov-action@v3
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: ${{ steps.coverage.outputs.report }}
+          files: ./target/coverage/tests.lcov
 
 
   clippy-check:
