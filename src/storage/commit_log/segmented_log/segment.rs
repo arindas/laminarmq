@@ -24,6 +24,7 @@ use std::{
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
 pub struct Config<Size> {
     pub max_store_size: Size,
+    pub max_store_overflow: Size,
     pub max_index_size: Size,
 }
 
@@ -188,9 +189,11 @@ where
 
         let remaining_store_capacity = self.config.max_store_size - self.store.size();
 
+        let append_threshold = remaining_store_capacity + self.config.max_store_overflow;
+
         let (position, record_header) = self
             .store
-            .append(stream, Some(remaining_store_capacity))
+            .append(stream, Some(append_threshold))
             .await
             .map_err(SegmentError::StoreError)?;
 
@@ -452,6 +455,7 @@ pub(crate) mod test {
 
         Some(Config {
             max_store_size: Size::from_usize(expected_store_size)?,
+            max_store_overflow: Size::from_usize(0_usize)?,
             max_index_size: Size::from_usize(expected_index_size)?,
         })
     }
