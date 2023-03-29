@@ -219,7 +219,9 @@ where
 
     fn lowest_index(&self) -> Self::Idx {
         self._read_segments
-            .first()
+            .iter()
+            .chain(self._write_segment.iter())
+            .next()
             .map(|segment| segment.lowest_index())
             .unwrap_or(self._config.initial_index)
     }
@@ -759,6 +761,18 @@ pub(crate) mod test {
         assert_eq!(
             segmented_log_highest_index_before_sleep,
             segmented_log.lowest_index()
+        );
+
+        _make_sleep_future(expiry_duration).await;
+
+        segmented_log
+            .remove_expired_segments(expiry_duration)
+            .await
+            .unwrap();
+
+        assert!(
+            segmented_log.is_empty(),
+            "Segmented log not cleared after all segments expired."
         );
 
         segmented_log.remove().await.unwrap();
