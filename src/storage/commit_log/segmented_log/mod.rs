@@ -479,9 +479,7 @@ pub(crate) mod test {
         super::super::commit_log::test::_test_indexed_read_contains_expected_records,
         segment::test::_segment_config, store::test::_RECORDS, *,
     };
-
-    use num::Zero;
-    use std::{convert::Infallible, fmt::Debug, marker::PhantomData};
+    use std::{convert::Infallible, fmt::Debug, future::Future, marker::PhantomData};
 
     pub(crate) async fn _test_segmented_log_read_append_truncate_consistency<
         S,
@@ -500,7 +498,7 @@ pub(crate) mod test {
         S::Position: ToPrimitive + Debug,
         M: Default + Serialize + DeserializeOwned + Clone,
         H: Hasher + Default,
-        Idx: Unsigned + CheckedSub + FromPrimitive + ToPrimitive + Zero,
+        Idx: Unsigned + CheckedSub + FromPrimitive + ToPrimitive,
         Idx: Ord + Copy + Debug,
         Idx: Serialize + DeserializeOwned,
         SD: SerDe,
@@ -642,6 +640,125 @@ pub(crate) mod test {
         assert!(
             segmented_log.is_empty(),
             "SegmentedLog not empty after removing."
+        );
+
+        segmented_log.remove().await.unwrap();
+    }
+
+    pub(crate) async fn _test_segmented_log_remove_expired_segments<
+        S,
+        M,
+        H,
+        Idx,
+        SD,
+        SSP,
+        MTF,
+        TF,
+    >(
+        _segment_storage_provider: SSP,
+        _make_sleep_future: MTF,
+        _: PhantomData<(M, H, SD)>,
+    ) where
+        S: Storage,
+        S::Size: FromPrimitive + Copy,
+        S::Content: SplitAt<u8>,
+        S::Position: ToPrimitive + Debug,
+        M: Default + Serialize + DeserializeOwned + Clone,
+        H: Hasher + Default,
+        Idx: Unsigned + CheckedSub + FromPrimitive + ToPrimitive,
+        Idx: Ord + Copy + Debug,
+        Idx: Serialize + DeserializeOwned,
+        SD: SerDe,
+        SSP: SegmentStorageProvider<S, Idx> + Clone,
+        MTF: Fn(Duration) -> TF,
+        TF: Future<Output = ()>,
+    {
+        const INITIAL_INDEX: usize = 42;
+
+        let initial_index = Idx::from_usize(INITIAL_INDEX).unwrap();
+
+        const NUM_SEGMENTS: usize = 10;
+
+        let config = Config {
+            segment_config: _segment_config::<M, Idx, S::Size, SD>(
+                _RECORDS[0].len(),
+                _RECORDS.len(),
+            )
+            .unwrap(),
+            initial_index,
+        };
+
+        let mut segmented_log = SegmentedLog::<S, M, H, Idx, S::Size, SD, SSP>::new(
+            config,
+            _segment_storage_provider.clone(),
+        )
+        .await
+        .unwrap();
+
+        let records = |num_segments: usize, records_per_segment: usize| {
+            _RECORDS
+                .iter()
+                .cycle()
+                .take(records_per_segment * num_segments)
+                .cloned()
+                .map(|x| {
+                    let x: &[u8] = x;
+                    x
+                })
+        };
+
+        for record in records(NUM_SEGMENTS / 2, _RECORDS.len()) {
+            let stream = futures_lite::stream::once(Ok::<&[u8], Infallible>(record));
+
+            segmented_log
+                .append(Record {
+                    metadata: MetaWithIdx {
+                        metadata: M::default(),
+                        index: Option::<Idx>::None,
+                    },
+                    value: stream,
+                })
+                .await
+                .unwrap();
+        }
+
+        let segmented_log_highest_index_before_sleep = segmented_log.highest_index();
+
+        let expiry_duration = Duration::from_millis(10);
+
+        // we keep a flag variable to sleep only after the last write segment has
+        // rotated back to the vec of read segments
+        let mut need_to_sleep = true;
+
+        for record in records(NUM_SEGMENTS / 2, _RECORDS.len()) {
+            let stream = futures_lite::stream::once(Ok::<&[u8], Infallible>(record));
+
+            segmented_log
+                .append(Record {
+                    metadata: MetaWithIdx {
+                        metadata: M::default(),
+                        index: Option::<Idx>::None,
+                    },
+                    value: stream,
+                })
+                .await
+                .unwrap();
+
+            if need_to_sleep {
+                _make_sleep_future(expiry_duration).await;
+            }
+
+            need_to_sleep = false;
+        }
+
+        segmented_log
+            .remove_expired_segments(expiry_duration)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            segmented_log_highest_index_before_sleep,
+            segmented_log.lowest_index()
         );
 
         segmented_log.remove().await.unwrap();
