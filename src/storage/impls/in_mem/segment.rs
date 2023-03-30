@@ -11,9 +11,24 @@ type Map<Idx> = BTreeMap<Idx, (Mem, Mem)>;
 
 type StorageMap<Idx> = Rc<RefCell<Map<Idx>>>;
 
-#[derive(Default, Clone)]
 pub struct InMemSegmentStorageProvider<Idx> {
     _storage_map: StorageMap<Idx>,
+}
+
+impl<Idx> Default for InMemSegmentStorageProvider<Idx> {
+    fn default() -> Self {
+        Self {
+            _storage_map: Default::default(),
+        }
+    }
+}
+
+impl<Idx> Clone for InMemSegmentStorageProvider<Idx> {
+    fn clone(&self) -> Self {
+        Self {
+            _storage_map: self._storage_map.clone(),
+        }
+    }
 }
 
 #[async_trait(?Send)]
