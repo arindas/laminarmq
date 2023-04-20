@@ -76,12 +76,12 @@ pub struct Config<Idx, Size> {
 }
 
 pub struct SegmentedLog<S, M, H, Idx, Size, SD, SSP> {
-    _write_segment: Option<Segment<S, M, H, Idx, Size, SD>>,
-    _read_segments: Vec<Segment<S, M, H, Idx, Size, SD>>,
+    write_segment: Option<Segment<S, M, H, Idx, Size, SD>>,
+    read_segments: Vec<Segment<S, M, H, Idx, Size, SD>>,
 
-    _config: Config<Idx, Size>,
+    config: Config<Idx, Size>,
 
-    _segment_storage_provider: SSP,
+    segment_storage_provider: SSP,
 }
 
 pub type LogError<S, SD> = SegmentedLogError<<S as Storage>::Error, <SD as SerDe>::Error>;
@@ -93,9 +93,9 @@ where
     type Size = S::Size;
 
     fn size(&self) -> Self::Size {
-        self._read_segments
+        self.read_segments
             .iter()
-            .chain(self._write_segment.iter())
+            .chain(self.write_segment.iter())
             .map(|x| x.size())
             .sum()
     }
@@ -146,10 +146,10 @@ where
             .ok_or(SegmentedLogError::NoSegmentsCreated)?;
 
         Ok(Self {
-            _write_segment: Some(write_segment),
-            _read_segments: read_segments,
-            _config: config,
-            _segment_storage_provider: segment_storage_provider,
+            write_segment: Some(write_segment),
+            read_segments,
+            config,
+            segment_storage_provider,
         })
     }
 }
@@ -157,8 +157,8 @@ where
 macro_rules! new_segment {
     ($segmented_log:ident, $base_index:ident) => {
         Segment::with_segment_storage_provider_config_and_base_index(
-            &mut $segmented_log._segment_storage_provider,
-            $segmented_log._config.segment_config,
+            &mut $segmented_log.segment_storage_provider,
+            $segmented_log.config.segment_config,
             $base_index,
         )
         .await
@@ -178,7 +178,7 @@ macro_rules! consume_segment {
 macro_rules! take_write_segment {
     ($segmented_log:ident) => {
         $segmented_log
-            ._write_segment
+            .write_segment
             .take()
             .ok_or(SegmentedLogError::WriteSegmentLost)
     };
@@ -187,7 +187,7 @@ macro_rules! take_write_segment {
 macro_rules! write_segment_ref {
     ($segmented_log:ident, $ref_method:ident) => {
         $segmented_log
-            ._write_segment
+            .write_segment
             .$ref_method()
             .ok_or(SegmentedLogError::WriteSegmentLost)
     };
@@ -211,19 +211,19 @@ where
     type Value = Record<M, Idx, S::Content>;
 
     fn highest_index(&self) -> Self::Idx {
-        self._write_segment
+        self.write_segment
             .as_ref()
             .map(|segment| segment.highest_index())
-            .unwrap_or(self._config.initial_index)
+            .unwrap_or(self.config.initial_index)
     }
 
     fn lowest_index(&self) -> Self::Idx {
-        self._read_segments
+        self.read_segments
             .iter()
-            .chain(self._write_segment.iter())
+            .chain(self.write_segment.iter())
             .next()
             .map(|segment| segment.lowest_index())
-            .unwrap_or(self._config.initial_index)
+            .unwrap_or(self.config.initial_index)
     }
 
     async fn read(&self, idx: &Self::Idx) -> Result<Self::Value, Self::ReadError> {
@@ -231,9 +231,9 @@ where
             return Err(SegmentedLogError::IndexOutOfBounds);
         }
 
-        self._read_segments
+        self.read_segments
             .iter()
-            .chain(self._write_segment.iter())
+            .chain(self.write_segment.iter())
             .find(|segment| segment.has_index(idx))
             .ok_or(SegmentedLogError::IndexGapEncountered)?
             .read(idx)
@@ -260,8 +260,8 @@ where
         let write_segment = take_write_segment!(self)?;
         let next_index = write_segment.highest_index();
 
-        self._read_segments.push(write_segment);
-        self._write_segment = Some(new_segment!(self, next_index)?);
+        self.read_segments.push(write_segment);
+        self.write_segment = Some(new_segment!(self, next_index)?);
 
         Ok(())
     }
@@ -272,7 +272,7 @@ where
 
         consume_segment!(write_segment, close)?;
 
-        self._write_segment = Some(new_segment!(self, write_segment_base_index)?);
+        self.write_segment = Some(new_segment!(self, write_segment_base_index)?);
 
         Ok(())
     }
@@ -283,7 +283,7 @@ where
     ) -> Result<Idx, LogError<S, SD>> {
         let next_index = self.highest_index();
 
-        let mut segments = std::mem::take(&mut self._read_segments);
+        let mut segments = std::mem::take(&mut self.read_segments);
         segments.push(take_write_segment!(self)?);
 
         let segment_pos_in_vec = segments
@@ -303,8 +303,8 @@ where
             new_segment!(self, next_index)?
         };
 
-        self._read_segments = to_keep;
-        self._write_segment = Some(write_segment);
+        self.read_segments = to_keep;
+        self.write_segment = Some(write_segment);
 
         let mut num_records_removed = <Idx as num::Zero>::zero();
         for segment in to_remove.drain(..) {
@@ -377,13 +377,13 @@ where
         }
 
         let segment_pos_in_vec = self
-            ._read_segments
+            .read_segments
             .iter()
             .position(|seg| seg.has_index(idx))
             .ok_or(SegmentedLogError::IndexGapEncountered)?;
 
         let segment_to_truncate = self
-            ._read_segments
+            .read_segments
             .get_mut(segment_pos_in_vec)
             .ok_or(SegmentedLogError::IndexGapEncountered)?;
 
@@ -394,14 +394,14 @@ where
 
         let next_index = segment_to_truncate.highest_index();
 
-        let mut segments_to_remove = self._read_segments.split_off(segment_pos_in_vec + 1);
+        let mut segments_to_remove = self.read_segments.split_off(segment_pos_in_vec + 1);
         segments_to_remove.push(take_write_segment!(self)?);
 
         for segment in segments_to_remove.drain(..) {
             consume_segment!(segment, remove)?;
         }
 
-        self._write_segment = Some(new_segment!(self, next_index)?);
+        self.write_segment = Some(new_segment!(self, next_index)?);
 
         Ok(())
     }
@@ -409,7 +409,7 @@ where
 
 macro_rules! consume_segmented_log {
     ($segmented_log:ident, $consume_method:ident) => {
-        let segments = &mut $segmented_log._read_segments;
+        let segments = &mut $segmented_log.read_segments;
         segments.push(take_write_segment!($segmented_log)?);
         for segment in segments.drain(..) {
             consume_segment!(segment, $consume_method)?;
