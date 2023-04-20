@@ -12,13 +12,13 @@ type Map<Idx> = BTreeMap<Idx, (Mem, Mem)>;
 type StorageMap<Idx> = Rc<RefCell<Map<Idx>>>;
 
 pub struct InMemSegmentStorageProvider<Idx> {
-    _storage_map: StorageMap<Idx>,
+    storage_map: StorageMap<Idx>,
 }
 
 impl<Idx> Default for InMemSegmentStorageProvider<Idx> {
     fn default() -> Self {
         Self {
-            _storage_map: Default::default(),
+            storage_map: Default::default(),
         }
     }
 }
@@ -26,7 +26,7 @@ impl<Idx> Default for InMemSegmentStorageProvider<Idx> {
 impl<Idx> Clone for InMemSegmentStorageProvider<Idx> {
     fn clone(&self) -> Self {
         Self {
-            _storage_map: self._storage_map.clone(),
+            storage_map: self.storage_map.clone(),
         }
     }
 }
@@ -41,7 +41,7 @@ where
     ) -> Result<Vec<Idx>, InMemStorageError> {
         loop {
             let mut storage_map = self
-                ._storage_map
+                .storage_map
                 .try_borrow_mut()
                 .map_err(|_| InMemStorageError::BorrowError)?;
 
@@ -67,7 +67,7 @@ where
         }
 
         Ok(self
-            ._storage_map
+            .storage_map
             .try_borrow()
             .map_err(|_| InMemStorageError::BorrowError)?
             .keys()
@@ -80,7 +80,7 @@ where
         segment_base_idx: &Idx,
     ) -> Result<SegmentStorage<InMemStorage>, InMemStorageError> {
         let mut storage_map = self
-            ._storage_map
+            .storage_map
             .try_borrow_mut()
             .map_err(|_| InMemStorageError::BorrowError)?;
 
