@@ -599,19 +599,19 @@ pub(crate) mod test {
             .await
             .unwrap();
 
-        if let Err(_) = segmented_log
+        if segmented_log
             .append(Record {
                 metadata: MetaWithIdx {
                     metadata: M::default(),
                     index: None,
                 },
                 value: futures_lite::stream::iter(
-                    records(2, _RECORDS.len()).map(|x| Ok::<&[u8], Infallible>(x)),
+                    records(2, _RECORDS.len()).map(Ok::<&[u8], Infallible>),
                 ),
             })
             .await
+            .is_ok()
         {
-        } else {
             unreachable!("Wrong result on exceeding max_store_bytes");
         }
 
