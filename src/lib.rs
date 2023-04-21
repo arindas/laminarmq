@@ -214,7 +214,6 @@
 //! At regular intervals, segments with age greater than the specified "segment_age" are removed and the messages
 //! stored in these segments are lost. A good value for "segment_age" could be `7 days`.
 
-pub mod commit_log;
 pub mod common;
 pub mod server;
 pub mod storage;
@@ -222,6 +221,4 @@ pub mod storage;
 #[cfg(not(tarpaulin_include))]
 pub mod prelude {
     //! Prelude module for [`laminarmq`](super) with common exports for convenience.
-
-    pub use super::commit_log::prelude::*;
 }

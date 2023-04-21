@@ -1,34 +1,23 @@
 use glommio::{executor, Latency, LocalExecutorBuilder, Placement, Shares};
-use hyper::{Body, Request, Response, StatusCode};
+use hyper::{service::service_fn, Body, Request, Response, StatusCode};
+use laminarmq::server::{impls::glommio::hyper_compat::HyperServer, Server};
 use std::convert::Infallible;
 use std::rc::Rc;
-use tracing::{debug, error, info, instrument, subscriber, Level};
+use tracing::{debug, info, instrument, subscriber, Level};
+use tracing::{info_span, Instrument};
 use tracing_subscriber::FmtSubscriber;
-
-use laminarmq::server::router::{single_node::Router, Router as _};
 
 const THREAD_NAME: &str = "laminarmq_server_thread_0";
 
-struct State {
-    pub router: Router,
-    pub _task_tx: (),
-}
+struct State;
 
 #[cfg(not(tarpaulin_include))]
-#[instrument(skip(shared_state))]
+#[instrument(skip(_shared_state))]
 async fn request_handler(
-    shared_state: Rc<State>,
+    _shared_state: Rc<State>,
     request: Request<Body>,
 ) -> Result<Response<Body>, Infallible> {
-    let response = if let Some(request) = shared_state.router.route(request).await {
-        debug!("serving => {:?}", request);
-
-        Ok(Body::from("Valid request!"))
-    } else {
-        error!("Request not routed.");
-
-        Err((String::with_capacity(0), StatusCode::NOT_FOUND))
-    };
+    let response = Err((String::with_capacity(0), StatusCode::NOT_FOUND));
 
     debug!("Response received.");
 
@@ -49,10 +38,6 @@ async fn request_handler(
 #[cfg(not(tarpaulin_include))]
 #[cfg(target_os = "linux")]
 fn main() {
-    use hyper::service::service_fn;
-    use laminarmq::server::{glommio_impl::hyper_compat::HyperServer, Server};
-    use tracing::{info_span, Instrument};
-
     let fmt_subscriber = FmtSubscriber::builder()
         .with_max_level(Level::DEBUG)
         .finish();
@@ -76,10 +61,7 @@ fn main() {
     LocalExecutorBuilder::new(Placement::Unbound)
         .name(THREAD_NAME)
         .spawn(|| async move {
-            let shared_state = Rc::new(State {
-                router: Router::default(),
-                _task_tx: (),
-            });
+            let shared_state = Rc::new(State {});
 
             let rpc_server_tq = executor().create_task_queue(
                 Shares::default(),

@@ -1,5 +1,17 @@
 //! Module providing abstractions for commit-log based message queue RPC server.
 
+/// Trait for abstracting a RPC server implementation.
+pub trait Server<Service> {
+    type Result;
+
+    /// Serves RPC requests using the provided `Service` instance.
+    ///
+    /// ## Implementation note:
+    /// This method should setup a mechanism for scheduling
+    /// request-serving tasks and return without blocking.
+    fn serve(&self, service: Service) -> Self::Result;
+}
+
 pub mod channel {
     //! Module providing traits for representing channels. These traits have to be implemented
     //! for each async runtime channel implementation.
@@ -40,26 +52,5 @@ pub mod channel {
     }
 }
 
-pub mod single_node;
-
-pub mod partition;
-pub mod router;
-pub mod worker;
-
-#[cfg(not(tarpaulin_include))]
-pub mod tokio_compat;
-
-#[cfg(target_os = "linux")]
-pub mod glommio_impl;
-
-/// Trait for abstracting a RPC server implementation.
-pub trait Server<Service> {
-    type Result;
-
-    /// Serves RPC requests using the provided `Service` instance.
-    ///
-    /// ## Implementation note:
-    /// This method should setup a mechanism for scheduling
-    /// request-serving tasks and return without blocking.
-    fn serve(&self, service: Service) -> Self::Result;
-}
+pub mod common;
+pub mod impls;

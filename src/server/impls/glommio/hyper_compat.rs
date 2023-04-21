@@ -1,6 +1,7 @@
 //! Module providing utilities for setting up a [`hyper`] server using [`glommio`].
 
-use crate::server::{tokio_compat::TokioIO, Server};
+use crate::common::tokio_compat::TokioIO;
+use crate::server::Server;
 use futures_lite::Future;
 use glommio::{net::TcpListener, sync::Semaphore, GlommioError, TaskQueueHandle as TaskQ};
 use hyper::{rt::Executor, server::conn::Http, Request, Response};
