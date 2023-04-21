@@ -175,17 +175,17 @@ pub mod split {
     }
 }
 
-pub mod serde {
+pub mod serde_compat {
     use std::ops::Deref;
 
     use serde::{Deserialize, Serialize};
 
-    pub trait SerDe {
+    pub trait SerializationProvider {
+        type SerializedBytes: Deref<Target = [u8]>;
+
         type Error: std::error::Error;
 
-        type SerBytes: Deref<Target = [u8]>;
-
-        fn serialize<T>(value: &T) -> Result<Self::SerBytes, Self::Error>
+        fn serialize<T>(value: &T) -> Result<Self::SerializedBytes, Self::Error>
         where
             T: Serialize;
 
@@ -199,16 +199,14 @@ pub mod serde {
     }
 
     pub mod bincode {
-        use super::SerDe;
-
         pub struct BinCode;
 
-        impl SerDe for BinCode {
+        impl super::SerializationProvider for BinCode {
             type Error = bincode::Error;
 
-            type SerBytes = Vec<u8>;
+            type SerializedBytes = Vec<u8>;
 
-            fn serialize<T>(value: &T) -> Result<Self::SerBytes, Self::Error>
+            fn serialize<T>(value: &T) -> Result<Self::SerializedBytes, Self::Error>
             where
                 T: serde::Serialize,
             {

@@ -1,6 +1,6 @@
 use super::{
     super::super::{
-        super::common::{serde::SerDe, split::SplitAt},
+        super::common::{serde_compat::SerializationProvider, split::SplitAt},
         AsyncConsume, AsyncIndexedRead, AsyncTruncate, Sizable, Storage,
     },
     index::{Index, IndexError, IndexRecord},
@@ -28,7 +28,7 @@ pub struct Config<Size> {
     pub max_index_size: Size,
 }
 
-pub struct Segment<S, M, H, Idx, Size, SD> {
+pub struct Segment<S, M, H, Idx, Size, SERP> {
     index: Index<S, Idx>,
     store: Store<S, H>,
 
@@ -36,10 +36,10 @@ pub struct Segment<S, M, H, Idx, Size, SD> {
 
     created_at: Instant,
 
-    _phantom_date: PhantomData<(M, SD)>,
+    _phantom_date: PhantomData<(M, SERP)>,
 }
 
-impl<S, M, H, Idx, SD> Segment<S, M, H, Idx, S::Size, SD>
+impl<S, M, H, Idx, SERP> Segment<S, M, H, Idx, S::Size, SERP>
 where
     S: Storage,
 {
@@ -63,7 +63,7 @@ where
     }
 }
 
-impl<S, M, H, Idx, SD> Sizable for Segment<S, M, H, Idx, S::Size, SD>
+impl<S, M, H, Idx, SERP> Sizable for Segment<S, M, H, Idx, S::Size, SERP>
 where
     S: Storage,
 {
@@ -104,20 +104,21 @@ where
 {
 }
 
-pub type SegmentOpError<S, SD> = SegmentError<<S as Storage>::Error, <SD as SerDe>::Error>;
+pub type SegmentOpError<S, SERP> =
+    SegmentError<<S as Storage>::Error, <SERP as SerializationProvider>::Error>;
 
 #[async_trait(?Send)]
-impl<S, M, H, Idx, SD> AsyncIndexedRead for Segment<S, M, H, Idx, S::Size, SD>
+impl<S, M, H, Idx, SERP> AsyncIndexedRead for Segment<S, M, H, Idx, S::Size, SERP>
 where
     S: Storage,
     S::Content: SplitAt<u8>,
-    SD: SerDe,
+    SERP: SerializationProvider,
     H: Hasher + Default,
     Idx: Unsigned + CheckedSub + ToPrimitive + Ord + Copy,
     Idx: Serialize + DeserializeOwned,
     M: Serialize + DeserializeOwned,
 {
-    type ReadError = SegmentOpError<S, SD>;
+    type ReadError = SegmentOpError<S, SERP>;
 
     type Idx = Idx;
 
@@ -148,39 +149,39 @@ where
             .map_err(SegmentError::StoreError)?;
 
         let metadata_bytes_len_bytes_len =
-            SD::serialized_size(&0_usize).map_err(SegmentError::SerializationError)?;
+            SERP::serialized_size(&0_usize).map_err(SegmentError::SerializationError)?;
 
         let (metadata_bytes_len_bytes, metadata_with_value) = record_content
             .split_at(metadata_bytes_len_bytes_len)
             .ok_or(SegmentError::RecordMetadataNotFound)?;
 
-        let metadata_size =
-            SD::deserialize(&metadata_bytes_len_bytes).map_err(SegmentError::SerializationError)?;
+        let metadata_size = SERP::deserialize(&metadata_bytes_len_bytes)
+            .map_err(SegmentError::SerializationError)?;
 
         let (metadata_bytes, value) = metadata_with_value
             .split_at(metadata_size)
             .ok_or(SegmentError::RecordMetadataNotFound)?;
 
         let metadata =
-            SD::deserialize(&metadata_bytes).map_err(SegmentError::SerializationError)?;
+            SERP::deserialize(&metadata_bytes).map_err(SegmentError::SerializationError)?;
 
         Ok(Record { metadata, value })
     }
 }
 
-impl<S, M, H, Idx, SD> Segment<S, M, H, Idx, S::Size, SD>
+impl<S, M, H, Idx, SERP> Segment<S, M, H, Idx, S::Size, SERP>
 where
     S: Storage,
     M: Serialize,
     H: Hasher + Default,
     Idx: Unsigned + CheckedSub + ToPrimitive + Ord + Copy,
     Idx: Serialize,
-    SD: SerDe,
+    SERP: SerializationProvider,
 {
     async fn append_serialized_record<XBuf, X, XE>(
         &mut self,
         stream: X,
-    ) -> Result<Idx, SegmentOpError<S, SD>>
+    ) -> Result<Idx, SegmentOpError<S, SERP>>
     where
         XBuf: Deref<Target = [u8]>,
         X: Stream<Item = Result<XBuf, XE>> + Unpin,
@@ -215,7 +216,7 @@ where
     pub async fn append<XBuf, X, XE>(
         &mut self,
         record: Record<M, Idx, X>,
-    ) -> Result<Idx, SegmentOpError<S, SD>>
+    ) -> Result<Idx, SegmentOpError<S, SERP>>
     where
         XBuf: Deref<Target = [u8]>,
         X: Stream<Item = Result<XBuf, XE>> + Unpin,
@@ -227,12 +228,13 @@ where
         let metadata = record
             .metadata
             .anchored_with_index(self.index.highest_index())
-            .ok_or(SegmentOpError::<S, SD>::InvalidAppendIdx)?;
+            .ok_or(SegmentOpError::<S, SERP>::InvalidAppendIdx)?;
 
-        let metadata_bytes = SD::serialize(&metadata).map_err(SegmentError::SerializationError)?;
+        let metadata_bytes =
+            SERP::serialize(&metadata).map_err(SegmentError::SerializationError)?;
 
         let metadata_bytes_len_bytes =
-            SD::serialize(&metadata_bytes.len()).map_err(SegmentError::SerializationError)?;
+            SERP::serialize(&metadata_bytes.len()).map_err(SegmentError::SerializationError)?;
 
         enum SBuf<XBuf, YBuf> {
             XBuf(XBuf),
@@ -268,19 +270,19 @@ where
     }
 }
 
-impl<S, M, H, Idx, SD> Segment<S, M, H, Idx, S::Size, SD>
+impl<S, M, H, Idx, SERP> Segment<S, M, H, Idx, S::Size, SERP>
 where
     S: Storage,
     M: Serialize + Clone,
     H: Hasher + Default,
     Idx: Unsigned + CheckedSub + ToPrimitive + Ord + Copy,
     Idx: Serialize,
-    SD: SerDe,
+    SERP: SerializationProvider,
 {
     pub async fn append_record_with_contiguous_bytes<X>(
         &mut self,
         record: &Record<M, Idx, X>,
-    ) -> Result<Idx, SegmentOpError<S, SD>>
+    ) -> Result<Idx, SegmentOpError<S, SERP>>
     where
         X: Deref<Target = [u8]>,
     {
@@ -292,12 +294,13 @@ where
             .metadata
             .clone()
             .anchored_with_index(self.index.highest_index())
-            .ok_or(SegmentOpError::<S, SD>::InvalidAppendIdx)?;
+            .ok_or(SegmentOpError::<S, SERP>::InvalidAppendIdx)?;
 
-        let metadata_bytes = SD::serialize(&metadata).map_err(SegmentError::SerializationError)?;
+        let metadata_bytes =
+            SERP::serialize(&metadata).map_err(SegmentError::SerializationError)?;
 
         let metadata_bytes_len_bytes =
-            SD::serialize(&metadata_bytes.len()).map_err(SegmentError::SerializationError)?;
+            SERP::serialize(&metadata_bytes.len()).map_err(SegmentError::SerializationError)?;
 
         let stream = futures_lite::stream::iter([
             Ok::<&[u8], Infallible>(metadata_bytes_len_bytes.deref()),
@@ -310,15 +313,15 @@ where
 }
 
 #[async_trait(?Send)]
-impl<S, M, H, Idx, SD> AsyncTruncate for Segment<S, M, H, Idx, S::Size, SD>
+impl<S, M, H, Idx, SERP> AsyncTruncate for Segment<S, M, H, Idx, S::Size, SERP>
 where
     S: Storage,
     Idx: Unsigned + CheckedSub + ToPrimitive + Ord + Copy,
-    SD: SerDe,
+    SERP: SerializationProvider,
 {
     type Mark = Idx;
 
-    type TruncError = SegmentError<S::Error, SD::Error>;
+    type TruncError = SegmentError<S::Error, SERP::Error>;
 
     async fn truncate(&mut self, mark: &Self::Mark) -> Result<(), Self::TruncError> {
         let index_record = self
@@ -345,12 +348,12 @@ where
 }
 
 #[async_trait(?Send)]
-impl<S, M, H, Idx, SD> AsyncConsume for Segment<S, M, H, Idx, S::Size, SD>
+impl<S, M, H, Idx, SERP> AsyncConsume for Segment<S, M, H, Idx, S::Size, SERP>
 where
     S: Storage,
-    SD: SerDe,
+    SERP: SerializationProvider,
 {
-    type ConsumeError = SegmentError<S::Error, SD::Error>;
+    type ConsumeError = SegmentError<S::Error, SERP::Error>;
 
     async fn remove(self) -> Result<(), Self::ConsumeError> {
         self.store
@@ -388,18 +391,18 @@ where
     async fn obtain(&mut self, idx: &Idx) -> Result<SegmentStorage<S>, S::Error>;
 }
 
-impl<S, M, H, Idx, SD> Segment<S, M, H, Idx, S::Size, SD>
+impl<S, M, H, Idx, SERP> Segment<S, M, H, Idx, S::Size, SERP>
 where
     S: Storage,
     H: Default,
     Idx: FromPrimitive + Copy + Eq,
-    SD: SerDe,
+    SERP: SerializationProvider,
 {
     pub async fn with_segment_storage_provider_config_and_base_index<SSP>(
         segment_storage_provider: &mut SSP,
         config: Config<S::Size>,
         base_index: Idx,
-    ) -> Result<Self, SegmentError<S::Error, SD::Error>>
+    ) -> Result<Self, SegmentError<S::Error, SERP::Error>>
     where
         SSP: SegmentStorageProvider<S, Idx>,
     {
@@ -429,7 +432,7 @@ pub(crate) mod test {
     use num::Zero;
     use std::fmt::Debug;
 
-    pub(crate) fn _segment_config<M, Idx, Size, SD>(
+    pub(crate) fn _segment_config<M, Idx, Size, SERP>(
         record_len: usize,
         num_records: usize,
     ) -> Option<Config<Size>>
@@ -437,11 +440,11 @@ pub(crate) mod test {
         M: Default + Serialize,
         Idx: Serialize + Zero,
         Size: FromPrimitive,
-        SD: SerDe,
+        SERP: SerializationProvider,
     {
-        let metadata_len_serialized_size = SD::serialized_size(&0_usize).ok()?;
+        let metadata_len_serialized_size = SERP::serialized_size(&0_usize).ok()?;
 
-        let metadata_serialized_size = SD::serialized_size(&MetaWithIdx {
+        let metadata_serialized_size = SERP::serialized_size(&MetaWithIdx {
             metadata: M::default(),
             index: Some(Idx::zero()),
         })
@@ -460,9 +463,9 @@ pub(crate) mod test {
         })
     }
 
-    pub(crate) async fn _test_segment_read_append_truncate_consistency<S, M, H, Idx, SD, SSP>(
+    pub(crate) async fn _test_segment_read_append_truncate_consistency<S, M, H, Idx, SERP, SSP>(
         mut _segment_storage_provider: SSP,
-        _: PhantomData<(M, H, SD)>,
+        _: PhantomData<(M, H, SERP)>,
     ) where
         S: Storage,
         S::Size: FromPrimitive + Copy,
@@ -473,15 +476,15 @@ pub(crate) mod test {
         Idx: Unsigned + CheckedSub + FromPrimitive + ToPrimitive + Zero,
         Idx: Ord + Copy + Debug,
         Idx: Serialize + DeserializeOwned,
-        SD: SerDe,
+        SERP: SerializationProvider,
         SSP: SegmentStorageProvider<S, Idx>,
     {
         let segment_base_index = Idx::zero();
 
         let config =
-            _segment_config::<M, Idx, S::Size, SD>(_RECORDS[0].len(), _RECORDS.len()).unwrap();
+            _segment_config::<M, Idx, S::Size, SERP>(_RECORDS[0].len(), _RECORDS.len()).unwrap();
 
-        let mut segment = Segment::<S, M, H, Idx, S::Size, SD>::with_segment_storage_provider_config_and_base_index(
+        let mut segment = Segment::<S, M, H, Idx, S::Size, SERP>::with_segment_storage_provider_config_and_base_index(
             &mut _segment_storage_provider,
             config,
             segment_base_index,
@@ -511,7 +514,7 @@ pub(crate) mod test {
 
         segment.close().await.unwrap();
 
-        let mut segment = Segment::<S, M, H, Idx, S::Size, SD>::with_segment_storage_provider_config_and_base_index(
+        let mut segment = Segment::<S, M, H, Idx, S::Size, SERP>::with_segment_storage_provider_config_and_base_index(
             &mut _segment_storage_provider,
             config,
             segment_base_index,
@@ -586,7 +589,7 @@ pub(crate) mod test {
 
         segment.remove().await.unwrap();
 
-        let segment = Segment::<S, M, H, Idx, S::Size, SD>::with_segment_storage_provider_config_and_base_index(
+        let segment = Segment::<S, M, H, Idx, S::Size, SERP>::with_segment_storage_provider_config_and_base_index(
             &mut _segment_storage_provider,
             config,
             segment_base_index,

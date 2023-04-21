@@ -2,7 +2,7 @@ pub mod segmented_log {
     #[cfg(test)]
     pub mod tests {
         use super::super::super::{
-            super::super::{super::common::serde::bincode, commit_log::segmented_log},
+            super::super::{super::common::serde_compat::bincode, commit_log::segmented_log},
             segment::InMemSegmentStorageProvider,
         };
         use futures_time::{future::FutureExt, time::Duration};

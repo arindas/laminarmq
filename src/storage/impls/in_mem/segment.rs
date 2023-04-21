@@ -107,7 +107,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        super::super::super::{super::common::serde::bincode, commit_log::segmented_log::segment},
+        super::super::super::{
+            super::common::serde_compat::bincode, commit_log::segmented_log::segment,
+        },
         *,
     };
     use std::marker::PhantomData;

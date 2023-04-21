@@ -5,7 +5,7 @@ pub mod store;
 use self::segment::{Segment, SegmentStorageProvider};
 use super::{
     super::super::{
-        common::{serde::SerDe, split::SplitAt},
+        common::{serde_compat::SerializationProvider, split::SplitAt},
         storage::{AsyncConsume, AsyncIndexedRead, AsyncTruncate, Sizable, Storage},
     },
     CommitLog,
@@ -75,18 +75,19 @@ pub struct Config<Idx, Size> {
     pub initial_index: Idx,
 }
 
-pub struct SegmentedLog<S, M, H, Idx, Size, SD, SSP> {
-    write_segment: Option<Segment<S, M, H, Idx, Size, SD>>,
-    read_segments: Vec<Segment<S, M, H, Idx, Size, SD>>,
+pub struct SegmentedLog<S, M, H, Idx, Size, SERP, SSP> {
+    write_segment: Option<Segment<S, M, H, Idx, Size, SERP>>,
+    read_segments: Vec<Segment<S, M, H, Idx, Size, SERP>>,
 
     config: Config<Idx, Size>,
 
     segment_storage_provider: SSP,
 }
 
-pub type LogError<S, SD> = SegmentedLogError<<S as Storage>::Error, <SD as SerDe>::Error>;
+pub type LogError<S, SERP> =
+    SegmentedLogError<<S as Storage>::Error, <SERP as SerializationProvider>::Error>;
 
-impl<S, M, H, Idx, SD, SSP> Sizable for SegmentedLog<S, M, H, Idx, S::Size, SD, SSP>
+impl<S, M, H, Idx, SERP, SSP> Sizable for SegmentedLog<S, M, H, Idx, S::Size, SERP, SSP>
 where
     S: Storage,
 {
@@ -101,19 +102,19 @@ where
     }
 }
 
-impl<S, M, H, Idx, SD, SSP> SegmentedLog<S, M, H, Idx, S::Size, SD, SSP>
+impl<S, M, H, Idx, SERP, SSP> SegmentedLog<S, M, H, Idx, S::Size, SERP, SSP>
 where
     S: Storage,
     S::Size: Copy,
     H: Default,
     Idx: FromPrimitive + Copy + Ord,
-    SD: SerDe,
+    SERP: SerializationProvider,
     SSP: SegmentStorageProvider<S, Idx>,
 {
     pub async fn new(
         config: Config<Idx, S::Size>,
         mut segment_storage_provider: SSP,
-    ) -> Result<Self, LogError<S, SD>> {
+    ) -> Result<Self, LogError<S, SERP>> {
         let mut segment_base_indices = segment_storage_provider
             .obtain_base_indices_of_stored_segments()
             .await
@@ -127,7 +128,7 @@ where
             _ => (),
         };
 
-        let mut read_segments = Vec::<Segment<S, M, H, Idx, S::Size, SD>>::new();
+        let mut read_segments = Vec::<Segment<S, M, H, Idx, S::Size, SERP>>::new();
 
         for segment_base_index in segment_base_indices {
             read_segments.push(
@@ -194,17 +195,17 @@ macro_rules! write_segment_ref {
 }
 
 #[async_trait(?Send)]
-impl<S, M, H, Idx, SD, SSP> AsyncIndexedRead for SegmentedLog<S, M, H, Idx, S::Size, SD, SSP>
+impl<S, M, H, Idx, SERP, SSP> AsyncIndexedRead for SegmentedLog<S, M, H, Idx, S::Size, SERP, SSP>
 where
     S: Storage,
     S::Content: SplitAt<u8>,
-    SD: SerDe,
+    SERP: SerializationProvider,
     H: Hasher + Default,
     Idx: Unsigned + CheckedSub + ToPrimitive + Ord + Copy,
     Idx: Serialize + DeserializeOwned,
     M: Serialize + DeserializeOwned,
 {
-    type ReadError = LogError<S, SD>;
+    type ReadError = LogError<S, SERP>;
 
     type Idx = Idx;
 
@@ -242,7 +243,7 @@ where
     }
 }
 
-impl<S, M, H, Idx, SD, SSP> SegmentedLog<S, M, H, Idx, S::Size, SD, SSP>
+impl<S, M, H, Idx, SERP, SSP> SegmentedLog<S, M, H, Idx, S::Size, SERP, SSP>
 where
     S: Storage,
     S::Content: SplitAt<u8>,
@@ -251,10 +252,10 @@ where
     Idx: FromPrimitive + ToPrimitive + Unsigned + CheckedSub,
     Idx: Copy + Ord + Serialize + DeserializeOwned,
     M: Serialize + DeserializeOwned,
-    SD: SerDe,
+    SERP: SerializationProvider,
     SSP: SegmentStorageProvider<S, Idx>,
 {
-    pub async fn rotate_new_write_segment(&mut self) -> Result<(), LogError<S, SD>> {
+    pub async fn rotate_new_write_segment(&mut self) -> Result<(), LogError<S, SERP>> {
         self.reopen_write_segment().await?;
 
         let write_segment = take_write_segment!(self)?;
@@ -266,7 +267,7 @@ where
         Ok(())
     }
 
-    pub async fn reopen_write_segment(&mut self) -> Result<(), LogError<S, SD>> {
+    pub async fn reopen_write_segment(&mut self) -> Result<(), LogError<S, SERP>> {
         let write_segment = take_write_segment!(self)?;
         let write_segment_base_index = write_segment.lowest_index();
 
@@ -280,7 +281,7 @@ where
     pub async fn remove_expired_segments(
         &mut self,
         expiry_duration: Duration,
-    ) -> Result<Idx, LogError<S, SD>> {
+    ) -> Result<Idx, LogError<S, SERP>> {
         let next_index = self.highest_index();
 
         let mut segments = std::mem::take(&mut self.read_segments);
@@ -315,7 +316,7 @@ where
     }
 }
 
-impl<S, M, H, Idx, SD, SSP> SegmentedLog<S, M, H, Idx, S::Size, SD, SSP>
+impl<S, M, H, Idx, SERP, SSP> SegmentedLog<S, M, H, Idx, S::Size, SERP, SSP>
 where
     S: Storage,
     S::Content: SplitAt<u8>,
@@ -324,13 +325,13 @@ where
     Idx: FromPrimitive + ToPrimitive + Unsigned + CheckedSub,
     Idx: Copy + Ord + Serialize + DeserializeOwned,
     M: Clone + Serialize + DeserializeOwned,
-    SD: SerDe,
+    SERP: SerializationProvider,
     SSP: SegmentStorageProvider<S, Idx>,
 {
     pub async fn append_record_with_contiguous_bytes<X>(
         &mut self,
         record: &Record<M, Idx, X>,
-    ) -> Result<Idx, LogError<S, SD>>
+    ) -> Result<Idx, LogError<S, SERP>>
     where
         X: Deref<Target = [u8]>,
     {
@@ -346,19 +347,19 @@ where
 }
 
 #[async_trait(?Send)]
-impl<S, M, H, Idx, SD, SSP> AsyncTruncate for SegmentedLog<S, M, H, Idx, S::Size, SD, SSP>
+impl<S, M, H, Idx, SERP, SSP> AsyncTruncate for SegmentedLog<S, M, H, Idx, S::Size, SERP, SSP>
 where
     S: Storage,
     S::Content: SplitAt<u8>,
     S::Size: Copy,
-    SD: SerDe,
+    SERP: SerializationProvider,
     H: Hasher + Default,
     Idx: Unsigned + CheckedSub + FromPrimitive + ToPrimitive + Ord + Copy,
     Idx: Serialize + DeserializeOwned,
     M: Default + Serialize + DeserializeOwned,
     SSP: SegmentStorageProvider<S, Idx>,
 {
-    type TruncError = LogError<S, SD>;
+    type TruncError = LogError<S, SERP>;
 
     type Mark = Idx;
 
@@ -418,12 +419,12 @@ macro_rules! consume_segmented_log {
 }
 
 #[async_trait(?Send)]
-impl<S, M, H, Idx, SD, SSP> AsyncConsume for SegmentedLog<S, M, H, Idx, S::Size, SD, SSP>
+impl<S, M, H, Idx, SERP, SSP> AsyncConsume for SegmentedLog<S, M, H, Idx, S::Size, SERP, SSP>
 where
     S: Storage,
-    SD: SerDe,
+    SERP: SerializationProvider,
 {
-    type ConsumeError = LogError<S, SD>;
+    type ConsumeError = LogError<S, SERP>;
 
     async fn remove(mut self) -> Result<(), Self::ConsumeError> {
         consume_segmented_log!(self, remove);
@@ -437,8 +438,8 @@ where
 }
 
 #[async_trait(?Send)]
-impl<S, M, H, Idx, SD, SSP, XBuf, X, XE> CommitLog<MetaWithIdx<M, Idx>, X, S::Content>
-    for SegmentedLog<S, M, H, Idx, S::Size, SD, SSP>
+impl<S, M, H, Idx, SERP, SSP, XBuf, X, XE> CommitLog<MetaWithIdx<M, Idx>, X, S::Content>
+    for SegmentedLog<S, M, H, Idx, S::Size, SERP, SSP>
 where
     S: Storage,
     S::Content: SplitAt<u8>,
@@ -447,12 +448,12 @@ where
     Idx: FromPrimitive + ToPrimitive + Unsigned + CheckedSub,
     Idx: Copy + Ord + Serialize + DeserializeOwned,
     M: Default + Serialize + DeserializeOwned,
-    SD: SerDe,
+    SERP: SerializationProvider,
     SSP: SegmentStorageProvider<S, Idx>,
     XBuf: Deref<Target = [u8]>,
     X: Stream<Item = Result<XBuf, XE>> + Unpin,
 {
-    type Error = LogError<S, SD>;
+    type Error = LogError<S, SERP>;
 
     async fn remove_expired(
         &mut self,
@@ -488,11 +489,11 @@ pub(crate) mod test {
         M,
         H,
         Idx,
-        SD,
+        SERP,
         SSP,
     >(
         _segment_storage_provider: SSP,
-        _: PhantomData<(M, H, SD)>,
+        _: PhantomData<(M, H, SERP)>,
     ) where
         S: Storage,
         S::Size: FromPrimitive + Copy,
@@ -503,7 +504,7 @@ pub(crate) mod test {
         Idx: Unsigned + CheckedSub + FromPrimitive + ToPrimitive,
         Idx: Ord + Copy + Debug,
         Idx: Serialize + DeserializeOwned,
-        SD: SerDe,
+        SERP: SerializationProvider,
         SSP: SegmentStorageProvider<S, Idx> + Clone,
     {
         const INITIAL_INDEX: usize = 42;
@@ -513,7 +514,7 @@ pub(crate) mod test {
         const NUM_SEGMENTS: usize = 10;
 
         let config = Config {
-            segment_config: _segment_config::<M, Idx, S::Size, SD>(
+            segment_config: _segment_config::<M, Idx, S::Size, SERP>(
                 _RECORDS[0].len(),
                 _RECORDS.len(),
             )
@@ -521,7 +522,7 @@ pub(crate) mod test {
             initial_index,
         };
 
-        let mut segmented_log = SegmentedLog::<S, M, H, Idx, S::Size, SD, SSP>::new(
+        let mut segmented_log = SegmentedLog::<S, M, H, Idx, S::Size, SERP, SSP>::new(
             config,
             _segment_storage_provider.clone(),
         )
@@ -564,7 +565,7 @@ pub(crate) mod test {
 
         segmented_log.close().await.unwrap();
 
-        let mut segmented_log = SegmentedLog::<S, M, H, Idx, S::Size, SD, SSP>::new(
+        let mut segmented_log = SegmentedLog::<S, M, H, Idx, S::Size, SERP, SSP>::new(
             config,
             _segment_storage_provider.clone(),
         )
@@ -619,7 +620,7 @@ pub(crate) mod test {
 
         segmented_log.close().await.unwrap();
 
-        let segmented_log = SegmentedLog::<S, M, H, Idx, S::Size, SD, SSP>::new(
+        let segmented_log = SegmentedLog::<S, M, H, Idx, S::Size, SERP, SSP>::new(
             config,
             _segment_storage_provider.clone(),
         )
@@ -632,7 +633,7 @@ pub(crate) mod test {
 
         segmented_log.remove().await.unwrap();
 
-        let segmented_log = SegmentedLog::<S, M, H, Idx, S::Size, SD, SSP>::new(
+        let segmented_log = SegmentedLog::<S, M, H, Idx, S::Size, SERP, SSP>::new(
             config,
             _segment_storage_provider.clone(),
         )
@@ -652,14 +653,14 @@ pub(crate) mod test {
         M,
         H,
         Idx,
-        SD,
+        SERP,
         SSP,
         MTF,
         TF,
     >(
         _segment_storage_provider: SSP,
         _make_sleep_future: MTF,
-        _: PhantomData<(M, H, SD)>,
+        _: PhantomData<(M, H, SERP)>,
     ) where
         S: Storage,
         S::Size: FromPrimitive + Copy,
@@ -670,7 +671,7 @@ pub(crate) mod test {
         Idx: Unsigned + CheckedSub + FromPrimitive + ToPrimitive,
         Idx: Ord + Copy + Debug,
         Idx: Serialize + DeserializeOwned,
-        SD: SerDe,
+        SERP: SerializationProvider,
         SSP: SegmentStorageProvider<S, Idx> + Clone,
         MTF: Fn(Duration) -> TF,
         TF: Future<Output = ()>,
@@ -682,7 +683,7 @@ pub(crate) mod test {
         const NUM_SEGMENTS: usize = 10;
 
         let config = Config {
-            segment_config: _segment_config::<M, Idx, S::Size, SD>(
+            segment_config: _segment_config::<M, Idx, S::Size, SERP>(
                 _RECORDS[0].len(),
                 _RECORDS.len(),
             )
@@ -690,7 +691,7 @@ pub(crate) mod test {
             initial_index,
         };
 
-        let mut segmented_log = SegmentedLog::<S, M, H, Idx, S::Size, SD, SSP>::new(
+        let mut segmented_log = SegmentedLog::<S, M, H, Idx, S::Size, SERP, SSP>::new(
             config,
             _segment_storage_provider.clone(),
         )
