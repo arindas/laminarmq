@@ -1,11 +1,6 @@
 name: rust-ci
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - 'feature/**'
-    paths:
-      - 'src/**'
   pull_request:
     branches:
       - main
