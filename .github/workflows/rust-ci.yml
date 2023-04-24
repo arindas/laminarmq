@@ -48,14 +48,14 @@ jobs:
         run: |
           ./grcov ./target/coverage.prof --binary-path \
           ./target/debug/deps/ -s . \
-          -t lcov --ignore-not-existing --ignore '../*' \
-          --ignore "/*" -o ./coverage.txt
+          -t covdir --ignore-not-existing --ignore '../*' \
+          --ignore "/*" -o ./coverage.json
 
       - name: Upload coverage to codecov.io
         uses: codecov/codecov-action@v3
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./coverage.txt
+          files: ./coverage.json
 
 
   clippy-check:
