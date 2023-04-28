@@ -8,7 +8,7 @@ use glommio::{
     io::{DmaFile, DmaStreamWriter, DmaStreamWriterBuilder, OpenOptions, ReadResult},
     GlommioError,
 };
-use std::{ops::Deref, path::Path};
+use std::path::{Path, PathBuf};
 
 #[derive(Debug)]
 pub enum DmaStorageError {
@@ -16,7 +16,6 @@ pub enum DmaStorageError {
     IoError(std::io::Error),
     StreamUnexpectedLength,
     ReadBeyondWrittenArea,
-    NoBackingFileError,
 }
 
 impl From<std::io::Error> for DmaStorageError {
@@ -44,6 +43,8 @@ pub struct DmaStorage {
     reader: DmaFile,
     writer: DmaStreamWriter,
 
+    backing_file_path: PathBuf,
+
     buffer_size: usize,
     size: u64,
 }
@@ -59,6 +60,8 @@ impl DmaStorage {
         path: P,
         buffer_size: usize,
     ) -> Result<Self, DmaStorageError> {
+        let backing_file_path = path.as_ref().to_path_buf();
+
         let backing_dma_storage_writer_file =
             Self::obtain_backing_writer_file(path.as_ref()).await?;
 
@@ -73,6 +76,7 @@ impl DmaStorage {
                 backing_dma_storage_writer_file,
                 buffer_size,
             ),
+            backing_file_path,
             buffer_size,
             size: initial_size,
         })
@@ -126,18 +130,13 @@ impl AsyncTruncate for DmaStorage {
 
     async fn truncate(&mut self, position: &Self::Mark) -> Result<(), Self::TruncError> {
         let (writer, reader) = {
-            let backing_file_path = self
-                .reader
-                .path()
-                .ok_or(DmaStorageError::NoBackingFileError)?;
-
             self.writer
                 .close()
                 .await
                 .map_err(DmaStorageError::IoError)?;
 
             let backing_writer_file =
-                Self::obtain_backing_writer_file(backing_file_path.deref()).await?;
+                Self::obtain_backing_writer_file(&self.backing_file_path).await?;
 
             backing_writer_file
                 .truncate(*position)
@@ -146,7 +145,7 @@ impl AsyncTruncate for DmaStorage {
 
             (
                 Self::stream_writer_with_buffer_size(backing_writer_file, self.buffer_size),
-                Self::obtain_backing_reader_file(backing_file_path.deref()).await?,
+                Self::obtain_backing_reader_file(&self.backing_file_path).await?,
             )
         };
 
@@ -163,12 +162,8 @@ impl AsyncTruncate for DmaStorage {
 impl AsyncConsume for DmaStorage {
     type ConsumeError = DmaStorageError;
 
-    async fn remove(self) -> Result<(), Self::ConsumeError> {
-        let backing_file_path = self
-            .reader
-            .path()
-            .ok_or(DmaStorageError::NoBackingFileError)?
-            .to_path_buf();
+    async fn remove(mut self) -> Result<(), Self::ConsumeError> {
+        let backing_file_path = std::mem::take(&mut self.backing_file_path);
 
         self.close().await?;
 
