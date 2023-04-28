@@ -22,8 +22,8 @@ where
 }
 
 pub struct DiskBackedSegmentStorageProvider<S, PASP, Idx> {
-    _path_addressed_storage_provider: PASP,
-    _storage_directory_path: PathBuf,
+    path_addressed_storage_provider: PASP,
+    storage_directory_path: PathBuf,
 
     _phantom_data: PhantomData<(S, Idx)>,
 }
@@ -48,8 +48,8 @@ where
 {
     fn clone(&self) -> Self {
         Self {
-            _path_addressed_storage_provider: self._path_addressed_storage_provider.clone(),
-            _storage_directory_path: self._storage_directory_path.clone(),
+            path_addressed_storage_provider: self.path_addressed_storage_provider.clone(),
+            storage_directory_path: self.storage_directory_path.clone(),
             _phantom_data: PhantomData,
         }
     }
@@ -71,8 +71,8 @@ where
         std::fs::create_dir_all(&storage_directory_path)?;
 
         Ok(Self {
-            _path_addressed_storage_provider: storage_provider,
-            _storage_directory_path: storage_directory_path,
+            path_addressed_storage_provider: storage_provider,
+            storage_directory_path,
             _phantom_data: PhantomData,
         })
     }
@@ -90,7 +90,7 @@ where
     S::Error: From<std::io::Error>,
 {
     async fn obtain_base_indices_of_stored_segments(&mut self) -> Result<Vec<Idx>, S::Error> {
-        let read_dir = std::fs::read_dir(&self._storage_directory_path).map_err(Into::into)?;
+        let read_dir = std::fs::read_dir(&self.storage_directory_path).map_err(Into::into)?;
 
         let base_indices = read_dir
             .filter_map(|dir_entry_result| dir_entry_result.ok().map(|dir_entry| dir_entry.path()))
@@ -108,20 +108,20 @@ where
 
     async fn obtain(&mut self, idx: &Idx) -> Result<SegmentStorage<S>, S::Error> {
         let store_path = self
-            ._storage_directory_path
+            .storage_directory_path
             .join(format!("{idx}.{STORE_FILE_EXTENSION}"));
 
         let index_path = self
-            ._storage_directory_path
+            .storage_directory_path
             .join(format!("{idx}.{INDEX_FILE_EXTENSION}"));
 
         let store = self
-            ._path_addressed_storage_provider
+            .path_addressed_storage_provider
             .obtain_storage(store_path)
             .await?;
 
         let index = self
-            ._path_addressed_storage_provider
+            .path_addressed_storage_provider
             .obtain_storage(index_path)
             .await?;
 
