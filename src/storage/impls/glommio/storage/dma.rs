@@ -16,6 +16,12 @@ pub enum DmaStorageError {
     NoBackingFileError,
 }
 
+impl From<std::io::Error> for DmaStorageError {
+    fn from(value: std::io::Error) -> Self {
+        Self::IoError(value)
+    }
+}
+
 impl std::fmt::Display for DmaStorageError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{self:?}")
