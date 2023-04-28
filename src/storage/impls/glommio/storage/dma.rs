@@ -1,4 +1,7 @@
-use crate::storage::{AsyncConsume, AsyncTruncate, Sizable, Storage, StreamUnexpectedLength};
+use crate::storage::{
+    impls::common::PathAddressedStorageProvider, AsyncConsume, AsyncTruncate, Sizable, Storage,
+    StreamUnexpectedLength,
+};
 use async_trait::async_trait;
 use futures_lite::AsyncWriteExt;
 use glommio::{
@@ -229,6 +232,15 @@ impl Storage for DmaStorage {
 
     fn is_persistent() -> bool {
         true
+    }
+}
+
+pub struct DmaStorageProvider;
+
+#[async_trait(?Send)]
+impl PathAddressedStorageProvider<DmaStorage> for DmaStorageProvider {
+    async fn obtain_storage<P: AsRef<Path>>(&self, path: P) -> Result<DmaStorage, DmaStorageError> {
+        DmaStorage::new(path).await
     }
 }
 
