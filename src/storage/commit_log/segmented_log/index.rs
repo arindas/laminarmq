@@ -362,18 +362,19 @@ impl<S: Storage, Idx> AsyncConsume for Index<S, Idx> {
 }
 
 pub(crate) mod test {
-    use futures_lite::StreamExt;
-    use num::{CheckedSub, FromPrimitive, ToPrimitive, Unsigned, Zero};
-
-    use crate::storage::AsyncTruncate;
-
     use super::{
-        super::super::super::{common::indexed_read_stream, AsyncConsume, AsyncIndexedRead},
+        super::{
+            super::super::{
+                common::{_TestStorage, indexed_read_stream},
+                AsyncConsume, AsyncIndexedRead, AsyncTruncate,
+            },
+            store::test::_RECORDS,
+        },
         Index, IndexError, IndexRecord, RecordHeader, Storage,
     };
+    use futures_lite::StreamExt;
+    use num::{CheckedSub, FromPrimitive, ToPrimitive, Unsigned, Zero};
     use std::{future::Future, hash::Hasher, marker::PhantomData, ops::Deref};
-
-    use super::super::store::test::_RECORDS;
 
     fn _index_records_test_data<H>() -> impl Iterator<Item = IndexRecord>
     where
@@ -422,7 +423,7 @@ pub(crate) mod test {
     pub(crate) async fn _test_index_read_append_truncate_consistency<SP, F, S, H, Idx>(
         storage_provider: SP,
     ) where
-        F: Future<Output = (S, PhantomData<(H, Idx)>)>,
+        F: Future<Output = (_TestStorage<S>, PhantomData<(H, Idx)>)>,
         SP: Fn() -> F,
         S: Storage,
         S::Position: Zero,
@@ -431,14 +432,20 @@ pub(crate) mod test {
         Idx: Unsigned + CheckedSub,
         Idx: ToPrimitive + FromPrimitive,
     {
-        match Index::<S, Idx>::with_storage(storage_provider().await.0).await {
+        let _TestStorage {
+            storage,
+            persistent: storage_is_persistent,
+        } = storage_provider().await.0;
+
+        match Index::<S, Idx>::with_storage(storage).await {
             Err(IndexError::NoBaseIndexFound) => {},
             _ => unreachable!("Wrong result returned when creating from empty storage without providing base index"),
         }
 
-        let mut index = Index::with_storage_and_base_index(storage_provider().await.0, Idx::zero())
-            .await
-            .unwrap();
+        let mut index =
+            Index::with_storage_and_base_index(storage_provider().await.0.storage, Idx::zero())
+                .await
+                .unwrap();
 
         match index.read(&Idx::zero()).await {
             Err(IndexError::IndexOutOfBounds) => {}
@@ -458,9 +465,9 @@ pub(crate) mod test {
 
         _test_index_contains_records(&index, _index_records_test_data::<H>(), _RECORDS.len()).await;
 
-        let index = if S::is_persistent() {
+        let index = if storage_is_persistent {
             index.close().await.unwrap();
-            Index::<S, Idx>::with_storage(storage_provider().await.0)
+            Index::<S, Idx>::with_storage(storage_provider().await.0.storage)
                 .await
                 .unwrap()
         } else {

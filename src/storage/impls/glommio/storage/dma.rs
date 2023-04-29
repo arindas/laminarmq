@@ -224,10 +224,6 @@ impl Storage for DmaStorage {
             .await
             .map_err(DmaStorageError::StorageError)
     }
-
-    fn is_persistent() -> bool {
-        true
-    }
 }
 
 pub struct DmaStorageProvider;
@@ -241,7 +237,10 @@ impl PathAddressedStorageProvider<DmaStorage> for DmaStorageProvider {
 
 #[cfg(test)]
 mod tests {
-    use super::{super::super::super::super::common, DmaStorage};
+    use super::{
+        super::super::super::super::common::{self, _TestStorage},
+        DmaStorage,
+    };
     use glommio::{LocalExecutorBuilder, Placement};
     use std::{fs, path::Path};
 
@@ -257,7 +256,10 @@ mod tests {
         let local_executor = LocalExecutorBuilder::new(Placement::Unbound)
             .spawn(move || async move {
                 common::test::_test_storage_read_append_truncate_consistency(|| async {
-                    DmaStorage::new(TEST_DMA_STORAGE_PATH).await.unwrap()
+                    _TestStorage {
+                        storage: DmaStorage::new(TEST_DMA_STORAGE_PATH).await.unwrap(),
+                        persistent: true,
+                    }
                 })
                 .await;
             })
