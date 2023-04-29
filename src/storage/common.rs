@@ -54,11 +54,11 @@ pub(crate) mod test {
     use num::{FromPrimitive, One, Zero};
     use std::{convert::Infallible, fmt::Debug, future::Future, ops::Deref};
 
-    pub(crate) async fn _test_storage_read_append_truncate_consistency<SP, F, S>(
-        storage_provider: SP,
+    pub(crate) async fn _test_storage_read_append_truncate_consistency<TSP, F, S>(
+        test_storage_provider: TSP,
     ) where
         F: Future<Output = _TestStorage<S>>,
-        SP: Fn() -> F,
+        TSP: Fn() -> F,
         S: Storage,
         S::Size: Zero,
         S::Position: One + Zero,
@@ -70,7 +70,7 @@ pub(crate) mod test {
         let _TestStorage {
             mut storage,
             persistent: storage_is_persistent,
-        } = storage_provider().await;
+        } = test_storage_provider().await;
 
         // 0 bytes read on 0 size storage should succeed
         storage
@@ -129,7 +129,7 @@ pub(crate) mod test {
 
         let mut storage = if storage_is_persistent {
             storage.close().await.unwrap();
-            storage_provider().await.storage
+            test_storage_provider().await.storage
         } else {
             storage
         };

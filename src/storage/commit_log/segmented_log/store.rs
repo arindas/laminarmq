@@ -248,11 +248,11 @@ pub(crate) mod test {
                     b"j9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSD",
                 ];
 
-    pub(crate) async fn _test_store_read_append_truncate_consistency<SP, F, S, H>(
-        storage_provider: SP,
+    pub(crate) async fn _test_store_read_append_truncate_consistency<TSP, F, S, H>(
+        test_storage_provider: TSP,
     ) where
         F: Future<Output = (_TestStorage<S>, PhantomData<H>)>,
-        SP: Fn() -> F,
+        TSP: Fn() -> F,
         S: Storage,
         S::Position: num::Zero,
         H: Hasher + Default,
@@ -260,7 +260,7 @@ pub(crate) mod test {
         let _TestStorage {
             storage,
             persistent: storage_is_persistent,
-        } = storage_provider().await.0;
+        } = test_storage_provider().await.0;
 
         let mut store = Store::<S, H>::new(storage);
 
@@ -288,7 +288,7 @@ pub(crate) mod test {
 
         let store = if storage_is_persistent {
             store.close().await.unwrap();
-            Store::<S, H>::new(storage_provider().await.0.storage)
+            Store::<S, H>::new(test_storage_provider().await.0.storage)
         } else {
             store
         };

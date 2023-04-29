@@ -376,11 +376,34 @@ pub(crate) mod test {
     use num::{CheckedSub, FromPrimitive, ToPrimitive, Unsigned, Zero};
     use std::{future::Future, hash::Hasher, marker::PhantomData, ops::Deref};
 
-    fn _index_records_test_data<H>() -> impl Iterator<Item = IndexRecord>
+    struct TestHasher<H> {
+        _phantom_data: PhantomData<H>,
+    }
+
+    impl<H> TestHasher<H> {
+        fn new() -> Self {
+            Self {
+                _phantom_data: PhantomData,
+            }
+        }
+    }
+
+    impl<H> Clone for TestHasher<H> {
+        fn clone(&self) -> Self {
+            TestHasher::new()
+        }
+    }
+
+    impl<H> Copy for TestHasher<H> {}
+
+    fn _test_index_records_provider<'a, H, const N: usize>(
+        record_source: &'a [&'a [u8; N]],
+        _test_hasher: TestHasher<H>,
+    ) -> impl Iterator<Item = IndexRecord> + 'a
     where
         H: Hasher + Default,
     {
-        _RECORDS
+        record_source
             .iter()
             .map(|x| RecordHeader::compute::<H>(x.deref()))
             .scan((0, 0), |(index, position), record_header| {
@@ -420,11 +443,11 @@ pub(crate) mod test {
         assert_eq!(count, expected_record_count);
     }
 
-    pub(crate) async fn _test_index_read_append_truncate_consistency<SP, F, S, H, Idx>(
-        storage_provider: SP,
+    pub(crate) async fn _test_index_read_append_truncate_consistency<TSP, F, S, H, Idx>(
+        test_storage_provider: TSP,
     ) where
         F: Future<Output = (_TestStorage<S>, PhantomData<(H, Idx)>)>,
-        SP: Fn() -> F,
+        TSP: Fn() -> F,
         S: Storage,
         S::Position: Zero,
         H: Hasher + Default,
@@ -432,27 +455,31 @@ pub(crate) mod test {
         Idx: Unsigned + CheckedSub,
         Idx: ToPrimitive + FromPrimitive,
     {
+        let test_hasher = TestHasher::<H>::new();
+
         let _TestStorage {
             storage,
             persistent: storage_is_persistent,
-        } = storage_provider().await.0;
+        } = test_storage_provider().await.0;
 
         match Index::<S, Idx>::with_storage(storage).await {
             Err(IndexError::NoBaseIndexFound) => {},
             _ => unreachable!("Wrong result returned when creating from empty storage without providing base index"),
         }
 
-        let mut index =
-            Index::with_storage_and_base_index(storage_provider().await.0.storage, Idx::zero())
-                .await
-                .unwrap();
+        let mut index = Index::with_storage_and_base_index(
+            test_storage_provider().await.0.storage,
+            Idx::zero(),
+        )
+        .await
+        .unwrap();
 
         match index.read(&Idx::zero()).await {
             Err(IndexError::IndexOutOfBounds) => {}
             _ => unreachable!("Wrong result returned for read on empty Index."),
         }
 
-        for index_record in _index_records_test_data::<H>() {
+        for index_record in _test_index_records_provider(&_RECORDS, test_hasher) {
             index.append(index_record).await.unwrap();
         }
 
@@ -463,11 +490,16 @@ pub(crate) mod test {
             ),
         }
 
-        _test_index_contains_records(&index, _index_records_test_data::<H>(), _RECORDS.len()).await;
+        _test_index_contains_records(
+            &index,
+            _test_index_records_provider(&_RECORDS, test_hasher),
+            _RECORDS.len(),
+        )
+        .await;
 
         let index = if storage_is_persistent {
             index.close().await.unwrap();
-            Index::<S, Idx>::with_storage(storage_provider().await.0.storage)
+            Index::<S, Idx>::with_storage(test_storage_provider().await.0.storage)
                 .await
                 .unwrap()
         } else {
@@ -481,7 +513,12 @@ pub(crate) mod test {
                 .await
                 .unwrap();
 
-        _test_index_contains_records(&index, _index_records_test_data::<H>(), _RECORDS.len()).await;
+        _test_index_contains_records(
+            &index,
+            _test_index_records_provider(&_RECORDS, test_hasher),
+            _RECORDS.len(),
+        )
+        .await;
 
         let truncate_index = _RECORDS.len() / 2;
 
@@ -494,7 +531,7 @@ pub(crate) mod test {
 
         _test_index_contains_records(
             &index,
-            _index_records_test_data::<H>().take(truncate_index),
+            _test_index_records_provider(&_RECORDS, test_hasher).take(truncate_index),
             truncate_index,
         )
         .await;
