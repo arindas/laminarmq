@@ -376,35 +376,22 @@ pub(crate) mod test {
     use num::{CheckedSub, FromPrimitive, ToPrimitive, Unsigned, Zero};
     use std::{future::Future, hash::Hasher, marker::PhantomData, ops::Deref};
 
-    struct TestHasher<H> {
-        _phantom_data: PhantomData<H>,
-    }
-
-    impl<H> TestHasher<H> {
-        fn new() -> Self {
-            Self {
-                _phantom_data: PhantomData,
-            }
-        }
-    }
-
-    impl<H> Clone for TestHasher<H> {
-        fn clone(&self) -> Self {
-            TestHasher::new()
-        }
-    }
-
-    impl<H> Copy for TestHasher<H> {}
-
-    fn _test_index_records_provider<'a, H, const N: usize>(
+    fn _test_records_provider<'a, const N: usize>(
         record_source: &'a [&'a [u8; N]],
-        _test_hasher: TestHasher<H>,
+    ) -> impl Iterator<Item = &'a [u8]> {
+        record_source.iter().cloned().map(|x| {
+            let x: &[u8] = x;
+            x
+        })
+    }
+
+    fn _test_index_records_provider<'a, H>(
+        record_source: impl Iterator<Item = &'a [u8]> + 'a,
     ) -> impl Iterator<Item = IndexRecord> + 'a
     where
         H: Hasher + Default,
     {
         record_source
-            .iter()
             .map(|x| RecordHeader::compute::<H>(x.deref()))
             .scan((0, 0), |(index, position), record_header| {
                 let index_record = IndexRecord::with_position_index_and_record_header::<u32, u32>(
@@ -455,8 +442,6 @@ pub(crate) mod test {
         Idx: Unsigned + CheckedSub,
         Idx: ToPrimitive + FromPrimitive,
     {
-        let test_hasher = TestHasher::<H>::new();
-
         let _TestStorage {
             storage,
             persistent: storage_is_persistent,
@@ -479,7 +464,7 @@ pub(crate) mod test {
             _ => unreachable!("Wrong result returned for read on empty Index."),
         }
 
-        for index_record in _test_index_records_provider(&_RECORDS, test_hasher) {
+        for index_record in _test_index_records_provider::<H>(_test_records_provider(&_RECORDS)) {
             index.append(index_record).await.unwrap();
         }
 
@@ -492,7 +477,7 @@ pub(crate) mod test {
 
         _test_index_contains_records(
             &index,
-            _test_index_records_provider(&_RECORDS, test_hasher),
+            _test_index_records_provider::<H>(_test_records_provider(&_RECORDS)),
             _RECORDS.len(),
         )
         .await;
@@ -515,7 +500,7 @@ pub(crate) mod test {
 
         _test_index_contains_records(
             &index,
-            _test_index_records_provider(&_RECORDS, test_hasher),
+            _test_index_records_provider::<H>(_test_records_provider(&_RECORDS)),
             _RECORDS.len(),
         )
         .await;
@@ -531,7 +516,8 @@ pub(crate) mod test {
 
         _test_index_contains_records(
             &index,
-            _test_index_records_provider(&_RECORDS, test_hasher).take(truncate_index),
+            _test_index_records_provider::<H>(_test_records_provider(&_RECORDS))
+                .take(truncate_index),
             truncate_index,
         )
         .await;
