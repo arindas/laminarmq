@@ -28,6 +28,22 @@ pub struct DiskBackedSegmentStorageProvider<S, PASP, Idx> {
     _phantom_data: PhantomData<(S, Idx)>,
 }
 
+/// Marks a Type as safe to move accross thread boundaries.
+///
+/// # Safety
+///
+/// DiskBackedSegmentStorageProvider has PASP, PathBuf and PhantomData. PathBuf
+/// and PhantomData are Send + Sync. So Send bound depends only on PASP
+unsafe impl<S, PASP, Idx> Send for DiskBackedSegmentStorageProvider<S, PASP, Idx> where PASP: Send {}
+
+/// Marks a Type's references as safe to move accross thread boundaries.
+///
+/// # Safety
+///
+/// DiskBackedSegmentStorageProvider has PASP, PathBuf and PhantomData. PathBuf
+/// and PhantomData are Send + Sync. So Sync bound depends only on PASP
+unsafe impl<S, PASP, Idx> Sync for DiskBackedSegmentStorageProvider<S, PASP, Idx> where PASP: Sync {}
+
 impl<S, PASP, Idx> DiskBackedSegmentStorageProvider<S, PASP, Idx>
 where
     PASP: PathAddressedStorageProvider<S> + Default,

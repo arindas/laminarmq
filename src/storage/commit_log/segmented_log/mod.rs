@@ -720,7 +720,7 @@ pub(crate) mod test {
 
         let segmented_log_highest_index_before_sleep = segmented_log.highest_index();
 
-        let expiry_duration = Duration::from_millis(10);
+        let expiry_duration = Duration::from_millis(20);
 
         // we keep a flag variable to sleep only after the last write segment has
         // rotated back to the vec of read segments

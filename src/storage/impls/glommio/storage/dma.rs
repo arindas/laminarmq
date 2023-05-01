@@ -163,11 +163,7 @@ impl AsyncConsume for DmaStorage {
     type ConsumeError = DmaStorageError;
 
     async fn remove(mut self) -> Result<(), Self::ConsumeError> {
-        let backing_file_path = std::mem::take(&mut self.backing_file_path);
-
-        self.close().await?;
-
-        glommio::io::remove(backing_file_path)
+        glommio::io::remove(self.backing_file_path)
             .await
             .map_err(DmaStorageError::StorageError)
     }
@@ -237,12 +233,20 @@ impl PathAddressedStorageProvider<DmaStorage> for DmaStorageProvider {
 
 #[cfg(test)]
 mod tests {
+    use crate::common::serde_compat::bincode;
+    use crate::storage::impls::{
+        common::DiskBackedSegmentStorageProvider, glommio::storage::dma::DmaStorageProvider,
+    };
+
     use super::{
-        super::super::super::super::common::{self, _TestStorage},
+        super::super::super::super::{
+            commit_log::segmented_log::{index, segment, store},
+            common::{self, _TestStorage},
+        },
         DmaStorage,
     };
     use glommio::{LocalExecutorBuilder, Placement};
-    use std::{fs, path::Path};
+    use std::{fs, marker::PhantomData, path::Path};
 
     #[test]
     fn test_dma_storage_read_append_truncate_consistency() {
@@ -266,5 +270,95 @@ mod tests {
             .unwrap();
 
         local_executor.join().unwrap();
+    }
+
+    #[test]
+    fn test_dma_store_read_append_truncate_consistency() {
+        const TEST_DMA_STORE_STORAGE_PATH: &str =
+            "/tmp/laminarmq_test_dma_store_read_append_truncate_consistency.store";
+
+        if Path::new(TEST_DMA_STORE_STORAGE_PATH).exists() {
+            fs::remove_file(TEST_DMA_STORE_STORAGE_PATH).unwrap();
+        }
+
+        let local_executor = LocalExecutorBuilder::new(Placement::Unbound)
+            .spawn(move || async move {
+                store::test::_test_store_read_append_truncate_consistency(|| async {
+                    (
+                        _TestStorage {
+                            storage: DmaStorage::new(TEST_DMA_STORE_STORAGE_PATH).await.unwrap(),
+                            persistent: true,
+                        },
+                        PhantomData::<crc32fast::Hasher>,
+                    )
+                })
+                .await;
+            })
+            .unwrap();
+
+        local_executor.join().unwrap();
+    }
+
+    #[test]
+    fn test_dma_index_read_append_truncate_consistency() {
+        const TEST_DMA_INDEX_STORAGE_PATH: &str =
+            "/tmp/laminarmq_test_dma_index_read_append_truncate_consistency.index";
+
+        if Path::new(TEST_DMA_INDEX_STORAGE_PATH).exists() {
+            fs::remove_file(TEST_DMA_INDEX_STORAGE_PATH).unwrap();
+        }
+
+        let local_executor = LocalExecutorBuilder::new(Placement::Unbound)
+            .spawn(move || async move {
+                index::test::_test_index_read_append_truncate_consistency(|| async {
+                    (
+                        _TestStorage {
+                            storage: DmaStorage::new(TEST_DMA_INDEX_STORAGE_PATH).await.unwrap(),
+                            persistent: true,
+                        },
+                        PhantomData::<(crc32fast::Hasher, u32)>,
+                    )
+                })
+                .await;
+            })
+            .unwrap();
+
+        local_executor.join().unwrap();
+    }
+
+    #[test]
+    fn test_segment_read_append_truncate_consistency() {
+        const DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY: &str =
+            "/tmp/laminarmq_test_segment_read_append_truncate_consistency";
+
+        if Path::new(DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY).exists() {
+            fs::remove_dir_all(DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY).unwrap();
+        }
+
+        let disk_backed_storage_provider = DiskBackedSegmentStorageProvider::<
+            DmaStorage,
+            DmaStorageProvider,
+            u32,
+        >::with_storage_directory_path_and_provider(
+            DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY,
+            DmaStorageProvider,
+        )
+        .unwrap();
+
+        let local_executor = LocalExecutorBuilder::new(Placement::Unbound)
+            .spawn(move || async move {
+                segment::test::_test_segment_read_append_truncate_consistency(
+                    disk_backed_storage_provider,
+                    PhantomData::<((), crc32fast::Hasher, bincode::BinCode)>,
+                )
+                .await;
+            })
+            .unwrap();
+
+        local_executor.join().unwrap();
+
+        if Path::new(DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY).exists() {
+            fs::remove_dir_all(DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY).unwrap();
+        }
     }
 }
