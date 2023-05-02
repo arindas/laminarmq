@@ -5,7 +5,7 @@ use crate::storage::{
 use async_trait::async_trait;
 use std::{
     collections::BinaryHeap,
-    fmt::Display,
+    fmt::{Debug, Display},
     marker::PhantomData,
     path::{Path, PathBuf},
     str::FromStr,
@@ -101,7 +101,7 @@ pub const INDEX_FILE_EXTENSION: &str = "index";
 impl<Idx, S, PASP> SegmentStorageProvider<S, Idx> for DiskBackedSegmentStorageProvider<S, PASP, Idx>
 where
     PASP: PathAddressedStorageProvider<S>,
-    Idx: Clone + Ord + FromStr + Display,
+    Idx: Clone + Ord + FromStr + Display + Debug,
     S: Storage,
     S::Error: From<std::io::Error>,
 {
@@ -110,7 +110,12 @@ where
 
         let base_indices = read_dir
             .filter_map(|dir_entry_result| dir_entry_result.ok().map(|dir_entry| dir_entry.path()))
-            .filter(|path| path.ends_with(INDEX_FILE_EXTENSION))
+            .filter(|path| {
+                path.extension()
+                    .map(|extension| extension == INDEX_FILE_EXTENSION)
+                    .and_then(|extension_matches| extension_matches.then_some(()))
+                    .is_some()
+            })
             .filter_map(|path| {
                 path.file_stem()
                     .and_then(|path| path.to_str())
