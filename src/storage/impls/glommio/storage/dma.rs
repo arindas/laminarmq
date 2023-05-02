@@ -222,7 +222,7 @@ impl Storage for DmaStorage {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct DmaStorageProvider;
 
 #[async_trait(?Send)]
