@@ -186,7 +186,7 @@ error.
 While the conventional `segmented_log` data structure is quite performant for a `commit_log` implementation,
 it still requires the following properties to hold true for the record being appended:
 - We have the entire record in memory
-- We know the record bytes length and record bytes checksum before the record is appended
+- We know the record bytes' length and record bytes' checksum before the record is appended
 
 
 It's not possible to know this information when the record bytes are read from an asynchronous stream of
@@ -204,9 +204,9 @@ Hence, to accommodate this use case, we introduced an intermediate indexing laye
 In the new design, instead of referring to records with a raw offset, we refer to them with indices. The
 index in each segment translates the record indices to raw file position in the store file.
 
-Now, the store append operation accepts an asynchronous stream of bytes instead a contiguously laid out
+Now, the store append operation accepts an asynchronous stream of bytes instead of a contiguously laid out
 slice of bytes. We use this operation to write the record bytes, and at the time of writing the record
-bytes, we calculate the record bytes length and checksum. Once we are done writing the record bytes to
+bytes, we calculate the record bytes' length and checksum. Once we are done writing the record bytes to
 the store, we writes it's corresponding record_header (containing the checksum and length), position and
 index as an index_record in the index.
 
