@@ -3,8 +3,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/arindas/laminarmq/actions/workflows/ci.yml">
-  <img src="https://github.com/arindas/laminarmq/actions/workflows/ci.yml/badge.svg" />
+  <a href="https://github.com/arindas/laminarmq/actions/workflows/rust-ci.yml">
+  <img src="https://github.com/arindas/laminarmq/actions/workflows/rust-ci.yml/badge.svg" />
   </a>
   <a href="https://codecov.io/gh/arindas/laminarmq" >
   <img src="https://codecov.io/gh/arindas/laminarmq/branch/main/graph/badge.svg?token=6VLETF5REC"/>
@@ -190,7 +190,7 @@ it still requires the following properties to hold true for the record being app
 
 
 It's not possible to know this information when the record bytes are read from an asynchronous stream of
-bytes. Without the enhancements, we would have to concatenate intermediate byte buffers to a vector. 
+bytes. Without the enhancements, we would have to concatenate intermediate byte buffers to a vector.
 This would not only incur more allocations, but also slow down our system.
 
 Hence, to accommodate this use case, we introduced an intermediate indexing layer to our design.
@@ -217,7 +217,7 @@ This provides two quality of life enhancements:
 Now, to prevent a malicious user from overloading our storage capacity and memory with a maliciously
 crafted request which infinitely loops over some data and sends it to our server, we have provided an
 optional `append_threshold` parameter to all append operations. When provided, it prevents streaming
-append writes to write more bytes than the provided `append_threshold`. 
+append writes to write more bytes than the provided `append_threshold`.
 
 At the segment level, this requires us to keep a segment overflow capacity. All segment append operations
 now use `segment_capacity - segment.size + segment_overflow_capacity` as the `append_threshold` value.

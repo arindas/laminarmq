@@ -3,8 +3,8 @@
 //! </p>
 //!
 //! <p align="center">
-//!   <a href="https://github.com/arindas/laminarmq/actions/workflows/ci.yml">
-//!   <img src="https://github.com/arindas/laminarmq/actions/workflows/ci.yml/badge.svg" />
+//!   <a href="https://github.com/arindas/laminarmq/actions/workflows/rust-ci.yml">
+//!   <img src="https://github.com/arindas/laminarmq/actions/workflows/rust-ci.yml/badge.svg" />
 //!   </a>
 //!   <a href="https://codecov.io/gh/arindas/laminarmq" >
 //!   <img src="https://codecov.io/gh/arindas/laminarmq/branch/main/graph/badge.svg?token=6VLETF5REC"/>
