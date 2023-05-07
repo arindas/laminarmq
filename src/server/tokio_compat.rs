@@ -55,3 +55,26 @@ where
             })
     }
 }
+
+pub mod common {
+    //! Common utilities pertaining to tokio.
+
+    use std::io::{self, ErrorKind::Other};
+    use tokio::io::{AsyncRead, AsyncReadExt};
+
+    /// Reads the given exact number of bytes from the given reader into a [`Vec<u8>`].
+    pub async fn read_exact<R: AsyncRead + Unpin>(
+        reader: &mut R,
+        num_bytes: u64,
+    ) -> io::Result<Vec<u8>> {
+        let mut reader = reader.take(num_bytes);
+        let mut bytes = Vec::new();
+        reader.read_to_end(&mut bytes).await?;
+
+        if bytes.len() != num_bytes as usize {
+            return Err(io::Error::new(Other, "wrong number of bytes read"));
+        }
+
+        Ok(bytes)
+    }
+}

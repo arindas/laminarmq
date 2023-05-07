@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./assets/logo.png" alt="laminarmq">
+  <img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/logo.png" alt="laminarmq">
 </p>
 
 <p align="center">
@@ -54,8 +54,10 @@ The current implementation based on [`glommio`](https://docs.rs/glommio) runs on
 >512
 >```
 
-Refer to latest git [API Documentation](https://arindas.github.io/laminarmq/laminarmq/)
-or [Crate Documentation](https://docs.rs/laminarmq) for more details.
+Refer to latest git [API Documentation](https://arindas.github.io/laminarmq/docs/laminarmq/)
+or [Crate Documentation](https://docs.rs/laminarmq) for more details. There's also a
+[book](https://arindas.github.io/laminarmq/book) being written to further describe
+design decisions, implementation details and recipes.
 
 `laminarmq` presents an elementary commit-log abstraction (a series of records ordered by offsets), on top of which
 several message queue semantics such as publish subscribe or even full blown protocols like MQTT could be implemented.
@@ -72,7 +74,10 @@ This section describes the internal design of `laminarmq`.
 
 ### Execution Model
 
-![execution-model](./assets/diagrams/laminarmq-execution-model.png)
+![execution-model](https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-execution-model.png)
+<p align="center">
+<b>Fig:</b> Execution model depicting application level partitioning and request level parallelism.
+</p>
 
 `laminarmq` uses the thread-per-core execution model where individual processor cores are limited to single threads.
 This model encourages design that minimizes inter-thread contention and locks, thereby improving tail latencies in
@@ -145,7 +150,11 @@ Messages in a "partition" are accessed using their "offset" i.e. location of the
 The segmented-log data structure for storing records is inspired from
 [Apache Kafka](https://www.microsoft.com/en-us/research/wp-content/uploads/2017/09/Kafka.pdf).
 
-![segmented_log](./assets/diagrams/laminarmq-segmented-log.png)
+![segmented_log](https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-segmented-log.png)
+<p align="center">
+<b>Fig:</b> File organisation for persisting the <code>segmented_log</code> data structure on a
+<code>*nix</code> file system.
+</p>
 
 A segmented log is a collection of read segments and a single write segment. Each "segment" is backed by a 
 storage file on disk called "store".

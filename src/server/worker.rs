@@ -1,6 +1,9 @@
 //! Module providing abstraction for processing requests with a thread pre core architecture.
 //!
-//! ![execution-model](https://i.imgur.com/8QrCjD2.png)
+//! ![execution-model](https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-execution-model.png)
+//! <p align="center">
+//! <b>Fig:</b> Execution model depicting application level partitioning and request level parallelism.
+//! </p>
 //!
 //! `laminarmq` uses the thread-per-core execution model where individual processor cores are limited to single threads.
 //! This model encourages design that minimizes inter-thread contention and locks, thereby improving tail latencies in
@@ -34,19 +37,43 @@ pub enum TaskError<P: Partition> {
     LockAcqFailed,
 }
 
+#[doc(hidden)]
+#[cfg(not(tarpaulin_include))]
+pub mod hyper_impl {
+    //! Module providing utilities for converting from [`TaskError`](super::TaskError) to
+    //! [`StatusCode`](hyper::StatusCode).
+
+    use super::{Partition, TaskError};
+    use hyper::StatusCode;
+
+    impl<P: Partition> From<&TaskError<P>> for StatusCode {
+        fn from(value: &TaskError<P>) -> Self {
+            match value {
+                // partition is lost and can't be recovered, hence it's fitting
+                TaskError::PartitionLost(_) => StatusCode::INTERNAL_SERVER_ERROR,
+
+                TaskError::PartitionError(_) => StatusCode::BAD_REQUEST,
+                TaskError::PartitionNotFound(_) => StatusCode::NOT_FOUND,
+                TaskError::PartitionInUse(_) => StatusCode::FAILED_DEPENDENCY,
+                TaskError::LockAcqFailed => StatusCode::FAILED_DEPENDENCY,
+            }
+        }
+    }
+}
+
 #[cfg(not(tarpaulin_include))]
 impl<P: Partition> Display for TaskError<P> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TaskError::PartitionError(err) => write!(f, "Partition error: {:?}", err),
+            TaskError::PartitionError(err) => write!(f, "Partition error: {err:?}"),
             TaskError::PartitionNotFound(partition) => {
-                write!(f, "Partition with id {:?} not found.", partition)
+                write!(f, "Partition with id {partition:?} not found.")
             }
             TaskError::PartitionInUse(partition) => {
-                write!(f, "Partition with id {:?} still in use.", partition)
+                write!(f, "Partition with id {partition:?} still in use.")
             }
             TaskError::PartitionLost(partition) => {
-                write!(f, "Partition entry for {:?} lost.", partition)
+                write!(f, "Partition entry for {partition:?} lost.")
             }
             TaskError::LockAcqFailed => {
                 write!(f, "Unable to acquire required locks for op.")
@@ -66,7 +93,7 @@ where
     P: Partition,
     S: Sender<TaskResult<Response, P>>,
 {
-    /// `Request to be processed.
+    /// `Request` to be processed.
     pub request: Request,
 
     /// Send end of the channel to send back response
@@ -114,6 +141,7 @@ where
     _phantom_data: PhantomData<(P, S, Request, Response)>,
 }
 
+#[cfg(not(tarpaulin_include))]
 impl<P, Request, Response, S, Proc> Worker<P, Request, Response, S, Proc>
 where
     P: Partition,
