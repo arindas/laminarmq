@@ -74,7 +74,7 @@ This section describes the internal design of `laminarmq`.
 
 ### Execution Model
 
-![execution-model](https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-execution-model.png)
+![execution-model](https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-execution-model.svg)
 <p align="center">
 <b>Fig:</b> Execution model depicting application level partitioning and request level parallelism.
 </p>
