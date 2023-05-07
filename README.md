@@ -202,13 +202,13 @@ Hence, to accommodate this use case, we introduced an intermediate indexing laye
 </p>
 
 In the new design, instead of referring to records with a raw offset, we refer to them with indices. The
-index in each segment translates the record indices to raw file position in the store file.
+index in each segment translates the record indices to raw file position in the segment store file.
 
 Now, the store append operation accepts an asynchronous stream of bytes instead of a contiguously laid out
 slice of bytes. We use this operation to write the record bytes, and at the time of writing the record
 bytes, we calculate the record bytes' length and checksum. Once we are done writing the record bytes to
-the store, we writes it's corresponding record_header (containing the checksum and length), position and
-index as an index_record in the index.
+the store, we write it's corresponding `record_header` (containing the checksum and length), position and
+index as an `index_record` in the segment index.
 
 This provides two quality of life enhancements:
 - Allow asynchronous streaming writes, without having to concatenate intermediate byte buffers
