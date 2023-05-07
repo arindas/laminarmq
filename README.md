@@ -150,7 +150,7 @@ Messages in a "partition" are accessed using their "offset" i.e. location of the
 The segmented-log data structure for storing records is inspired from
 [Apache Kafka](https://www.microsoft.com/en-us/research/wp-content/uploads/2017/09/Kafka.pdf).
 
-![segmented_log](https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-segmented-log.png)
+![segmented_log](https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-segmented-log.svg)
 <p align="center">
 <b>Fig:</b> File organisation for persisting the <code>segmented_log</code> data structure on a
 <code>*nix</code> file system.
