@@ -27,7 +27,7 @@ A scalable, distributed message queue powered by a segmented, partitioned, repli
 In order to use `laminarmq` as a library, add the following to your `Cargo.toml`:
 ```toml
 [dependencies]
-laminarmq = "0.0.4"
+laminarmq = "0.0.5-rc"
 ```
 
 The current implementation based on [`glommio`](https://docs.rs/glommio) runs only on linux. `glommio` requires
