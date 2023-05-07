@@ -3,8 +3,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/arindas/laminarmq/actions/workflows/ci.yml">
-  <img src="https://github.com/arindas/laminarmq/actions/workflows/ci.yml/badge.svg" />
+  <a href="https://github.com/arindas/laminarmq/actions/workflows/rust-ci.yml">
+  <img src="https://github.com/arindas/laminarmq/actions/workflows/rust-ci.yml/badge.svg" />
   </a>
   <a href="https://codecov.io/gh/arindas/laminarmq" >
   <img src="https://codecov.io/gh/arindas/laminarmq/branch/main/graph/badge.svg?token=6VLETF5REC"/>
@@ -74,7 +74,7 @@ This section describes the internal design of `laminarmq`.
 
 ### Execution Model
 
-![execution-model](https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-execution-model.png)
+![execution-model](https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-execution-model.svg)
 <p align="center">
 <b>Fig:</b> Execution model depicting application level partitioning and request level parallelism.
 </p>
@@ -150,7 +150,7 @@ Messages in a "partition" are accessed using their "offset" i.e. location of the
 The segmented-log data structure for storing records is inspired from
 [Apache Kafka](https://www.microsoft.com/en-us/research/wp-content/uploads/2017/09/Kafka.pdf).
 
-![segmented_log](https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-segmented-log.png)
+![segmented_log](https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-segmented-log.svg)
 <p align="center">
 <b>Fig:</b> File organisation for persisting the <code>segmented_log</code> data structure on a
 <code>*nix</code> file system.
@@ -182,6 +182,46 @@ with a segment I/O error.
 - If the offset is out of bounds of even the write segment, we return an "out of bounds"
 error.
 
+#### `laminarmq` specific enhancements to the `segmented_log` data structure
+While the conventional `segmented_log` data structure is quite performant for a `commit_log` implementation,
+it still requires the following properties to hold true for the record being appended:
+- We have the entire record in memory
+- We know the record bytes' length and record bytes' checksum before the record is appended
+
+
+It's not possible to know this information when the record bytes are read from an asynchronous stream of
+bytes. Without the enhancements, we would have to concatenate intermediate byte buffers to a vector.
+This would not only incur more allocations, but also slow down our system.
+
+Hence, to accommodate this use case, we introduced an intermediate indexing layer to our design.
+
+![segmented_log](https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-indexed-segmented-log.svg)
+<p align="center">
+<b>Fig:</b> Data organisation for persisting the <code>segmented_log</code> data structure on a
+<code>*nix</code> file system.
+</p>
+
+In the new design, instead of referring to records with a raw offset, we refer to them with indices. The
+index in each segment translates the record indices to raw file position in the segment store file.
+
+Now, the store append operation accepts an asynchronous stream of bytes instead of a contiguously laid out
+slice of bytes. We use this operation to write the record bytes, and at the time of writing the record
+bytes, we calculate the record bytes' length and checksum. Once we are done writing the record bytes to
+the store, we write it's corresponding `record_header` (containing the checksum and length), position and
+index as an `index_record` in the segment index.
+
+This provides two quality of life enhancements:
+- Allow asynchronous streaming writes, without having to concatenate intermediate byte buffers
+- Records are accessed much more easily with easy to use indices
+
+Now, to prevent a malicious user from overloading our storage capacity and memory with a maliciously
+crafted request which infinitely loops over some data and sends it to our server, we have provided an
+optional `append_threshold` parameter to all append operations. When provided, it prevents streaming
+append writes to write more bytes than the provided `append_threshold`.
+
+At the segment level, this requires us to keep a segment overflow capacity. All segment append operations
+now use `segment_capacity - segment.size + segment_overflow_capacity` as the `append_threshold` value.
+A good `segment_overflow_capacity` value could be `segment_capacity / 2`.
 
 #### Replication and Partitioning (or redundancy and horizontal scaling)
 A particular "node" contains some or all "partition"(s) of a "topic". Hence a "topic" is both partitioned and
