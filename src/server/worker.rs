@@ -65,15 +65,15 @@ pub mod hyper_impl {
 impl<P: Partition> Display for TaskError<P> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TaskError::PartitionError(err) => write!(f, "Partition error: {:?}", err),
+            TaskError::PartitionError(err) => write!(f, "Partition error: {err:?}"),
             TaskError::PartitionNotFound(partition) => {
-                write!(f, "Partition with id {:?} not found.", partition)
+                write!(f, "Partition with id {partition:?} not found.")
             }
             TaskError::PartitionInUse(partition) => {
-                write!(f, "Partition with id {:?} still in use.", partition)
+                write!(f, "Partition with id {partition:?} still in use.")
             }
             TaskError::PartitionLost(partition) => {
-                write!(f, "Partition entry for {:?} lost.", partition)
+                write!(f, "Partition entry for {partition:?} lost.")
             }
             TaskError::LockAcqFailed => {
                 write!(f, "Unable to acquire required locks for op.")

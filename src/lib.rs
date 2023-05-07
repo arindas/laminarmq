@@ -217,6 +217,7 @@
 pub mod commit_log;
 pub mod common;
 pub mod server;
+pub mod storage;
 
 #[cfg(not(tarpaulin_include))]
 pub mod prelude {

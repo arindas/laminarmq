@@ -1,0 +1,82 @@
+name: rust-ci
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'feature/**'
+    paths:
+      - 'src/**'
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'src/**'
+
+jobs:
+  code-coverage:
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Install toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+          profile: minimal
+          components: llvm-tools-preview
+
+      - name: Clean artefacts
+        uses: actions-rs/cargo@v1
+        with:
+          command: clean
+
+      - name: Execute tests
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+        env:
+          CARGO_INCREMENTAL: 0
+          RUSTFLAGS: '-Cinstrument-coverage'
+          LLVM_PROFILE_FILE: './target/coverage.prof/cargo-test-%p-%m.profraw'
+
+      - name: Install grcov
+        run: |
+          rm -rf ./grcov*
+          wget https://github.com/mozilla/grcov/releases/latest/download/grcov-x86_64-unknown-linux-gnu.tar.bz2
+          tar -xf grcov-x86_64-unknown-linux-gnu.tar.bz2
+
+      - name: Collect code coverage
+        run: |
+          ./grcov ./target/coverage.prof --binary-path \
+          ./target/debug/deps/ -s . \
+          -t cobertura --branch --ignore-not-existing --ignore '../*' \
+          --ignore "/*" -o ./coverage.xml
+
+      - name: Upload coverage to codecov.io
+        uses: codecov/codecov-action@v3
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
+
+
+  clippy-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          components: clippy
+          profile: minimal
+          override: true
+
+      - uses: actions-rs/clippy-check@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          args: --all-features
+

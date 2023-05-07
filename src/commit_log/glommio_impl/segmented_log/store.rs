@@ -30,10 +30,10 @@ impl Display for StoreError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             StoreError::SerializationError(err) => {
-                write!(f, "Error during record ser/deser-ialization: {}", err)
+                write!(f, "Error during record ser/deser-ialization: {err}")
             }
             StoreError::StorageError(err) => {
-                write!(f, "Error during Storage IO: {}", err)
+                write!(f, "Error during Storage IO: {err}")
             }
             StoreError::InvalidRecordHeader => {
                 write!(f, "Checksum or record length mismatch.")
@@ -42,7 +42,7 @@ impl Display for StoreError {
                 write!(f, "Store not backed by a file.")
             }
             StoreError::InvalidReadPosition(pos) => {
-                write!(f, "Not a valid read position: {:?}", pos)
+                write!(f, "Not a valid read position: {pos:?}")
             }
         }
     }
