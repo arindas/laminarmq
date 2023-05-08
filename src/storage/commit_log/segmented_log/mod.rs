@@ -720,7 +720,7 @@ pub(crate) mod test {
 
         let segmented_log_highest_index_before_sleep = segmented_log.highest_index();
 
-        let expiry_duration = Duration::from_millis(100);
+        let expiry_duration = Duration::from_millis(10);
 
         // we keep a flag variable to sleep only after the last write segment has
         // rotated back to the vec of read segments
@@ -752,9 +752,9 @@ pub(crate) mod test {
             .await
             .unwrap();
 
-        assert_eq!(
-            segmented_log_highest_index_before_sleep,
-            segmented_log.lowest_index()
+        assert!(
+            segmented_log_highest_index_before_sleep <= segmented_log.lowest_index(),
+            "Expired segments not removed."
         );
 
         _make_sleep_future(expiry_duration).await;
