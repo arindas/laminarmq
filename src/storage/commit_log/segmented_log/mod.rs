@@ -282,6 +282,10 @@ where
         &mut self,
         expiry_duration: Duration,
     ) -> Result<Idx, LogError<S, SERP>> {
+        if write_segment_ref!(self, as_ref)?.is_empty() {
+            self.reopen_write_segment().await?
+        }
+
         let next_index = self.highest_index();
 
         let mut segments = std::mem::take(&mut self.read_segments);
@@ -484,6 +488,22 @@ pub(crate) mod test {
     };
     use std::{convert::Infallible, fmt::Debug, future::Future, marker::PhantomData};
 
+    pub fn _test_records_provider<'a, const N: usize>(
+        record_source: &'a [&'a [u8; N]],
+        num_segments: usize,
+        records_per_segment: usize,
+    ) -> impl Iterator<Item = &'a [u8]> {
+        record_source
+            .iter()
+            .cycle()
+            .take(records_per_segment * num_segments)
+            .cloned()
+            .map(|x| {
+                let x: &[u8] = x;
+                x
+            })
+    }
+
     pub(crate) async fn _test_segmented_log_read_append_truncate_consistency<
         S,
         M,
@@ -529,19 +549,7 @@ pub(crate) mod test {
         .await
         .unwrap();
 
-        let records = |num_segments: usize, records_per_segment: usize| {
-            _RECORDS
-                .iter()
-                .cycle()
-                .take(records_per_segment * num_segments)
-                .cloned()
-                .map(|x| {
-                    let x: &[u8] = x;
-                    x
-                })
-        };
-
-        for record in records(NUM_SEGMENTS, _RECORDS.len()) {
+        for record in _test_records_provider(&_RECORDS, NUM_SEGMENTS, _RECORDS.len()) {
             let record = Record {
                 metadata: MetaWithIdx {
                     metadata: M::default(),
@@ -574,7 +582,7 @@ pub(crate) mod test {
 
         _test_indexed_read_contains_expected_records(
             &segmented_log,
-            records(NUM_SEGMENTS, _RECORDS.len()),
+            _test_records_provider(&_RECORDS, NUM_SEGMENTS, _RECORDS.len()),
             _RECORDS.len() * NUM_SEGMENTS,
         )
         .await;
@@ -607,7 +615,8 @@ pub(crate) mod test {
                     index: None,
                 },
                 value: futures_lite::stream::iter(
-                    records(2, _RECORDS.len()).map(Ok::<&[u8], Infallible>),
+                    _test_records_provider(&_RECORDS, 2, _RECORDS.len())
+                        .map(Ok::<&[u8], Infallible>),
                 ),
             })
             .await
@@ -698,19 +707,7 @@ pub(crate) mod test {
         .await
         .unwrap();
 
-        let records = |num_segments: usize, records_per_segment: usize| {
-            _RECORDS
-                .iter()
-                .cycle()
-                .take(records_per_segment * num_segments)
-                .cloned()
-                .map(|x| {
-                    let x: &[u8] = x;
-                    x
-                })
-        };
-
-        for record in records(NUM_SEGMENTS / 2, _RECORDS.len()) {
+        for record in _test_records_provider(&_RECORDS, NUM_SEGMENTS / 2, _RECORDS.len()) {
             let stream = futures_lite::stream::once(Ok::<&[u8], Infallible>(record));
 
             segmented_log
@@ -733,7 +730,7 @@ pub(crate) mod test {
         // rotated back to the vec of read segments
         let mut need_to_sleep = true;
 
-        for record in records(NUM_SEGMENTS / 2, _RECORDS.len()) {
+        for record in _test_records_provider(&_RECORDS, NUM_SEGMENTS / 2, _RECORDS.len()) {
             let stream = futures_lite::stream::once(Ok::<&[u8], Infallible>(record));
 
             segmented_log
@@ -759,9 +756,9 @@ pub(crate) mod test {
             .await
             .unwrap();
 
-        assert_eq!(
-            segmented_log_highest_index_before_sleep,
-            segmented_log.lowest_index()
+        assert!(
+            segmented_log_highest_index_before_sleep <= segmented_log.lowest_index(),
+            "Expired segments not removed."
         );
 
         _make_sleep_future(expiry_duration).await;

@@ -157,21 +157,23 @@ impl Storage for InMemStorage {
 
         Ok(vec)
     }
-
-    fn is_persistent() -> bool {
-        false
-    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{super::super::super::common, InMemStorage};
+    use super::{
+        super::super::super::common::{self, _TestStorage},
+        InMemStorage,
+    };
 
     #[test]
     fn test_in_mem_storage_read_append_truncate_consistency() {
         futures_lite::future::block_on(async {
             common::test::_test_storage_read_append_truncate_consistency(|| async {
-                InMemStorage::default()
+                _TestStorage {
+                    storage: InMemStorage::default(),
+                    persistent: false,
+                }
             })
             .await;
         });

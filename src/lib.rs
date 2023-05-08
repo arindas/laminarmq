@@ -3,8 +3,8 @@
 //! </p>
 //!
 //! <p align="center">
-//!   <a href="https://github.com/arindas/laminarmq/actions/workflows/ci.yml">
-//!   <img src="https://github.com/arindas/laminarmq/actions/workflows/ci.yml/badge.svg" />
+//!   <a href="https://github.com/arindas/laminarmq/actions/workflows/rust-ci.yml">
+//!   <img src="https://github.com/arindas/laminarmq/actions/workflows/rust-ci.yml/badge.svg" />
 //!   </a>
 //!   <a href="https://codecov.io/gh/arindas/laminarmq" >
 //!   <img src="https://codecov.io/gh/arindas/laminarmq/branch/main/graph/badge.svg?token=6VLETF5REC"/>
@@ -27,7 +27,7 @@
 //! In order to use `laminarmq` as a library, add the following to your `Cargo.toml`:
 //! ```toml
 //! [dependencies]
-//! laminarmq = "0.0.4"
+//! laminarmq = "0.0.5-rc1"
 //! ```
 //!
 //! The current implementation based on [`glommio`](https://docs.rs/glommio) runs only on linux. `glommio` requires
@@ -218,7 +218,6 @@ pub mod common;
 pub mod server;
 pub mod storage;
 
-#[cfg(not(tarpaulin_include))]
 pub mod prelude {
     //! Prelude module for [`laminarmq`](super) with common exports for convenience.
 }

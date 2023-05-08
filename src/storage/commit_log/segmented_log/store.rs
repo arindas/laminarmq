@@ -220,7 +220,7 @@ impl<S: Storage, H> Sizable for Store<S, H> {
 
 pub(crate) mod test {
     use super::{
-        super::super::super::{AsyncConsume, AsyncTruncate},
+        super::super::super::{common::_TestStorage, AsyncConsume, AsyncTruncate},
         RecordHeader, Storage, Store, StoreError,
     };
     use std::{convert::Infallible, future::Future, hash::Hasher, marker::PhantomData, ops::Deref};
@@ -248,16 +248,21 @@ pub(crate) mod test {
                     b"j9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSD",
                 ];
 
-    pub(crate) async fn _test_store_read_append_truncate_consistency<SP, F, S, H>(
-        storage_provider: SP,
+    pub(crate) async fn _test_store_read_append_truncate_consistency<TSP, F, S, H>(
+        test_storage_provider: TSP,
     ) where
-        F: Future<Output = (S, PhantomData<H>)>,
-        SP: Fn() -> F,
+        F: Future<Output = (_TestStorage<S>, PhantomData<H>)>,
+        TSP: Fn() -> F,
         S: Storage,
         S::Position: num::Zero,
         H: Hasher + Default,
     {
-        let mut store = Store::<S, H>::new(storage_provider().await.0);
+        let _TestStorage {
+            storage,
+            persistent: storage_is_persistent,
+        } = test_storage_provider().await.0;
+
+        let mut store = Store::<S, H>::new(storage);
 
         match store.read(&num::zero(), &RecordHeader::default()).await {
             Err(StoreError::ReadOnEmptyStore) => {}
@@ -281,9 +286,9 @@ pub(crate) mod test {
             record_append_info_vec.push(record_append_info);
         }
 
-        let store = if S::is_persistent() {
+        let store = if storage_is_persistent {
             store.close().await.unwrap();
-            Store::<S, H>::new(storage_provider().await.0)
+            Store::<S, H>::new(test_storage_provider().await.0.storage)
         } else {
             store
         };

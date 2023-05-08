@@ -43,17 +43,22 @@ where
     }
 }
 
+pub(crate) struct _TestStorage<S> {
+    pub(crate) storage: S,
+    pub(crate) persistent: bool,
+}
+
 pub(crate) mod test {
-    use super::super::Storage;
+    use super::{super::Storage, _TestStorage};
     use futures_lite::stream;
     use num::{FromPrimitive, One, Zero};
     use std::{convert::Infallible, fmt::Debug, future::Future, ops::Deref};
 
-    pub(crate) async fn _test_storage_read_append_truncate_consistency<SP, F, S>(
-        storage_provider: SP,
+    pub(crate) async fn _test_storage_read_append_truncate_consistency<TSP, F, S>(
+        test_storage_provider: TSP,
     ) where
-        F: Future<Output = S>,
-        SP: Fn() -> F,
+        F: Future<Output = _TestStorage<S>>,
+        TSP: Fn() -> F,
         S: Storage,
         S::Size: Zero,
         S::Position: One + Zero,
@@ -62,7 +67,10 @@ pub(crate) mod test {
         const REQ_BYTES: &[u8] = b"Hello World!";
         let mut req_body = stream::once(Ok::<&[u8], Infallible>(REQ_BYTES));
 
-        let mut storage = storage_provider().await;
+        let _TestStorage {
+            mut storage,
+            persistent: storage_is_persistent,
+        } = test_storage_provider().await;
 
         // 0 bytes read on 0 size storage should succeed
         storage
@@ -119,9 +127,9 @@ pub(crate) mod test {
             S::Size::from_usize(expected_storage_size).unwrap()
         );
 
-        let mut storage = if S::is_persistent() {
+        let mut storage = if storage_is_persistent {
             storage.close().await.unwrap();
-            storage_provider().await
+            test_storage_provider().await.storage
         } else {
             storage
         };

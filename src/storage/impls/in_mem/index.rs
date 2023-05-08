@@ -1,6 +1,9 @@
 #[cfg(test)]
 mod tests {
-    use super::super::{super::super::commit_log::segmented_log::index, storage::InMemStorage};
+    use super::super::{
+        super::super::{commit_log::segmented_log::index, common::_TestStorage},
+        storage::InMemStorage,
+    };
     use std::marker::PhantomData;
 
     #[test]
@@ -8,7 +11,10 @@ mod tests {
         futures_lite::future::block_on(async {
             index::test::_test_index_read_append_truncate_consistency(|| async {
                 (
-                    InMemStorage::default(),
+                    _TestStorage {
+                        storage: InMemStorage::default(),
+                        persistent: false,
+                    },
                     PhantomData::<(crc32fast::Hasher, u32)>,
                 )
             })

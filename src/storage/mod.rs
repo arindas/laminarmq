@@ -131,8 +131,6 @@ pub trait Storage:
         position: &Self::Position,
         size: &Self::Size,
     ) -> Result<Self::Content, Self::Error>;
-
-    fn is_persistent() -> bool;
 }
 
 pub mod commit_log;
