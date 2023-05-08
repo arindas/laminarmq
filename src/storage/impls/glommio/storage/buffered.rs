@@ -161,8 +161,6 @@ impl AsyncConsume for BufferedStorage {
     type ConsumeError = BufferedStorageError;
 
     async fn remove(mut self) -> Result<(), Self::ConsumeError> {
-        println!("{:?}", self.backing_file_path);
-
         glommio::io::remove(self.backing_file_path)
             .await
             .map_err(BufferedStorageError::StorageError)
