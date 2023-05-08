@@ -49,11 +49,9 @@ pub struct DmaStorage {
     size: u64,
 }
 
-pub const DEFAULT_DMA_STORAGE_BUFFER_SIZE: usize = 128 << 10;
-
 impl DmaStorage {
     pub async fn new<P: AsRef<Path>>(path: P) -> Result<Self, DmaStorageError> {
-        Self::with_storage_path_and_buffer_size(path, DEFAULT_DMA_STORAGE_BUFFER_SIZE).await
+        Self::with_storage_path_and_buffer_size(path, super::DEFAULT_STORAGE_BUFFER_SIZE).await
     }
 
     pub async fn with_storage_path_and_buffer_size<P: AsRef<Path>>(
@@ -328,9 +326,9 @@ mod tests {
     }
 
     #[test]
-    fn test_segment_read_append_truncate_consistency() {
+    fn test_dma_segment_read_append_truncate_consistency() {
         const TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY: &str =
-            "/tmp/laminarmq_test_segment_read_append_truncate_consistency";
+            "/tmp/laminarmq_test_dma_segment_read_append_truncate_consistency";
 
         if Path::new(TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY).exists() {
             fs::remove_dir_all(TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY).unwrap();

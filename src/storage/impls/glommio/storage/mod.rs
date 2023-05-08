@@ -1,3 +1,4 @@
 pub mod buffered;
 pub mod dma;
-pub mod immutable;
+
+pub const DEFAULT_STORAGE_BUFFER_SIZE: usize = 128 << 10;

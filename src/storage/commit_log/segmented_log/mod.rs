@@ -282,6 +282,10 @@ where
         &mut self,
         expiry_duration: Duration,
     ) -> Result<Idx, LogError<S, SERP>> {
+        if write_segment_ref!(self, as_ref)?.is_empty() {
+            self.reopen_write_segment().await?
+        }
+
         let next_index = self.highest_index();
 
         let mut segments = std::mem::take(&mut self.read_segments);
