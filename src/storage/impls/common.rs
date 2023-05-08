@@ -112,8 +112,7 @@ where
             .filter_map(|dir_entry_result| dir_entry_result.ok().map(|dir_entry| dir_entry.path()))
             .filter(|path| {
                 path.extension()
-                    .map(|extension| extension == INDEX_FILE_EXTENSION)
-                    .and_then(|extension_matches| extension_matches.then_some(()))
+                    .filter(|extension| *extension == INDEX_FILE_EXTENSION)
                     .is_some()
             })
             .filter_map(|path| {
