@@ -38,7 +38,6 @@ impl From<StreamUnexpectedLength> for BufferedStorageError {
     }
 }
 
-#[allow(unused)]
 pub struct BufferedStorage {
     reader: BufferedFile,
     writer: StreamWriter,
