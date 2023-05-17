@@ -195,11 +195,25 @@ This would not only incur more allocations, but also slow down our system.
 
 Hence, to accommodate this use case, we introduced an intermediate indexing layer to our design.
 
-![segmented_log](https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-indexed-segmented-log.svg)
+![segmented_log](https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-indexed-segmented-log-landscape.svg)
 <p align="center">
 <b>Fig:</b> Data organisation for persisting the <code>segmented_log</code> data structure on a
 <code>*nix</code> file system.
 </p>
+
+```
+//! Index and position invariants across segmented_log
+
+// segmented_log index invariants
+segmented_log.lowest_index  = segmented_log.read_segments[0].lowest_index
+segmented_log.highest_index = segmented_log.write_segment.highest_index
+
+// record position invariants in store
+records[i+1].position = records[i].position + records[i].record_header.length
+
+// segment index invariants in segmented_log
+segments[i+1].base_index = segments[i].highest_index = segments[i].index[index.len - 1].index + 1
+```
 
 In the new design, instead of referring to records with a raw offset, we refer to them with indices. The
 index in each segment translates the record indices to raw file position in the segment store file.
