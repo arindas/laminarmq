@@ -283,6 +283,16 @@ Here's all the diagrams in an order that makes sense:
 
 ![partition-control-flow-replication](https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-partition-control-flow-and-replication.svg)
 
+## Execution Model
+  
+### General Work stealing async runtime (e.g. `tokio`)
+
+![async-execution-model-general](https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-async-execution-model-general.svg)
+  
+### Thread per core async runtime (e.g. `glommio`)
+  
+![async-execution-model-thread-per-core](https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-async-execution-model-thread-per-core.svg)
+  
 ### Storage data-structures
 
 #### `segmented_log`
