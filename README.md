@@ -175,6 +175,8 @@ N_i)))`
 - For some replication factor `k`, we select the top `k` nodes to place the `k` replicas of the
 partition with id `P_x`
 
+(We assume `k <= |N|`; where `|N|` is the number of nodes and `k` is the number of replicas)
+
 With this mechanism, anyone with the ids and weights of all the members in the cluster can compute
 the destination nodes for the replicas of a partition. This knowledge can also be used to route
 partition request to the appropriate nodes at both the client side and the server side.
