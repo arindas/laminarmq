@@ -68,12 +68,9 @@ partition_id_1 = (topic_id_0, partition_idx_1)
 
 partition_id_2 = (topic_id_1, partition_idx_0)
 
-[L] := leader
-[F] := follower
-
-The exact numerical ids don't have any pattern; there can be multiple topics, each of which can have
-multiple partitions.
 ```
+>The exact numerical ids don't have any pattern with respect to partition_id and topic_id; there can
+>be multiple topics, each of which can have multiple partitions (identified by partition_idx).
 
 … alternatively:
 
@@ -93,8 +90,9 @@ multiple partitions.
 │       └── segmented_log{[segment#001, segment#002, ...]}
 └── ...other nodes
 
-[L] := leader
-[F] := follower
+```
+```
+[L] := leader; [F] := follower
 ```
 
 <p align="center">
