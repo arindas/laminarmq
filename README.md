@@ -181,9 +181,10 @@ With this mechanism, anyone with the ids and weights of all the members in the c
 the destination nodes for the replicas of a partition. This knowledge can also be used to route
 partition request to the appropriate nodes at both the client side and the server side.
 
-In our case we load balance all idempotent partition requests across all the possible nodes where a
-replica of the request's partition can be present. For non-idempotent request, if we send it to any
-one of the candidate nodes, the redirect it to the current leader of the replica set.
+In our case, we use client side load balancing to load balance all idempotent partition requests
+across all the possible nodes where a replica of the request's partition can be present. For
+non-idempotent request, if we send it to any one of the candidate nodes, they redirect it to the
+current leader of the replica set.
 
 ## Testing
 
