@@ -25,7 +25,7 @@ log.<br><i>This is currently a work in progress.</i>
 ## Usage
 
 `laminarmq` provides a library crate and two binaries for managing `laminarmq` deployments. In order
-to use `laminarmq` as a library, add the following to your `Cargo.toml`: 
+to use `laminarmq` as a library, add the following to your `Cargo.toml`:
 
 ```toml
 [dependencies]
@@ -137,7 +137,7 @@ For instance, the `glommio` async runtime which requires an updated linux kernel
 work. (Note: 512 KiB is the minimum needed to spawn a single executor. Spawning multiple executors
 may require you to raise the limit accordingly. I recommend 8192 KiB on a 8 GiB RAM machine.)
 
-First, check the current `memlock` limit: 
+First, check the current `memlock` limit:
 
 ```sh
 ulimit -l
@@ -156,14 +156,14 @@ To make the new limits effective, you need to log in to the machine again. Verif
 have been reflected with `ulimit` as described above.
 
 >(On old WSL versions, you might need to spawn a login shell every time for the limits to be
->reflected: 
+>reflected:
 >```sh
->su ${USER} -l 
->``` 
+>su ${USER} -l
+>```
 >The limits persist once inside the login shell. This is not necessary on the latest WSL2 version as
 >of 22.12.2022)
 
-Finally, clone the repository and run the tests: 
+Finally, clone the repository and run the tests:
 ```sh
 git clone https://github.com/arindas/laminarmq.git
 cd laminarmq/
