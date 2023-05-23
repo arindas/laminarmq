@@ -161,7 +161,7 @@ using Rendezvous hashing.
 
 From the Wikipedia [article](https://en.wikipedia.org/wiki/Rendezvous_hashing):
 >Rendezvous or highest random weight (HRW) hashing is an algorithm that allows clients to achieve
->distributed agreement on a set of k options out of a possible set of n options. A typical
+>distributed agreement on a set of _k_ options out of a possible set of _n_ options. A typical
 >application is when clients need to agree on which sites (or proxies) objects are assigned to.
 
 In our case, we use rendezvous hashing to determine the subset of nodes to use for placing the
