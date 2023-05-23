@@ -186,7 +186,7 @@ across all the possible nodes where a replica of the request's partition can be 
 non-idempotent request, if we send it to any one of the candidate nodes, they redirect it to the
 current leader of the replica set.
 
-## Supported execution models
+### Supported execution models
 
 `laminarmq` supports two execution models:
 - General async execution model used by various async runtimes in the Rust ecosystem (e.g `tokio`)
@@ -205,9 +205,83 @@ requests. In our case this translates to having each thread be responsible for o
 partition replicas in a node. Requests pertaining to a partition replica are always routed to the
 same thread. The following sections will go into more detail as to how this is achieved.
 
-We realize that although the thread per core model has some inherent advantages, being compatible
-with the existing Rust ecosystem will significantly increase adoption. Therefore, we have designed
-our system with reusable components which can be organized to suit both execution models.
+We realize that although the thread per core execution model has some inherent advantages, being
+compatible with the existing Rust ecosystem will significantly increase adoption. Therefore, we have
+designed our system with reusable components which can be organized to suit both execution models.
+
+### Request routing in nodes
+
+#### General design
+
+![request-rouing-general](https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-node-request-routing-general.svg)
+<p align="center">
+<b>Fig:</b> Request routing mechanism in <code>laminarmq</code> nodes using the general execution
+model.
+</p>
+
+In our cluster, we have two kinds of requests:
+- __membership requests__: used by the gossip style service discovery system for maintaining cluster
+membership.
+- __partition requests__: used to interact with `laminarmq` topic partitions.
+
+We use an [eBPF](https://ebpf.io/what-is-ebpf/) XDP filter to classify request packets at the socket
+layer into membership request packets and partition request packets. Next we use eBPF to route
+membership packets to a different socket which is exclusively used by the membership management
+subsystem in that node. The partition request packets are left to flow as is.
+
+Next we have an "HTTP server", which parses the incoming partition request packets from the original
+socket into valid `partition::*` requests. For every `partition::*` request, the HTTP server spawns
+a future to handle it. This request handler future does the following:
+- Create a new channel `(tx, rx)` for the request.
+- Send the parsed partition request along with send end of the channel `(partition::*, tx)` to the
+"Request Router" over the request router's receiving channel.
+- Await on the recv. end of the channel created by this future for the response. `res = rx.await`
+- When we receive the response from this future's channel, we serialize it and respond back to the
+socket we had received the packets from.
+
+Next we have a "Request Router / Partition manager" responsible for routing various requests to the
+partition serving futures. The request router unit receives both `membership::*` requests from the
+membership subsystem and `partition::*` requests received from the "HTTP server" request handler
+futures (also called request poller futures from here on since they poll for the response from the
+channel recv. `rx` end). The request router unit routes requests as follows:
+- `membership::*` requests are broadcast to all the partition serving futures
+- `(partition::*_request(partition_id_x, …), tx)` tuples are routed to their destination partitions
+using the `partition_id`.
+- `(partition::create(partition_id_x, …), tx)` tuples are handled by the request router/ partition
+manager itself. For this, the request router / partition manager creates a new partition serving
+future, allocates the required storage units or it and sends and appropriate response on `tx`.
+
+Finally, the individual partition server futures receive both `membership::*` and `(partition::*,
+tx)` requests as they come to our node and routed. They handle the requests as necessary and send a
+response back to `tx` where applicable.
+
+#### Thread per core execution model compatible design
+
+![request-routing-thread-per-core](https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-node-request-routing-thread-per-core.svg)
+<p align="center">
+<b>Fig:</b> Request routing mechanism in <code>laminarmq</code> nodes using the thred per core
+execution model.
+</p>
+
+In the thread per core execution model each thread is responsible for a subset of the partitions.
+Hence each thread has it's own "Request Router / Partition Manager", "HTTP Server" and a set of
+partition serving futures. We run multiple such threads on different processor cores.
+
+Now, as discussed before we need to route individual requests to the correct destination thread to
+ensure request locality. We use a dedicated "Thread Router" eBPF XDP filter to route partition
+request packets to their destination threads.
+
+The "Thread Router" eBPF XDP filter keeps a eBPF `sockmap` which contains the sockets where each of
+the threads listen to for requests. For every incoming request, we route it to its destination
+thread using this `sockmap`. Now we can again leverage rendezvous hashing here to determine the
+thread to be used for a request. We use the `partition_id` and `thread_id` for rendezvous hashing.
+Since all the threads run on different processor cores, they will have similar request handling
+capacity and hence will have equal weights. Using this, requests belonging to a particular partition
+will always be routed to the same thread on a particular node. This ensures a high level of request
+locality.
+
+The remaining components behave as discussed above. Notice how we are able to reuse the same
+components in a drastically different execution model, as promised before.
 
 ## Testing
 
