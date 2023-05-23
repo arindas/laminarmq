@@ -144,7 +144,7 @@ neighbouring nodes, they in-turn gossip to their neighbours and so on).
 
 In order to see whether a node has failed, the nodes randomly probes individual nodes in the
 cluster. For instance, node A probes node B directly. If node B responds, it has not failed. If node
-B does not respond, A attempt to probe node B indirectly through other nodes in the cluster, e.g.
+B does not respond, A attempts to probe node B indirectly through other nodes in the cluster, e.g.
 node A might ask node C to probe node B. Node A continues to indirectly probe node B with all the
 other nodes in the cluster. If node B responds to any of the indirect probes, it is still considered
 to not have failed. It is otherwise declared failed and removed from the cluster.
