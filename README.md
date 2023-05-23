@@ -283,6 +283,14 @@ locality.
 The remaining components behave as discussed above. Notice how we are able to reuse the same
 components in a drastically different execution model, as promised before.
 
+### Partition control flow and replication
+
+![partition-control-flow-replication](https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-partition-control-flow-and-replication.svg)
+<p align="center">
+<b>Fig:</b> Partition serving future control flow and partition replication mechanism in
+<code>laminarmq</code>
+</p>
+
 ## Testing
 
 You may run tests with `cargo` as you would for any other crate. However, since `laminarmq` is
