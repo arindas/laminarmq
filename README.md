@@ -291,6 +291,245 @@ components in a drastically different execution model, as promised before.
 <code>laminarmq</code>
 </p>
 
+The partition controller future receives membership event requests `membership::{join, leave,
+update_weight}` or `(paritition::*, tx)` requests from the request router future.
+
+The partition request handler handles the different requests as follows:
+
+- Idempotent `partition::*_request`: performs the necessary idempotent operation on the underlying
+  segmented log and responds with the result on the response channel.
+
+- Non-idempotent `partition::*_request`: Leader and follower replicas handle non-idempotent replicas
+  differently:
+
+  - Leader replicas: Replicates non-idempotent operations on all follower partitions in the Raft
+    group if this partition is a leader, and then applies the operation locally. This might involve
+    first sending an Raft append request, locally writing once majority of replicas respond back,
+    then commit-ing it locally and finally relay the commit to all other replicas. Leader replicas
+    respond to requests only from clients. Non-idempotent requests from follower replicas are
+    ignored.
+  - Follower replicas: Follower replicas respond to non-idempotent requests only from leaders.
+    Non-idempotent from clients are redirected to the leader. A follower replica handles
+    non-idempotent requests by applying the changes locally in accordance with Raft.
+
+  Once the replicas are done handling the request, they send back an appropriate response to the
+  response channel, if present. (A redirect response is also encoded properly and sent back to the
+  response channel).
+
+- `membership::join(i)`: add {node #i} to local priority queue. If the required number of replicas
+  is more than the current number, pop() one member from the priority queue and add it to the Raft
+  group (making it an eligible candidate in the Raft leader election process). If the current
+  replica is a leader, we send a `partition::create(...)` request. If there is no leader among the
+  replicas, we initial the leadership election process with each replica as a candidate.
+
+- `membership::leave(j)`: remove {node #j} from priority queue and Raft group if present. If `{node
+  #j}` was not present in the Raft group no further action is necessary. If it was present in the
+  Raft group, `pop()` another member from the priority queue, add it to the Raft group and proceed
+  similarly as in the case of `membership::join(j)`
+
+- `membership::update_weight(k)`: updates priority for `{node #k}` by recomputing rendezvous_hash
+  for {node #k} with this partition replicas partition_id. Next, if any node in the priority queue
+  has a higher priority than any of the nodes in the Raft group, the node with the least priority
+  is replaced by the highest priority element from the queue. We send a
+  `partition::remove(partition_id, ...)` request to `{node #k}`. Afterwards we proceed similarly
+  to `membership::{leave, join}` requests.
+
+When a node goes down the appropriate `membership::leave(i)` message (where `i` is the node that
+went down) is sent to all the nodes in the cluster. The partition replica controllers in each node
+handle the membership request accordingly. In effect:
+- For every leader partition in that node:
+  - if there are no other follower replicas in other nodes in it's Raft group, that partition goes
+    down.
+  - if there are other follower replicas in other nodes, there are leader elections among them and
+    after a leader is elected, reads and writes for that partition proceed normally
+- For every follower partition in that node:
+  - the remaining replicas in the same raft group continue to function in accordance with Raft's
+    mechanisms.
+
+For each of the partition replicas on the node that went down, new host nodes are selected using
+rendezvous hash priority.
+
+In our system, we use different Raft groups for different data buckets (replica groups).
+[CockroachDB](https://www.cockroachlabs.com/) and [Tikv](https://tikv.org) call this manner of using
+different Raft groups for different data buckets on the same node as MultiRaft.
+
+Read more here:
+- https://tikv.org/deep-dive/scalability/multi-raft/
+- https://www.cockroachlabs.com/blog/scaling-raft/
+
+Every partition controller is backed by a `segmented_log` for persisting records.
+
+### Persistence mechanism
+
+#### `segmented_log`: Persistent data structure for storing records in a partition
+The segmented-log data structure for storing was originally described in the [Apache
+Kafka](https://www.microsoft.com/en-us/research/wp-content/uploads/2017/09/Kafka.pdf) paper.
+
+![segmented_log](https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-segmented-log.svg)
+<p align="center">
+<b>Fig:</b> File organisation for persisting the <code>segmented_log</code> data structure on a
+<code>*nix</code> file system.
+</p>
+
+A segmented log is a collection of read segments and a single write segment. Each "segment" is
+backed by a storage file on disk called "store".
+
+The log is:
+- "immutable", since only "append", "read" and "truncate" operations are allowed. It is not possible
+  to update or delete records from the middle of the log.
+- "segmented", since it is composed of segments, where each segment services records from a
+  particular range of offsets.
+
+All writes go to the write segment. A new record is written at `offset = write_segment.next_offset`
+in the write segment. When we max out the capacity of the write segment, we close the write segment
+and reopen it as a read segment. The re-opened segment is added to the list of read segments. A new
+write segment is then created with `base_offset` equal to the `next_offset` of the previous write
+segment.
+
+When reading from a particular offset, we linearly check which segment contains the given read
+segment. If a segment capable of servicing a read from the given offset is found, we read from that
+segment. If no such segment is found among the read segments, we default to the write segment. The
+following scenarios may occur when reading from the write segment in this case:
+- The write segment has synced the messages including the message at the given offset. In this case
+  the record is read successfully and returned.
+- The write segment hasn't synced the data at the given offset. In this case the read fails with a
+  segment I/O error.
+- If the offset is out of bounds of even the write segment, we return an "out of bounds" error.
+
+#### `laminarmq` specific enhancements to the `segmented_log` data structure
+While the conventional `segmented_log` data structure is quite performant for a `commit_log`
+implementation, it still requires the following properties to hold true for the record being
+appended:
+- We have the entire record in memory
+- We know the record bytes' length and record bytes' checksum before the record is appended
+
+It's not possible to know this information when the record bytes are read from an asynchronous
+stream of bytes. Without the enhancements, we would have to concatenate intermediate byte buffers to
+a vector. This would not only incur more allocations, but also slow down our system.
+
+Hence, to accommodate this use case, we introduced an intermediate indexing layer to our design.
+
+![segmented_log](https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-indexed-segmented-log-landscape.svg)
+
+```
+//! Index and position invariants across segmented_log
+
+// segmented_log index invariants
+segmented_log.lowest_index  = segmented_log.read_segments[0].lowest_index
+segmented_log.highest_index = segmented_log.write_segment.highest_index
+
+// record position invariants in store
+records[i+1].position = records[i].position + records[i].record_header.length
+
+// segment index invariants in segmented_log
+segments[i+1].base_index = segments[i].highest_index = segments[i].index[index.len - 1].index + 1
+```
+<p align="center">
+<b>Fig:</b> Data organisation for persisting the <code>segmented_log</code> data structure on a
+<code>*nix</code> file system.
+</p>
+
+In the new design, instead of referring to records with a raw offset, we refer to them with indices.
+The index in each segment translates the record indices to raw file position in the segment store
+file.
+
+Now, the store append operation accepts an asynchronous stream of bytes instead of a contiguously
+laid out slice of bytes. We use this operation to write the record bytes, and at the time of writing
+the record bytes, we calculate the record bytes' length and checksum. Once we are done writing the
+record bytes to the store, we write it's corresponding `record_header` (containing the checksum and
+length), position and index as an `index_record` in the segment index.
+
+This provides two quality of life enhancements:
+- Allow asynchronous streaming writes, without having to concatenate intermediate byte buffers
+- Records are accessed much more easily with easy to use indices
+
+Now, to prevent a malicious user from overloading our storage capacity and memory with a maliciously
+crafted request which infinitely loops over some data and sends it to our server, we have provided
+an optional `append_threshold` parameter to all append operations. When provided, it prevents
+streaming append writes to write more bytes than the provided `append_threshold`.
+
+At the segment level, this requires us to keep a segment overflow capacity. All segment append
+operations now use `segment_capacity - segment.size + segment_overflow_capacity` as the
+`append_threshold` value. A good `segment_overflow_capacity` value could be `segment_capacity / 2`.
+
+### Execution Model
+
+#### General async runtime (e.g. `tokio`, `async-std` etc.)
+
+![async-execution-model-general](https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-async-execution-model-general.svg)
+<p align="center">
+<b>Fig:</b> General async runtime based execution model for <code>laminarmq</code>
+</p>
+
+This execution model is based on the executor, reactor, waker abstractions used by all rust async
+runtimes. We don't have to specifically care about how and where a particular future is executed.
+
+The data flow in this execution model is as follows:
+- A HTTP server future parses HTTP requests from the request socket
+- For every HTTP request it creates a new future to handle it
+- The HTTP handler future sends the request and a response channel tx to the request router via a channel.
+It also awaits on the response rx end.
+- The request router future maintains a map of partition_id to designated request channel tx for each
+partition controller future.
+- For every partition request received it forwards the request on the appropriate partition request
+channel tx. If a `partition::create(...)` request is received it creates a new partition controller
+future.
+- The partition controller future send back the response to the provided response channel tx.
+- The response poller future received it and responds back with a serialized response to the socket.
+
+All futures are spawned using the async runtime's designated `{…}::spawn(…)` method. We don't have
+to specify any details as to how and where the future's corresponding task will be executed.
+
+#### Thread per core async runtime (e.g. `glommio`)
+
+![async-execution-model-thread-per-core](https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-async-execution-model-thread-per-core.svg)
+<p align="center">
+<b>Fig:</b> Thread per core async runtime based execution model for <code>laminarmq</code>
+</p>
+
+In the thread per core model since each processor core is limited to a single thread, tasks in a
+thread need to be scheduled efficiently. Hence each worker thread runs their own task scheduler.
+
+We currently use [`glommio`](https://docs.rs/glommio) as our thread-per-core runtime.
+
+Here, tasks can be scheduled on different task queues and different task queues can be provisioned
+with specific fractions of CPU time shares. Generally tasks with similar latency profiles are
+executed on the same task queue. For instance web server tasks will be executed on a different queue
+than the one that runs tasks for persisting data to the disk.
+
+We re-use the same constructs that we use the general async runtim execution model. The only
+difference being, we explicitly care about in which task queue a class of future's tasks are
+executed. In our case, we have the following 4 task queues:
+- Request router task queue
+- HTTP server request parser task queue
+- Partition replica controller task queue
+- Response poller task queue
+
+Each of these task queue can be assigned specific fractions of CPU time shares. `glommio` also
+provides utilities for automatically deducing these CPU time shares based on their runtime latency
+profiles.
+
+Apart from this `glommio` leverages the new linux 5.x [`io_uring`](https://kernel.dk/io_uring.pdf)
+API which facilitates true asynchronous IO for both networking and disk interfaces. (Other `async`
+runtimes such as [`tokio`](https://docs.rs/tokio) make blocking system calls for disk IO operations
+in a thread-pool.)
+
+`io_uring` also has the advantage of being able to queue together multiple system calls together and
+then asynchronously wait for their completion by making a maximum of one context switch. It is also
+possible to avoid context switches altogether. This is achieved with a pair of ring buffers called
+the submission-queue and the completion-queue. Once the queues are set up, user can queue multiple
+system calls on the submission queue. The linux kernel processes the system calls and places the
+results in the completion queue. The user can then freely read the results from the
+completion-queue. This entire process after setting up the queues doesn't require any additional
+context switch.
+
+Read more: https://man.archlinux.org/man/io_uring.7.en
+
+`glommio` presents additional abstractions on top of `io_uring` in the form of an async runtime,
+with support for networking, disk IO, channels, single threaded locks and more.
+
+Read more: https://www.datadoghq.com/blog/engineering/introducing-glommio/
+
 ## Testing
 
 You may run tests with `cargo` as you would for any other crate. However, since `laminarmq` is
