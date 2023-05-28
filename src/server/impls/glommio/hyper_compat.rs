@@ -98,35 +98,38 @@ where
 
     #[instrument(skip(service))]
     fn serve(&self, service: S) -> Self::Result {
-        let max_connections = self.max_connections;
-        let task_q = self.task_q;
+        let (max_connections, task_q) = (self.max_connections, self.task_q);
 
-        debug!("Attempting bind()");
+        if max_connections == 0 {
+            error!("max_connections = 0. Refusing connections.");
+            return Err(ConnectionRefused.into());
+        }
+
+        debug!("Attempting bind() on {:?}", self.addr);
         let listener = TcpListener::bind(self.addr)?;
 
         let conn_control = Rc::new(Semaphore::new(max_connections as _));
 
         let spawn_result = HyperExecutor { task_q }.spawn(
             async move {
-                if max_connections == 0 {
-                    error!("max_connections = 0. Refusing connections.");
-                    return Err::<(), GlommioError<()>>(io::Error::from(ConnectionRefused).into());
-                }
-
                 debug!("Start listening for client connections.");
 
                 loop {
                     let stream = listener.accept().await?;
                     let addr = stream.local_addr()?;
 
-                    debug!("Accepted a connection");
+                    debug!("Accepted a connection from: {addr:?}");
 
                     let scoped_conn_control = conn_control.clone();
                     let captured_service = service.clone();
 
                     HyperExecutor { task_q }.execute(
                         async move {
-                            let _semaphore_permit = scoped_conn_control.acquire_permit(1).await?;
+                            let _semaphore_permit =
+                                scoped_conn_control.acquire_permit(1).await.map_err(|_| {
+                                    error!("Failed to acquire connection semaphore!");
+                                    io::Error::from(ConnectionRefused)
+                                })?;
 
                             debug!("Acquired permit on conn_control, begin serving connection");
 
