@@ -1,8 +1,10 @@
 use glommio::{executor, Latency, LocalExecutorBuilder, Placement, Shares};
 use hyper::{service::service_fn, Body, Request, Response, StatusCode};
-use laminarmq::server::{impls::glommio::hyper_compat::HyperServer, Server};
-use std::convert::Infallible;
-use std::rc::Rc;
+use laminarmq::server::{
+    impls::glommio::hyper_compat::{ConnControl, HyperServer},
+    Server,
+};
+use std::{convert::Infallible, num::NonZeroUsize, rc::Rc};
 use tracing::{debug, info, instrument, subscriber, Level};
 use tracing::{info_span, Instrument};
 use tracing_subscriber::FmtSubscriber;
@@ -69,7 +71,12 @@ fn main() {
                 "rpc_server_tq",
             );
 
-            let server = HyperServer::new(1024, rpc_server_tq, ([0, 0, 0, 0], 8080));
+            let server = HyperServer::new(
+                NonZeroUsize::new(1024).unwrap(),
+                ConnControl::Blocking,
+                rpc_server_tq,
+                ([0, 0, 0, 0], 8080),
+            );
 
             let server_task = server
                 .serve(service_fn(move |req| {

@@ -11,6 +11,7 @@ use std::{
         ErrorKind::{ConnectionRefused, ConnectionReset, Other},
     },
     net::SocketAddr,
+    num::NonZeroUsize,
     rc::Rc,
 };
 use tower_service::Service;
@@ -65,22 +66,35 @@ impl From<ConnResult> for io::Result<()> {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum ConnControl {
+    NonBlocking,
+    Blocking,
+}
+
 /// Serves HTTP requests at the given address using the given parameters. All request
 /// handling futures are spawned on the given [`TaskQ`].
 #[derive(Debug)]
 pub struct HyperServer {
-    pub max_connections: usize,
+    pub max_connections: NonZeroUsize,
+    pub conn_control: ConnControl,
     pub task_q: TaskQ,
     pub addr: SocketAddr,
 }
 
 impl HyperServer {
-    pub fn new<A>(max_connections: usize, task_q: TaskQ, addr: A) -> Self
+    pub fn new<A>(
+        max_connections: NonZeroUsize,
+        conn_control: ConnControl,
+        task_q: TaskQ,
+        addr: A,
+    ) -> Self
     where
         A: Into<SocketAddr>,
     {
         Self {
             max_connections,
+            conn_control,
             task_q,
             addr: addr.into(),
         }
@@ -98,17 +112,13 @@ where
 
     #[instrument(skip(service))]
     fn serve(&self, service: S) -> Self::Result {
-        let (max_connections, task_q) = (self.max_connections, self.task_q);
+        let (max_connections, task_q, conn_control) =
+            (self.max_connections.get(), self.task_q, self.conn_control);
 
-        if max_connections == 0 {
-            error!("max_connections = 0. Refusing connections.");
-            return Err(ConnectionRefused.into());
-        }
-
-        debug!("Attempting bind() on {:?}", self.addr);
+        debug!("Binding on {:?}", self.addr);
         let listener = TcpListener::bind(self.addr)?;
 
-        let conn_control = Rc::new(Semaphore::new(max_connections as _));
+        let conn_semaphore = Rc::new(Semaphore::new(max_connections as _));
 
         let spawn_result = HyperExecutor { task_q }.spawn(
             async move {
@@ -120,29 +130,35 @@ where
 
                     debug!("Accepted a connection from: {addr:?}");
 
-                    let scoped_conn_control = conn_control.clone();
-                    let captured_service = service.clone();
+                    let conn_semaphore = conn_semaphore.clone();
+                    let service = service.clone();
 
                     HyperExecutor { task_q }.execute(
                         async move {
-                            let _semaphore_permit =
-                                scoped_conn_control.acquire_permit(1).await.map_err(|_| {
-                                    error!("Failed to acquire connection semaphore!");
-                                    io::Error::from(ConnectionRefused)
-                                })?;
+                            let _semaphore_permit = match conn_control {
+                                ConnControl::Blocking => conn_semaphore.acquire_permit(1).await,
+                                _ => conn_semaphore.try_acquire_permit(1),
+                            }
+                            .map_err(|err| match err {
+                                GlommioError::WouldBlock(_) => "Max connections limit crossed!",
+                                _ => "Failed to acquire connection permit!",
+                            })
+                            .map_err(|err| error!(err))
+                            .map_err(|_| io::Error::from(ConnectionRefused))?;
 
-                            debug!("Acquired permit on conn_control, begin serving connection");
+                            debug!("Acquired connection permit, begin serving connection.");
 
-                            let http = Http::new()
+                            let http_connection = Http::new()
                                 .with_executor(HyperExecutor { task_q })
-                                .serve_connection(TokioIO(stream), captured_service);
+                                .serve_connection(TokioIO(stream), service);
 
                             debug!("Obtained connection handle.");
 
-                            let conn_res: io::Result<()> = ConnResult(addr, http.await).into();
+                            let conn_res = http_connection.await;
 
-                            debug!("Done serving connection");
-                            conn_res
+                            debug!("Done serving connection.");
+
+                            io::Result::<()>::from(ConnResult(addr, conn_res))
                         }
                         .instrument(trace_span!("connection_handler")),
                     );
