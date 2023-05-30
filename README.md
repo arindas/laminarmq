@@ -577,4 +577,5 @@ cargo test
 
 ## License
 
-`laminarmq` is licensed under the MIT License. See [License](./LICENSE) for more details.
+`laminarmq` is licensed under the MIT License. See
+[License](https://raw.githubusercontent.com/arindas/laminarmq/main/LICENSE) for more details.
