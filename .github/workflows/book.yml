@@ -1,6 +1,7 @@
 name: mdbook
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - book
