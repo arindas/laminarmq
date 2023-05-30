@@ -160,6 +160,7 @@ ids and capacity weights. We then use their ids and weights to determine where t
 using Rendezvous hashing.
 
 From the Wikipedia [article](https://en.wikipedia.org/wiki/Rendezvous_hashing):
+
 >Rendezvous or highest random weight (HRW) hashing is an algorithm that allows clients to achieve
 >distributed agreement on a set of _k_ options out of a possible set of _n_ options. A typical
 >application is when clients need to agree on which sites (or proxies) objects are assigned to.
@@ -354,8 +355,8 @@ In our system, we use different Raft groups for different data buckets (replica 
 different Raft groups for different data buckets on the same node as MultiRaft.
 
 Read more here:
-- https://tikv.org/deep-dive/scalability/multi-raft/
-- https://www.cockroachlabs.com/blog/scaling-raft/
+- <https://tikv.org/deep-dive/scalability/multi-raft/>
+- <https://www.cockroachlabs.com/blog/scaling-raft/>
 
 Every partition controller is backed by a `segmented_log` for persisting records.
 
@@ -422,7 +423,7 @@ segmented_log.highest_index = segmented_log.write_segment.highest_index
 records[i+1].position = records[i].position + records[i].record_header.length
 
 // segment index invariants in segmented_log
-segments[i+1].base_index = segments[i].highest_index = segments[i].index[index.len - 1].index + 1
+segments[i+1].base_index = segments[i].highest_index = segments[i].index[index.len-1].index + 1
 ```
 <p align="center">
 <b>Fig:</b> Data organisation for persisting the <code>segmented_log</code> data structure on a
@@ -523,12 +524,12 @@ results in the completion queue. The user can then freely read the results from 
 completion-queue. This entire process after setting up the queues doesn't require any additional
 context switch.
 
-Read more: https://man.archlinux.org/man/io_uring.7.en
+Read more: <https://man.archlinux.org/man/io_uring.7.en>
 
 `glommio` presents additional abstractions on top of `io_uring` in the form of an async runtime,
 with support for networking, disk IO, channels, single threaded locks and more.
 
-Read more: https://www.datadoghq.com/blog/engineering/introducing-glommio/
+Read more: <https://www.datadoghq.com/blog/engineering/introducing-glommio/>
 
 ## Testing
 
