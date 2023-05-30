@@ -25,7 +25,9 @@ segmented_log.highest_index = segmented_log.write_segment.highest_index
 records[i+1].position = records[i].position + records[i].record_header.length
 
 // segment index invariants in segmented_log
-segments[i+1].base_index = segments[i].highest_index = segments[i].index[index.len-1].index + 1
+segments[i + 1].base_index 
+  = segments[i].highest_index 
+  = segments[i].index[index.len - 1].index + 1
 ```
 <p align="center">
 <b>Fig:</b> Data organisation for persisting the <code>segmented_log</code> data structure on a
