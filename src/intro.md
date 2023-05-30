@@ -19,8 +19,7 @@ partitioned, replicated and immutable log.
 several message queue semantics such as publish subscribe or even full blown protocols like MQTT could be implemented.
 Users are free to read the messages with offsets in any order they need.
 
-This book is meant to answer the "Why?" and "How?" questions behind `laminarmq` and it's internal design. The "What?"
-questions are extensively covered in [API Documentation](https://docs.rs/laminarmq).
+Refer to [API Documentation](https://docs.rs/laminarmq) for reference. 
 
 ## License
 `laminarmq` is licensed under the MIT License. See [License](./LICENSE) for more details.
