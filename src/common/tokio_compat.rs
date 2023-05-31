@@ -1,4 +1,4 @@
-//! Module providing a compatiability layer between [`tokio`] and [`futures_lite`] IO.
+//! Module providing a compatiability layer between `tokio` and `futures_lite` I/O.
 
 use futures_lite::{AsyncRead, AsyncWrite};
 use std::{
@@ -8,8 +8,8 @@ use std::{
 };
 use tokio::io::ReadBuf;
 
-/// Wraps a `futures_lite::{AsyncRead, AsyncWrite}` IO comunication channel with a
-/// `tokio::io::{AsyncRead, AsyncWrite}` implementation.
+/// Wraps a `futures_lite::{AsyncRead, AsyncWrite}` I/O comunication channel to
+/// provide a `tokio::io::{AsyncRead, AsyncWrite}` implementation.
 pub struct TokioIO<T>(pub T)
 where
     T: AsyncRead + AsyncWrite + Unpin;

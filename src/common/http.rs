@@ -14,7 +14,7 @@ use std::{
     task::{Context, Poll},
 };
 
-/// Wraps a [`butes::Buf`] implementation to provide an [`HttpBody`] implementation.
+/// Wraps a [`bytes::Buf`] implementation to provide an [`HttpBody`] implementation.
 pub struct BufToHttpBody<T>(Option<T>);
 
 impl<T> BufToHttpBody<T> {
@@ -65,8 +65,9 @@ where
     T: Deref<Target = [u8]>,
 {
     /// Creates a new [`BufToHttpBody`] instance from a [`Deref`] instance.
+    ///
     /// This function wraps `deref_value` with [`DerefToAsRef`], [`Cursor`] and finally
-    /// [`BufToHttpBody`] to obtain the [`HttpBody`] implementation.
+    /// [`BufToHttpBody`] to obtain an [`HttpBody`] implementation.
     pub fn with_deref_value(deref_value: T) -> Self {
         BufToHttpBody::new(Cursor::new(DerefToAsRef::new(deref_value)))
     }

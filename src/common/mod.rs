@@ -1,7 +1,7 @@
 //! Module containing common utilities used throughout `laminarmq`.
 
 pub mod stream {
-    //! Module containing common utilities for managing [`futures_lite::Stream`](s).
+    //! Module providing some common utilities for managing streams.
 
     /// Error to represent undexpect stream termination or overflow, i.e a stream of unexpected
     /// length.
@@ -18,7 +18,9 @@ pub mod stream {
 }
 
 pub mod ref_ops {
-    //! Module providing utilities for [`Deref`] and [`AsRef`] interop.
+    //! Module providing utilities for [`Deref`](Deref) and [`AsRef`] interop.
+
+    use std::ops::Deref;
 
     /// Wraps a slice to provide an [`AsRef`] implementation.
     pub struct DerefToAsRef<T>(T);
@@ -32,7 +34,7 @@ pub mod ref_ops {
 
     impl<T, X> AsRef<[X]> for DerefToAsRef<T>
     where
-        T: std::ops::Deref<Target = [X]>,
+        T: Deref<Target = [X]>,
     {
         fn as_ref(&self) -> &[X] {
             self.0.deref()
