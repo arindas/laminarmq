@@ -2,6 +2,7 @@
 
 [Introduction](./intro.md)
 
+# Design
 - [Cluster Hierarchy](./cluster.md)
 - [Service Discovery](./service_discovery.md)
 - [Supported Execution Models](./supported_exec_model.md)
@@ -15,4 +16,5 @@
 - [Execution Model](./execution_model.md)
   - [General async runtime](./general_async.md)
   - [Thread Per Core](./thread_per_core.md)
-- [Testing](./testing.md)
+
+[Testing](./testing.md)

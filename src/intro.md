@@ -20,7 +20,7 @@ on top of which several message queue semantics such as publish subscribe or eve
 protocols like MQTT could be implemented. Users are free to read the messages with offsets in any
 order they need.
 
-Refer to [API Documentation](https://docs.rs/laminarmq) for reference.
+Refer to [API Documentation](https://docs.rs/laminarmq) for library documentation.
 
 ## License
 

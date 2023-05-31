@@ -4,3 +4,7 @@ language = "en"
 multilingual = false
 src = "src"
 title = "laminarmq"
+
+[output.html]
+git-repository-url = "https://github.com/arindas/laminarmq"
+edit-url-template = "https://github.com/arindas/laminarmq/edit/book/{path}"
