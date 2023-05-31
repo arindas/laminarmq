@@ -58,7 +58,7 @@ This section describes the internal design of `laminarmq`.
 
 ![cluster-hierarchy](https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-cluster-hierarchy.svg)
 
-```
+```text
 partition_id_x is of the form (topic_id, partition_idx)
 
 In this example, consider:
@@ -91,7 +91,7 @@ partition_id_2 = (topic_id_1, partition_idx_0)
 └── ...other nodes
 
 ```
-```
+```text
 [L] := leader; [F] := follower
 ```
 
@@ -412,7 +412,7 @@ Hence, to accommodate this use case, we introduced an intermediate indexing laye
 
 ![segmented_log](https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-indexed-segmented-log-landscape.svg)
 
-```
+```text
 //! Index and position invariants across segmented_log
 
 // segmented_log index invariants

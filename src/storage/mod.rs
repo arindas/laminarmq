@@ -74,7 +74,7 @@ pub trait Storage:
     + AsyncConsume<ConsumeError = Self::Error>
     + Sizable<Size = Self::Position>
 {
-    type Content: Deref<Target = [u8]>;
+    type Content: Deref<Target = [u8]> + Unpin;
 
     type Position: Unsigned + FromPrimitive + ToPrimitive + Sum + Ord + Copy;
 

@@ -49,7 +49,10 @@ pub(crate) struct _TestStorage<S> {
 }
 
 pub(crate) mod test {
-    use super::{super::Storage, _TestStorage};
+    use super::{
+        super::{super::common::http::BufToHttpBody, Storage},
+        _TestStorage,
+    };
     use futures_lite::stream;
     use num::{FromPrimitive, One, Zero};
     use std::{convert::Infallible, fmt::Debug, future::Future, ops::Deref};
@@ -135,6 +138,11 @@ pub(crate) mod test {
         };
 
         let read_bytes = storage.read(&position_0, &bytes_written_0).await.unwrap();
+        assert_eq!(read_bytes.deref(), REQ_BYTES);
+
+        let read_bytes = hyper::body::to_bytes(BufToHttpBody::with_deref_value(read_bytes))
+            .await
+            .unwrap();
         assert_eq!(read_bytes.deref(), REQ_BYTES);
 
         let read_bytes = storage.read(&position_1, &bytes_written_1).await.unwrap();
