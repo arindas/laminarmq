@@ -30,7 +30,7 @@ jobs:
         components: rustfmt, rust-src
 
     - name: Build Documentation
-      run: cargo doc --all --no-deps
+      run: cargo doc --lib --no-deps
 
     - name: Deploy Docs
       uses: peaceiris/actions-gh-pages@v3
