@@ -1,6 +1,6 @@
 # `segmented_log`
 
-The segmented-log data structure for storing was originally described in the [Apache
+The segmented-log data structure for storing records was originally described in the [Apache
 Kafka](https://www.microsoft.com/en-us/research/wp-content/uploads/2017/09/Kafka.pdf) paper.
 
 ![segmented_log](https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-segmented-log.svg)
