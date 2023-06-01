@@ -8,7 +8,7 @@ where
     C: AsyncConsume + 'static,
 {
     consumable: Option<C>,
-    method: ConsumeMethod,
+    consume_method: ConsumeMethod,
     task_q: Option<TaskQ>,
 }
 
@@ -18,33 +18,33 @@ pub enum ConsumeMethod {
     Close,
 }
 
-impl<C> ConsumeHandle<C>
-where
-    C: AsyncConsume,
-{
-    pub async fn consume(consumable: Option<C>, method: ConsumeMethod) {
+impl ConsumeMethod {
+    pub async fn consume<C>(&self, consumable: Option<C>)
+    where
+        C: AsyncConsume,
+    {
         async move {
-            let result = if let Some(consumable) = consumable {
-                match method {
-                    ConsumeMethod::Remove => consumable.remove().await,
-                    ConsumeMethod::Close => consumable.close().await,
-                }
-            } else {
-                Ok(())
-            };
-
-            if let Err(error) = result {
-                tracing::error!("error during consuming: {:?}", error);
+            match (&self, consumable) {
+                (&ConsumeMethod::Remove, Some(consumable)) => consumable.remove().await,
+                (&ConsumeMethod::Close, Some(consumable)) => consumable.close().await,
+                _ => Ok(()),
             }
+            .map_err(|error| tracing::error!("error during consuming: {:?}", error))
+            .ok();
         }
         .instrument(tracing::span!(Level::ERROR, "consume"))
         .await;
     }
+}
 
+impl<C> ConsumeHandle<C>
+where
+    C: AsyncConsume,
+{
     pub fn new(consumable: C) -> Self {
         Self {
             consumable: Some(consumable),
-            method: ConsumeMethod::Close,
+            consume_method: ConsumeMethod::Close,
             task_q: None,
         }
     }
@@ -52,7 +52,7 @@ where
     pub fn with_consume_method(consumable: C, consume_method: ConsumeMethod) -> Self {
         Self {
             consumable: Some(consumable),
-            method: consume_method,
+            consume_method,
             task_q: None,
         }
     }
@@ -64,7 +64,7 @@ where
     ) -> Self {
         Self {
             consumable: Some(consumable),
-            method: consume_method,
+            consume_method,
             task_q: Some(task_q),
         }
     }
@@ -77,6 +77,8 @@ where
     type Target = C;
 
     fn deref(&self) -> &Self::Target {
+        // SAFETY: consumable is always a Some(_)
+        // before AsyncConsume::drop() is called.
         unsafe { self.consumable.as_ref().unwrap_unchecked() }
     }
 }
@@ -88,13 +90,13 @@ where
     fn drop(&mut self) {
         let task_q = self.task_q;
         let consumable = self.consumable.take();
-        let method = self.method;
+        let consume_method = self.consume_method;
 
         match task_q {
             Some(task_q) => {
                 glommio::spawn_local_into(
                     async move {
-                        ConsumeHandle::consume(consumable, method).await;
+                        consume_method.consume(consumable).await;
                     },
                     task_q,
                 )
@@ -103,7 +105,7 @@ where
             }
             None => {
                 glommio::spawn_local(async move {
-                    ConsumeHandle::consume(consumable, method).await;
+                    consume_method.consume(consumable).await;
                 })
                 .detach();
             }
