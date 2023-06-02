@@ -87,29 +87,21 @@ impl<C> Drop for ConsumeHandle<C>
 where
     C: AsyncConsume + 'static,
 {
+    #[tracing::instrument(skip(self))]
     fn drop(&mut self) {
-        let task_q = self.task_q;
-        let consumable = self.consumable.take();
-        let consume_method = self.consume_method;
+        let (consumable, consume_method) = (self.consumable.take(), self.consume_method);
 
-        match task_q {
-            Some(task_q) => {
-                glommio::spawn_local_into(
-                    async move {
-                        consume_method.consume(consumable).await;
-                    },
-                    task_q,
-                )
-                .map(|x| x.detach())
-                .ok();
-            }
-            None => {
-                glommio::spawn_local(async move {
-                    consume_method.consume(consumable).await;
-                })
-                .detach();
-            }
+        let consume_future = async move {
+            consume_method.consume(consumable).await;
+        };
+
+        match self.task_q {
+            Some(task_q) => glommio::spawn_local_into(consume_future, task_q),
+            None => Ok(glommio::spawn_local(consume_future)),
         }
+        .map_err(|error| tracing::error!("error spawning consume_future: {:?}", error))
+        .map(|x| x.detach())
+        .ok();
     }
 }
 
