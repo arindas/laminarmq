@@ -343,18 +343,18 @@ mod tests {
             fs::remove_dir_all(TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY).unwrap();
         }
 
-        let disk_backed_storage_provider = DiskBackedSegmentStorageProvider::<
-            BufferedStorage,
-            BufferedStorageProvider,
-            u32,
-        >::with_storage_directory_path_and_provider(
-            TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY,
-            BufferedStorageProvider,
-        )
-        .unwrap();
-
         let local_executor = LocalExecutorBuilder::new(Placement::Unbound)
             .spawn(move || async move {
+                let disk_backed_storage_provider = DiskBackedSegmentStorageProvider::<
+                    BufferedStorage,
+                    BufferedStorageProvider,
+                    u32,
+                >::with_storage_directory_path_and_provider(
+                    TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY,
+                    BufferedStorageProvider,
+                )
+                .unwrap();
+
                 segment::test::_test_segment_read_append_truncate_consistency(
                     disk_backed_storage_provider,
                     PhantomData::<((), crc32fast::Hasher, bincode::BinCode)>,
@@ -379,18 +379,18 @@ mod tests {
             fs::remove_dir_all(TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY).unwrap();
         }
 
-        let disk_backed_storage_provider = DiskBackedSegmentStorageProvider::<
-            BufferedStorage,
-            BufferedStorageProvider,
-            u32,
-        >::with_storage_directory_path_and_provider(
-            TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY,
-            BufferedStorageProvider,
-        )
-        .unwrap();
-
         let local_executor = LocalExecutorBuilder::new(Placement::Unbound)
             .spawn(move || async move {
+                let disk_backed_storage_provider = DiskBackedSegmentStorageProvider::<
+                    BufferedStorage,
+                    BufferedStorageProvider,
+                    u32,
+                >::with_storage_directory_path_and_provider(
+                    TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY,
+                    BufferedStorageProvider,
+                )
+                .unwrap();
+
                 segmented_log::test::_test_segmented_log_read_append_truncate_consistency(
                     disk_backed_storage_provider,
                     PhantomData::<((), crc32fast::Hasher, bincode::BinCode)>,
@@ -415,18 +415,18 @@ mod tests {
             fs::remove_dir_all(TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY).unwrap();
         }
 
-        let disk_backed_storage_provider = DiskBackedSegmentStorageProvider::<
-            BufferedStorage,
-            BufferedStorageProvider,
-            u32,
-        >::with_storage_directory_path_and_provider(
-            TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY,
-            BufferedStorageProvider,
-        )
-        .unwrap();
-
         let local_executor = LocalExecutorBuilder::new(Placement::Unbound)
             .spawn(move || async move {
+                let disk_backed_storage_provider = DiskBackedSegmentStorageProvider::<
+                    BufferedStorage,
+                    BufferedStorageProvider,
+                    u32,
+                >::with_storage_directory_path_and_provider(
+                    TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY,
+                    BufferedStorageProvider,
+                )
+                .unwrap();
+
                 segmented_log::test::_test_segmented_log_remove_expired_segments(
                     disk_backed_storage_provider,
                     |duration| async move { glommio::timer::sleep(duration).await },
