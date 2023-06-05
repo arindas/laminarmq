@@ -71,14 +71,13 @@ fn main() {
                 "rpc_server_tq",
             );
 
-            let server = HyperServer::new(
-                NonZeroUsize::new(1024).unwrap(),
-                ConnControl::Blocking,
-                rpc_server_tq,
-                ([0, 0, 0, 0], 8080),
-            );
+            let server = HyperServer {
+                max_connections: NonZeroUsize::new(1024).unwrap(),
+                conn_control: ConnControl::Blocking,
+                task_q: rpc_server_tq,
+            };
 
-            let server_task = server
+            let (socket_addr, server_task) = server
                 .serve(service_fn(move |req| {
                     request_handler(shared_state.clone(), req)
                 }))
@@ -86,7 +85,7 @@ fn main() {
 
             let server_join_handle = server_task.detach();
 
-            info!("Listening for HTTP requests on 0.0.0.0:8080");
+            info!("Listening for HTTP requests on {:?}", socket_addr);
 
             signal_rx.recv().await;
 

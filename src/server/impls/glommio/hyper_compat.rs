@@ -50,6 +50,7 @@ where
     }
 }
 
+/// Wrapper for Hyper HTTP connection result.
 pub struct ConnResult(SocketAddr, Result<(), hyper::Error>);
 
 impl From<ConnResult> for io::Result<()> {
@@ -66,9 +67,15 @@ impl From<ConnResult> for io::Result<()> {
     }
 }
 
+/// Mechanism of connection control in [`HyperServer`]
 #[derive(Debug, Clone, Copy)]
 pub enum ConnControl {
+    /// Non blocking connection control: Refuses all connections past the threshold limit.
     NonBlocking,
+
+    /// Blocking connection control: Blocks on new connections when the maximum connections
+    /// control limit is reached. The blocked connections are resumed and serviced when
+    /// the total number of connections come down from the threshold limit.
     Blocking,
 }
 
@@ -79,25 +86,37 @@ pub struct HyperServer {
     pub max_connections: NonZeroUsize,
     pub conn_control: ConnControl,
     pub task_q: TaskQ,
-    pub addr: SocketAddr,
 }
 
 impl HyperServer {
-    pub fn new<A>(
+    /// Creates a new [`HyperServer`] instance with the given maximum connections limit, connection
+    /// control mechanism, and the task queue to schedule connection handler tasks on.
+    pub fn with_max_connections_conn_control_and_task_q(
         max_connections: NonZeroUsize,
         conn_control: ConnControl,
         task_q: TaskQ,
-        addr: A,
-    ) -> Self
-    where
-        A: Into<SocketAddr>,
-    {
+    ) -> Self {
         Self {
             max_connections,
             conn_control,
             task_q,
-            addr: addr.into(),
         }
+    }
+
+    /// Creates a new [`HyperServer`] with the given connection control mechanism and task queue
+    /// with the default maximum connections limit of `1024`.
+    pub fn with_conn_control_and_task_q(conn_control: ConnControl, task_q: TaskQ) -> Self {
+        Self::with_max_connections_conn_control_and_task_q(
+            unsafe { NonZeroUsize::new_unchecked(1024) }, // SAFETY: 1024 > 0
+            conn_control,
+            task_q,
+        )
+    }
+
+    /// Creates a new [`HyperServer`] with the given task queue, default maximum connections limit
+    /// of `1024` and with the default connection control mechanism: [`ConnControl::Blocking`].
+    pub fn with_task_q(task_q: TaskQ) -> Self {
+        Self::with_conn_control_and_task_q(ConnControl::Blocking, task_q)
     }
 }
 
@@ -108,15 +127,17 @@ where
     RespBd: hyper::body::HttpBody + 'static,
     RespBd::Error: std::error::Error + Send + Sync,
 {
-    type Result = io::Result<glommio::Task<Result<(), GlommioError<()>>>>;
+    /// The socket address that this server listens on, and the connection listener task handle.
+    type Result = io::Result<(SocketAddr, glommio::Task<Result<(), GlommioError<()>>>)>;
 
     #[instrument(skip(service))]
     fn serve(&self, service: S) -> Self::Result {
         let (max_connections, task_q, conn_control) =
             (self.max_connections.get(), self.task_q, self.conn_control);
 
-        debug!("Binding on {:?}", self.addr);
-        let listener = TcpListener::bind(self.addr)?;
+        let listener = TcpListener::bind::<SocketAddr>(([0, 0, 0, 0], 0).into())?;
+        let listener_local_addr = listener.local_addr()?;
+        debug!("Binded on: {:?}", listener_local_addr);
 
         let conn_semaphore = Rc::new(Semaphore::new(max_connections as _));
 
@@ -126,7 +147,7 @@ where
 
                 loop {
                     let stream = listener.accept().await?;
-                    let addr = stream.local_addr()?;
+                    let addr = stream.peer_addr()?;
 
                     debug!("Accepted a connection from: {addr:?}");
 
@@ -167,6 +188,8 @@ where
             .instrument(trace_span!("tcp_listener")),
         );
 
-        spawn_result.map_err(|_| io::Error::new(Other, "error spawning tcp_listener"))
+        spawn_result
+            .map(|spawned_task_handle| (listener_local_addr, spawned_task_handle))
+            .map_err(|_| io::Error::new(Other, "error spawning tcp_listener"))
     }
 }
