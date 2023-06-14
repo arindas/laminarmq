@@ -44,7 +44,7 @@ pub(crate) mod test {
         Y: Deref<Target = [u8]>,
     {
         let count = futures_lite::stream::iter(expected_records)
-            .zip(indexed_read_stream(indexed_read, ..).await)
+            .zip(indexed_read_stream(indexed_read, ..))
             .map(|(y, record)| {
                 assert_eq!(y.deref(), record.value.deref());
                 Some(())

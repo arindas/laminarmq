@@ -6,12 +6,15 @@ use self::segment::{Segment, SegmentStorageProvider};
 use super::{
     super::super::{
         common::{serde_compat::SerializationProvider, split::SplitAt},
-        storage::{AsyncConsume, AsyncIndexedRead, AsyncTruncate, Sizable, Storage},
+        storage::common::indexed_read_stream,
+        storage::{AsyncConsume, AsyncIndexedRead, AsyncTruncate},
+        storage::{Sizable, Storage},
     },
     CommitLog,
 };
 use async_trait::async_trait;
 use futures_core::Stream;
+use futures_lite::{stream, StreamExt};
 use num::{CheckedSub, FromPrimitive, ToPrimitive, Unsigned};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{hash::Hasher, ops::Deref, time::Duration};
@@ -240,6 +243,23 @@ where
             .read(idx)
             .await
             .map_err(SegmentedLogError::SegmentError)
+    }
+}
+
+impl<S, M, H, Idx, SERP, SSP> SegmentedLog<S, M, H, Idx, S::Size, SERP, SSP>
+where
+    S: Storage,
+    S::Content: SplitAt<u8>,
+    SERP: SerializationProvider,
+    H: Hasher + Default,
+    Idx: Unsigned + CheckedSub + ToPrimitive + Ord + Copy,
+    Idx: Serialize + DeserializeOwned,
+    M: Serialize + DeserializeOwned,
+{
+    pub fn stream(&self) -> impl Stream<Item = Record<M, Idx, S::Content>> + '_ {
+        stream::iter(self.read_segments.iter().chain(self.write_segment.iter()))
+            .map(|segment| indexed_read_stream(segment, ..))
+            .flatten()
     }
 }
 
@@ -482,10 +502,7 @@ where
 }
 
 pub(crate) mod test {
-    use super::{
-        super::super::commit_log::test::_test_indexed_read_contains_expected_records,
-        segment::test::_segment_config, store::test::_RECORDS, *,
-    };
+    use super::{segment::test::_segment_config, store::test::_RECORDS, *};
     use std::{convert::Infallible, fmt::Debug, future::Future, marker::PhantomData};
 
     pub fn _test_records_provider<'a, const N: usize>(
@@ -580,12 +597,24 @@ pub(crate) mod test {
         .await
         .unwrap();
 
-        _test_indexed_read_contains_expected_records(
-            &segmented_log,
-            _test_records_provider(&_RECORDS, NUM_SEGMENTS, _RECORDS.len()),
-            _RECORDS.len() * NUM_SEGMENTS,
-        )
-        .await;
+        {
+            let segmented_log_stream = segmented_log.stream();
+
+            let expected_records = _test_records_provider(&_RECORDS, NUM_SEGMENTS, _RECORDS.len());
+
+            let expected_record_count = _RECORDS.len() * NUM_SEGMENTS;
+
+            let record_count = segmented_log_stream
+                .zip(futures_lite::stream::iter(expected_records))
+                .map(|(record, y)| {
+                    assert_eq!(record.value.deref(), y.deref());
+                    Some(())
+                })
+                .count()
+                .await;
+
+            assert_eq!(record_count, expected_record_count);
+        };
 
         let truncate_index = INITIAL_INDEX + NUM_SEGMENTS / 2 * _RECORDS.len() + _RECORDS.len() / 2;
 

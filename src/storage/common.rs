@@ -5,7 +5,7 @@ use std::{cmp, ops::RangeBounds};
 
 /// Returns a stream of items spanning the given index bounds from the provided
 /// [`AsyncIndexedRead`] instance.
-pub async fn indexed_read_stream<'a, R, RB>(
+pub fn indexed_read_stream<'a, R, RB>(
     indexed_read: &'a R,
     index_bounds: RB,
 ) -> impl Stream<Item = R::Value> + 'a
