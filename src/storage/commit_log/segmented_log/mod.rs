@@ -272,6 +272,12 @@ where
             .map(move |segment| indexed_read_stream(segment, lo..=hi))
             .flatten()
     }
+
+    pub fn stream_unbounded(&self) -> impl Stream<Item = Record<M, Idx, S::Content>> + '_ {
+        stream::iter(self.segments())
+            .map(move |segment| indexed_read_stream(segment, ..))
+            .flatten()
+    }
 }
 
 impl<S, M, H, Idx, SERP, SSP> SegmentedLog<S, M, H, Idx, S::Size, SERP, SSP>
@@ -609,7 +615,25 @@ pub(crate) mod test {
         .unwrap();
 
         {
-            let segmented_log_stream = segmented_log.stream(..);
+            let expected_record_count = _RECORDS.len();
+
+            let segmented_log_stream = segmented_log
+                .stream(..(Idx::from_usize(expected_record_count).unwrap() + initial_index));
+
+            let expected_records = _test_records_provider(&_RECORDS, NUM_SEGMENTS, _RECORDS.len());
+
+            let record_count = segmented_log_stream
+                .zip(futures_lite::stream::iter(expected_records))
+                .map(|(record, expected_record_value)| {
+                    assert_eq!(record.value.deref(), expected_record_value.deref());
+                    Some(())
+                })
+                .count()
+                .await;
+
+            assert_eq!(record_count, expected_record_count);
+
+            let segmented_log_stream = segmented_log.stream_unbounded();
 
             let expected_records = _test_records_provider(&_RECORDS, NUM_SEGMENTS, _RECORDS.len());
 
@@ -617,8 +641,8 @@ pub(crate) mod test {
 
             let record_count = segmented_log_stream
                 .zip(futures_lite::stream::iter(expected_records))
-                .map(|(record, y)| {
-                    assert_eq!(record.value.deref(), y.deref());
+                .map(|(record, expected_record_value)| {
+                    assert_eq!(record.value.deref(), expected_record_value.deref());
                     Some(())
                 })
                 .count()
