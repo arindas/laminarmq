@@ -551,7 +551,10 @@ where
 }
 
 pub(crate) mod test {
-    use super::{segment::test::_segment_config, store::test::_RECORDS, *};
+    use super::{
+        super::super::commit_log::test::_test_indexed_read_contains_expected_records,
+        segment::test::_segment_config, store::test::_RECORDS, *,
+    };
     use std::{convert::Infallible, fmt::Debug, future::Future, marker::PhantomData};
 
     pub fn _test_records_provider<'a, const N: usize>(
@@ -646,6 +649,13 @@ pub(crate) mod test {
         .await
         .unwrap();
 
+        _test_indexed_read_contains_expected_records(
+            &segmented_log,
+            _test_records_provider(&_RECORDS, NUM_SEGMENTS, _RECORDS.len()),
+            _RECORDS.len() * NUM_SEGMENTS,
+        )
+        .await;
+
         {
             let expected_record_count = _RECORDS.len();
 
@@ -665,16 +675,19 @@ pub(crate) mod test {
 
             assert_eq!(record_count, expected_record_count);
 
-            let segmented_log_stream = segmented_log.stream_unbounded();
+            let segmented_log_stream_unbounded = segmented_log.stream_unbounded();
+            let segmented_log_stream_bounded = segmented_log.stream(..);
 
             let expected_records = _test_records_provider(&_RECORDS, NUM_SEGMENTS, _RECORDS.len());
 
             let expected_record_count = _RECORDS.len() * NUM_SEGMENTS;
 
-            let record_count = segmented_log_stream
+            let record_count = segmented_log_stream_unbounded
+                .zip(segmented_log_stream_bounded)
                 .zip(futures_lite::stream::iter(expected_records))
-                .map(|(record, expected_record_value)| {
-                    assert_eq!(record.value.deref(), expected_record_value.deref());
+                .map(|((record_x, record_y), expected_record_value)| {
+                    assert_eq!(record_x.value.deref(), expected_record_value.deref());
+                    assert_eq!(record_y.value.deref(), expected_record_value.deref());
                     Some(())
                 })
                 .count()
