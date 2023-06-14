@@ -18,6 +18,7 @@ use futures_lite::{stream, StreamExt};
 use num::{CheckedSub, FromPrimitive, ToPrimitive, Unsigned};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
+    cmp::Ordering,
     hash::Hasher,
     ops::{Deref, RangeBounds},
     time::Duration,
@@ -239,14 +240,16 @@ where
             return Err(SegmentedLogError::IndexOutOfBounds);
         }
 
-        self.segments()
-            .find(|segment| segment.has_index(idx))
+        self.find_segment_with_index(idx)
             .ok_or(SegmentedLogError::IndexGapEncountered)?
             .read(idx)
             .await
             .map_err(SegmentedLogError::SegmentError)
     }
 }
+
+pub type SegmentOption<'a, S, M, H, Idx, SERP> =
+    Option<&'a Segment<S, M, H, Idx, <S as Sizable>::Size, SERP>>;
 
 impl<S, M, H, Idx, SERP, SSP> SegmentedLog<S, M, H, Idx, S::Size, SERP, SSP>
 where
@@ -258,6 +261,26 @@ where
     Idx: Serialize + DeserializeOwned,
     M: Serialize + DeserializeOwned,
 {
+    fn read_segment_with_idx_pos_in_vec(&self, idx: &Idx) -> Option<usize> {
+        self.read_segments
+            .binary_search_by(|segment| match idx {
+                idx if &segment.lowest_index() > idx => Ordering::Greater,
+                idx if &segment.highest_index() <= idx => Ordering::Less,
+                _ => Ordering::Equal,
+            })
+            .ok()
+    }
+
+    pub fn find_segment_with_index(&self, idx: &Idx) -> SegmentOption<'_, S, M, H, Idx, SERP> {
+        self.read_segment_with_idx_pos_in_vec(idx)
+            .and_then(|segment_pos_in_vec| self.read_segments.get(segment_pos_in_vec))
+            .or_else(|| {
+                self.write_segment
+                    .as_ref()
+                    .filter(|segment| segment.has_index(idx))
+            })
+    }
+
     pub fn stream<RB>(
         &self,
         index_bounds: RB,
@@ -268,7 +291,18 @@ where
         let (lo, hi) =
             index_bounds_for_range(index_bounds, self.lowest_index(), self.highest_index());
 
-        stream::iter(self.segments())
+        let segments = match (
+            self.read_segment_with_idx_pos_in_vec(&lo),
+            self.read_segment_with_idx_pos_in_vec(&hi),
+        ) {
+            (Some(lo_seg), Some(hi_seg)) => &self.read_segments[lo_seg..=hi_seg],
+            (Some(lo_seg), None) => &self.read_segments[lo_seg..],
+            _ => &[],
+        }
+        .iter()
+        .chain(self.write_segment.iter());
+
+        stream::iter(segments)
             .map(move |segment| indexed_read_stream(segment, lo..=hi))
             .flatten()
     }
@@ -419,9 +453,7 @@ where
         }
 
         let segment_pos_in_vec = self
-            .read_segments
-            .iter()
-            .position(|seg| seg.has_index(idx))
+            .read_segment_with_idx_pos_in_vec(idx)
             .ok_or(SegmentedLogError::IndexGapEncountered)?;
 
         let segment_to_truncate = self
