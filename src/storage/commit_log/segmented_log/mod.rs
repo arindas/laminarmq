@@ -6,7 +6,7 @@ use self::segment::{Segment, SegmentStorageProvider};
 use super::{
     super::super::{
         common::{serde_compat::SerializationProvider, split::SplitAt},
-        storage::common::indexed_read_stream,
+        storage::common::{index_bounds_for_range, indexed_read_stream},
         storage::{AsyncConsume, AsyncIndexedRead, AsyncTruncate},
         storage::{Sizable, Storage},
     },
@@ -17,7 +17,11 @@ use futures_core::Stream;
 use futures_lite::{stream, StreamExt};
 use num::{CheckedSub, FromPrimitive, ToPrimitive, Unsigned};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::{hash::Hasher, ops::Deref, time::Duration};
+use std::{
+    hash::Hasher,
+    ops::{Deref, RangeBounds},
+    time::Duration,
+};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct MetaWithIdx<M, Idx> {
@@ -90,6 +94,12 @@ pub struct SegmentedLog<S, M, H, Idx, Size, SERP, SSP> {
 pub type LogError<S, SERP> =
     SegmentedLogError<<S as Storage>::Error, <SERP as SerializationProvider>::Error>;
 
+impl<S, M, H, Idx, Size, SERP, SSP> SegmentedLog<S, M, H, Idx, Size, SERP, SSP> {
+    fn segments(&self) -> impl Iterator<Item = &Segment<S, M, H, Idx, Size, SERP>> {
+        self.read_segments.iter().chain(self.write_segment.iter())
+    }
+}
+
 impl<S, M, H, Idx, SERP, SSP> Sizable for SegmentedLog<S, M, H, Idx, S::Size, SERP, SSP>
 where
     S: Storage,
@@ -97,11 +107,7 @@ where
     type Size = S::Size;
 
     fn size(&self) -> Self::Size {
-        self.read_segments
-            .iter()
-            .chain(self.write_segment.iter())
-            .map(|x| x.size())
-            .sum()
+        self.segments().map(|x| x.size()).sum()
     }
 }
 
@@ -222,9 +228,7 @@ where
     }
 
     fn lowest_index(&self) -> Self::Idx {
-        self.read_segments
-            .iter()
-            .chain(self.write_segment.iter())
+        self.segments()
             .next()
             .map(|segment| segment.lowest_index())
             .unwrap_or(self.config.initial_index)
@@ -235,9 +239,7 @@ where
             return Err(SegmentedLogError::IndexOutOfBounds);
         }
 
-        self.read_segments
-            .iter()
-            .chain(self.write_segment.iter())
+        self.segments()
             .find(|segment| segment.has_index(idx))
             .ok_or(SegmentedLogError::IndexGapEncountered)?
             .read(idx)
@@ -256,9 +258,18 @@ where
     Idx: Serialize + DeserializeOwned,
     M: Serialize + DeserializeOwned,
 {
-    pub fn stream(&self) -> impl Stream<Item = Record<M, Idx, S::Content>> + '_ {
-        stream::iter(self.read_segments.iter().chain(self.write_segment.iter()))
-            .map(|segment| indexed_read_stream(segment, ..))
+    pub fn stream<RB>(
+        &self,
+        index_bounds: RB,
+    ) -> impl Stream<Item = Record<M, Idx, S::Content>> + '_
+    where
+        RB: RangeBounds<Idx>,
+    {
+        let (lo, hi) =
+            index_bounds_for_range(index_bounds, self.lowest_index(), self.highest_index());
+
+        stream::iter(self.segments())
+            .map(move |segment| indexed_read_stream(segment, lo..=hi))
             .flatten()
     }
 }
@@ -598,7 +609,7 @@ pub(crate) mod test {
         .unwrap();
 
         {
-            let segmented_log_stream = segmented_log.stream();
+            let segmented_log_stream = segmented_log.stream(..);
 
             let expected_records = _test_records_provider(&_RECORDS, NUM_SEGMENTS, _RECORDS.len());
 
