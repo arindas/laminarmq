@@ -281,6 +281,24 @@ where
             })
     }
 
+    pub async fn read_from_segment(
+        &self,
+        segment_pos_in_log: usize,
+        idx: &Idx,
+    ) -> Result<(Record<M, Idx, S::Content>, Idx), Option<(usize, Idx)>> {
+        if segment_pos_in_log >= (self.read_segments.len() + 1) || !self.has_index(idx) {
+            return Err(None);
+        }
+
+        self.read_segments
+            .get(segment_pos_in_log)
+            .unwrap_or(self.write_segment.as_ref().ok_or(None)?)
+            .read(idx)
+            .await
+            .map(|record| (record, *idx + Idx::one()))
+            .map_err(|_| Some((segment_pos_in_log + 1, *idx)))
+    }
+
     pub fn stream<RB>(
         &self,
         index_bounds: RB,
@@ -695,6 +713,30 @@ pub(crate) mod test {
 
             assert_eq!(record_count, expected_record_count);
         };
+
+        {
+            let (mut segment_pos_in_log, mut idx) = (0_usize, segmented_log.lowest_index());
+
+            let mut expected_records =
+                _test_records_provider(&_RECORDS, NUM_SEGMENTS, _RECORDS.len());
+
+            loop {
+                let record = segmented_log
+                    .read_from_segment(segment_pos_in_log, &idx)
+                    .await;
+
+                (segment_pos_in_log, idx) = match record {
+                    Ok((record, next_idx)) => {
+                        assert_eq!(Some(record.value.deref()), expected_records.next());
+                        (segment_pos_in_log, next_idx)
+                    }
+                    Err(Some((next_segment_pos, idx))) => (next_segment_pos, idx),
+                    Err(None) => break,
+                };
+            }
+
+            assert_eq!(idx, segmented_log.highest_index());
+        }
 
         let truncate_index = INITIAL_INDEX + NUM_SEGMENTS / 2 * _RECORDS.len() + _RECORDS.len() / 2;
 
