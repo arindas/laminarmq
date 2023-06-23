@@ -240,16 +240,13 @@ where
             return Err(SegmentedLogError::IndexOutOfBounds);
         }
 
-        self.find_segment_with_index(idx)
-            .ok_or(SegmentedLogError::IndexGapEncountered)?
-            .read(idx)
-            .await
-            .map_err(SegmentedLogError::SegmentError)
+        self.read_from_segment_raw(
+            self.read_segment_with_idx_position_in_read_segments_vec(idx),
+            idx,
+        )
+        .await
     }
 }
-
-pub type SegmentOption<'a, S, M, H, Idx, SERP> =
-    Option<&'a Segment<S, M, H, Idx, <S as Sizable>::Size, SERP>>;
 
 impl<S, M, H, Idx, SERP, SSP> SegmentedLog<S, M, H, Idx, S::Size, SERP, SSP>
 where
@@ -261,7 +258,9 @@ where
     Idx: Serialize + DeserializeOwned,
     M: Serialize + DeserializeOwned,
 {
-    fn read_segment_with_idx_pos_in_vec(&self, idx: &Idx) -> Option<usize> {
+    fn read_segment_with_idx_position_in_read_segments_vec(&self, idx: &Idx) -> Option<usize> {
+        self.has_index(idx).then_some(())?;
+
         self.read_segments
             .binary_search_by(|segment| match idx {
                 idx if &segment.lowest_index() > idx => Ordering::Greater,
@@ -271,14 +270,24 @@ where
             .ok()
     }
 
-    pub fn find_segment_with_index(&self, idx: &Idx) -> SegmentOption<'_, S, M, H, Idx, SERP> {
-        self.read_segment_with_idx_pos_in_vec(idx)
-            .and_then(|segment_pos_in_vec| self.read_segments.get(segment_pos_in_vec))
-            .or_else(|| {
-                self.write_segment
-                    .as_ref()
-                    .filter(|segment| segment.has_index(idx))
-            })
+    async fn read_from_segment_raw(
+        &self,
+        read_segment_position_in_read_segments_vec: Option<usize>,
+        idx: &Idx,
+    ) -> Result<Record<M, Idx, S::Content>, LogError<S, SERP>> {
+        let segment = match (read_segment_position_in_read_segments_vec, idx) {
+            (_, idx) if !self.has_index(idx) => return Err(SegmentedLogError::IndexOutOfBounds),
+            (Some(position), _) => self
+                .read_segments
+                .get(position)
+                .ok_or(SegmentedLogError::IndexGapEncountered)?,
+            (None, _) => write_segment_ref!(self, as_ref)?,
+        };
+
+        segment
+            .read(idx)
+            .await
+            .map_err(SegmentedLogError::SegmentError)
     }
 
     pub async fn read_from_segment(
@@ -286,14 +295,13 @@ where
         segment_pos_in_log: usize,
         idx: &Idx,
     ) -> Result<(Record<M, Idx, S::Content>, Idx), Option<(usize, Idx)>> {
-        if segment_pos_in_log >= (self.read_segments.len() + 1) || !self.has_index(idx) {
-            return Err(None);
-        }
+        let position_in_read_segments_vec = match segment_pos_in_log {
+            _ if segment_pos_in_log < self.read_segments.len() => Ok(Some(segment_pos_in_log)),
+            _ if segment_pos_in_log == self.read_segments.len() => Ok(None),
+            _ => Err(None),
+        }?;
 
-        self.read_segments
-            .get(segment_pos_in_log)
-            .unwrap_or(self.write_segment.as_ref().ok_or(None)?)
-            .read(idx)
+        self.read_from_segment_raw(position_in_read_segments_vec, idx)
             .await
             .map(|record| (record, *idx + Idx::one()))
             .map_err(|_| Some((segment_pos_in_log + 1, *idx)))
@@ -310,10 +318,12 @@ where
             index_bounds_for_range(index_bounds, self.lowest_index(), self.highest_index());
 
         let segments = match (
-            self.read_segment_with_idx_pos_in_vec(&lo),
-            self.read_segment_with_idx_pos_in_vec(&hi),
+            self.read_segment_with_idx_position_in_read_segments_vec(&lo),
+            self.read_segment_with_idx_position_in_read_segments_vec(&hi),
         ) {
-            (Some(lo_seg), Some(hi_seg)) => &self.read_segments[lo_seg..=hi_seg],
+            (Some(lo_seg), Some(hi_seg)) if lo_seg <= hi_seg => {
+                &self.read_segments[lo_seg..=hi_seg]
+            }
             (Some(lo_seg), None) => &self.read_segments[lo_seg..],
             _ => &[],
         }
@@ -471,7 +481,7 @@ where
         }
 
         let segment_pos_in_vec = self
-            .read_segment_with_idx_pos_in_vec(idx)
+            .read_segment_with_idx_position_in_read_segments_vec(idx)
             .ok_or(SegmentedLogError::IndexGapEncountered)?;
 
         let segment_to_truncate = self
