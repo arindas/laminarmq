@@ -6,15 +6,23 @@ use self::segment::{Segment, SegmentStorageProvider};
 use super::{
     super::super::{
         common::{serde_compat::SerializationProvider, split::SplitAt},
-        storage::{AsyncConsume, AsyncIndexedRead, AsyncTruncate, Sizable, Storage},
+        storage::common::{index_bounds_for_range, indexed_read_stream},
+        storage::{AsyncConsume, AsyncIndexedRead, AsyncTruncate},
+        storage::{Sizable, Storage},
     },
     CommitLog,
 };
 use async_trait::async_trait;
 use futures_core::Stream;
+use futures_lite::{stream, StreamExt};
 use num::{CheckedSub, FromPrimitive, ToPrimitive, Unsigned};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::{hash::Hasher, ops::Deref, time::Duration};
+use std::{
+    cmp::Ordering,
+    hash::Hasher,
+    ops::{Deref, RangeBounds},
+    time::Duration,
+};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct MetaWithIdx<M, Idx> {
@@ -87,6 +95,12 @@ pub struct SegmentedLog<S, M, H, Idx, Size, SERP, SSP> {
 pub type LogError<S, SERP> =
     SegmentedLogError<<S as Storage>::Error, <SERP as SerializationProvider>::Error>;
 
+impl<S, M, H, Idx, Size, SERP, SSP> SegmentedLog<S, M, H, Idx, Size, SERP, SSP> {
+    fn segments(&self) -> impl Iterator<Item = &Segment<S, M, H, Idx, Size, SERP>> {
+        self.read_segments.iter().chain(self.write_segment.iter())
+    }
+}
+
 impl<S, M, H, Idx, SERP, SSP> Sizable for SegmentedLog<S, M, H, Idx, S::Size, SERP, SSP>
 where
     S: Storage,
@@ -94,11 +108,7 @@ where
     type Size = S::Size;
 
     fn size(&self) -> Self::Size {
-        self.read_segments
-            .iter()
-            .chain(self.write_segment.iter())
-            .map(|x| x.size())
-            .sum()
+        self.segments().map(|x| x.size()).sum()
     }
 }
 
@@ -219,9 +229,7 @@ where
     }
 
     fn lowest_index(&self) -> Self::Idx {
-        self.read_segments
-            .iter()
-            .chain(self.write_segment.iter())
+        self.segments()
             .next()
             .map(|segment| segment.lowest_index())
             .unwrap_or(self.config.initial_index)
@@ -232,14 +240,105 @@ where
             return Err(SegmentedLogError::IndexOutOfBounds);
         }
 
+        self.read_from_segment_raw(
+            self.read_segment_with_idx_position_in_read_segments_vec(idx),
+            idx,
+        )
+        .await
+    }
+}
+
+impl<S, M, H, Idx, SERP, SSP> SegmentedLog<S, M, H, Idx, S::Size, SERP, SSP>
+where
+    S: Storage,
+    S::Content: SplitAt<u8>,
+    SERP: SerializationProvider,
+    H: Hasher + Default,
+    Idx: Unsigned + CheckedSub + ToPrimitive + Ord + Copy,
+    Idx: Serialize + DeserializeOwned,
+    M: Serialize + DeserializeOwned,
+{
+    fn read_segment_with_idx_position_in_read_segments_vec(&self, idx: &Idx) -> Option<usize> {
+        self.has_index(idx).then_some(())?;
+
         self.read_segments
-            .iter()
-            .chain(self.write_segment.iter())
-            .find(|segment| segment.has_index(idx))
-            .ok_or(SegmentedLogError::IndexGapEncountered)?
+            .binary_search_by(|segment| match idx {
+                idx if &segment.lowest_index() > idx => Ordering::Greater,
+                idx if &segment.highest_index() <= idx => Ordering::Less,
+                _ => Ordering::Equal,
+            })
+            .ok()
+    }
+
+    async fn read_from_segment_raw(
+        &self,
+        read_segment_position_in_read_segments_vec: Option<usize>,
+        idx: &Idx,
+    ) -> Result<Record<M, Idx, S::Content>, LogError<S, SERP>> {
+        let segment = match (read_segment_position_in_read_segments_vec, idx) {
+            (_, idx) if !self.has_index(idx) => return Err(SegmentedLogError::IndexOutOfBounds),
+            (Some(position), _) => self
+                .read_segments
+                .get(position)
+                .ok_or(SegmentedLogError::IndexGapEncountered)?,
+            (None, _) => write_segment_ref!(self, as_ref)?,
+        };
+
+        segment
             .read(idx)
             .await
             .map_err(SegmentedLogError::SegmentError)
+    }
+
+    pub async fn read_from_segment(
+        &self,
+        segment_pos_in_log: usize,
+        idx: &Idx,
+    ) -> Result<(Record<M, Idx, S::Content>, Idx), Option<(usize, Idx)>> {
+        let position_in_read_segments_vec = match segment_pos_in_log {
+            _ if segment_pos_in_log < self.read_segments.len() => Ok(Some(segment_pos_in_log)),
+            _ if segment_pos_in_log == self.read_segments.len() => Ok(None),
+            _ => Err(None),
+        }?;
+
+        self.read_from_segment_raw(position_in_read_segments_vec, idx)
+            .await
+            .map(|record| (record, *idx + Idx::one()))
+            .map_err(|_| Some((segment_pos_in_log + 1, *idx)))
+    }
+
+    pub fn stream<RB>(
+        &self,
+        index_bounds: RB,
+    ) -> impl Stream<Item = Record<M, Idx, S::Content>> + '_
+    where
+        RB: RangeBounds<Idx>,
+    {
+        let (lo, hi) =
+            index_bounds_for_range(index_bounds, self.lowest_index(), self.highest_index());
+
+        let segments = match (
+            self.read_segment_with_idx_position_in_read_segments_vec(&lo),
+            self.read_segment_with_idx_position_in_read_segments_vec(&hi),
+        ) {
+            (Some(lo_seg), Some(hi_seg)) if lo_seg <= hi_seg => {
+                &self.read_segments[lo_seg..=hi_seg]
+            }
+            (Some(lo_seg), None) => &self.read_segments[lo_seg..],
+            _ => &[],
+        }
+        .iter()
+        .chain(self.write_segment.iter());
+
+        stream::iter(segments)
+            .map(move |segment| indexed_read_stream(segment, lo..=hi))
+            .flatten()
+    }
+
+    pub fn stream_unbounded(&self) -> impl Stream<Item = Record<M, Idx, S::Content>> + '_ {
+        stream::iter(self.segments())
+            .map(move |segment| indexed_read_stream(segment, ..))
+            .flatten()
     }
 }
 
@@ -382,9 +481,7 @@ where
         }
 
         let segment_pos_in_vec = self
-            .read_segments
-            .iter()
-            .position(|seg| seg.has_index(idx))
+            .read_segment_with_idx_position_in_read_segments_vec(idx)
             .ok_or(SegmentedLogError::IndexGapEncountered)?;
 
         let segment_to_truncate = self
@@ -586,6 +683,70 @@ pub(crate) mod test {
             _RECORDS.len() * NUM_SEGMENTS,
         )
         .await;
+
+        {
+            let expected_record_count = _RECORDS.len();
+
+            let segmented_log_stream = segmented_log
+                .stream(..(Idx::from_usize(expected_record_count).unwrap() + initial_index));
+
+            let expected_records = _test_records_provider(&_RECORDS, NUM_SEGMENTS, _RECORDS.len());
+
+            let record_count = segmented_log_stream
+                .zip(futures_lite::stream::iter(expected_records))
+                .map(|(record, expected_record_value)| {
+                    assert_eq!(record.value.deref(), expected_record_value.deref());
+                    Some(())
+                })
+                .count()
+                .await;
+
+            assert_eq!(record_count, expected_record_count);
+
+            let segmented_log_stream_unbounded = segmented_log.stream_unbounded();
+            let segmented_log_stream_bounded = segmented_log.stream(..);
+
+            let expected_records = _test_records_provider(&_RECORDS, NUM_SEGMENTS, _RECORDS.len());
+
+            let expected_record_count = _RECORDS.len() * NUM_SEGMENTS;
+
+            let record_count = segmented_log_stream_unbounded
+                .zip(segmented_log_stream_bounded)
+                .zip(futures_lite::stream::iter(expected_records))
+                .map(|((record_x, record_y), expected_record_value)| {
+                    assert_eq!(record_x.value.deref(), expected_record_value.deref());
+                    assert_eq!(record_y.value.deref(), expected_record_value.deref());
+                    Some(())
+                })
+                .count()
+                .await;
+
+            assert_eq!(record_count, expected_record_count);
+        };
+
+        {
+            let (mut segment_pos_in_log, mut idx) = (0_usize, segmented_log.lowest_index());
+
+            let mut expected_records =
+                _test_records_provider(&_RECORDS, NUM_SEGMENTS, _RECORDS.len());
+
+            loop {
+                let record = segmented_log
+                    .read_from_segment(segment_pos_in_log, &idx)
+                    .await;
+
+                (segment_pos_in_log, idx) = match record {
+                    Ok((record, next_idx)) => {
+                        assert_eq!(Some(record.value.deref()), expected_records.next());
+                        (segment_pos_in_log, next_idx)
+                    }
+                    Err(Some((next_segment_pos, idx))) => (next_segment_pos, idx),
+                    Err(None) => break,
+                };
+            }
+
+            assert_eq!(idx, segmented_log.highest_index());
+        }
 
         let truncate_index = INITIAL_INDEX + NUM_SEGMENTS / 2 * _RECORDS.len() + _RECORDS.len() / 2;
 

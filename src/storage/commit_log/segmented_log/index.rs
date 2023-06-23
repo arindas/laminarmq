@@ -420,7 +420,7 @@ pub(crate) mod test {
         Idx: ToPrimitive,
     {
         let count = futures_lite::stream::iter(index_records)
-            .zip(indexed_read_stream(index, ..).await)
+            .zip(indexed_read_stream(index, ..))
             .map(|(x, y)| {
                 assert_eq!(x, y);
                 Some(())

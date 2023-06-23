@@ -61,7 +61,6 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
 
-
   clippy-check:
     runs-on: ubuntu-latest
 

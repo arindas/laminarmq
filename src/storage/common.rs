@@ -1,22 +1,14 @@
 use super::AsyncIndexedRead;
 use futures_core::Stream;
-use num::CheckedSub;
+use num::{CheckedSub, Unsigned};
 use std::{cmp, ops::RangeBounds};
 
-/// Returns a stream of items spanning the given index bounds from the provided
-/// [`AsyncIndexedRead`] instance.
-pub async fn indexed_read_stream<'a, R, RB>(
-    indexed_read: &'a R,
-    index_bounds: RB,
-) -> impl Stream<Item = R::Value> + 'a
+pub fn index_bounds_for_range<RB, Idx>(index_bounds: RB, lo_min: Idx, hi_max: Idx) -> (Idx, Idx)
 where
-    RB: RangeBounds<R::Idx>,
-    R: AsyncIndexedRead,
-    R::Value: 'a,
+    RB: RangeBounds<Idx>,
+    Idx: Unsigned + CheckedSub + Ord + Copy,
 {
-    let (lo_min, hi_max) = (indexed_read.lowest_index(), indexed_read.highest_index());
-
-    let one = <R::Idx as num::One>::one();
+    let one = <Idx as num::One>::one();
 
     let hi_max = hi_max - one;
 
@@ -33,6 +25,24 @@ where
     };
 
     let (lo, hi) = (cmp::max(lo, lo_min), cmp::min(hi, hi_max));
+
+    (lo, hi)
+}
+
+/// Returns a stream of items spanning the given index bounds from the provided
+/// [`AsyncIndexedRead`] instance.
+pub fn indexed_read_stream<'a, R, RB>(
+    indexed_read: &'a R,
+    index_bounds: RB,
+) -> impl Stream<Item = R::Value> + 'a
+where
+    RB: RangeBounds<R::Idx>,
+    R: AsyncIndexedRead,
+    R::Value: 'a,
+{
+    let (lo_min, hi_max) = (indexed_read.lowest_index(), indexed_read.highest_index());
+
+    let (lo, hi) = index_bounds_for_range(index_bounds, lo_min, hi_max);
 
     async_stream::stream! {
         for index in num::range_inclusive(lo, hi) {
