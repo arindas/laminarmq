@@ -258,6 +258,9 @@ pub enum SeqRead<M, Idx, C> {
     },
 }
 
+pub type ResolvedSegmentResult<'a, S, M, H, Idx, SERP> =
+    Result<&'a Segment<S, M, H, Idx, <S as Sizable>::Size, SERP>, LogError<S, SERP>>;
+
 impl<S, M, H, Idx, SERP, SSP> SegmentedLog<S, M, H, Idx, S::Size, SERP, SSP>
 where
     S: Storage,
@@ -283,7 +286,7 @@ where
     fn resolve_segment(
         &self,
         segment_id: Option<usize>,
-    ) -> Result<&Segment<S, M, H, Idx, S::Size, SERP>, LogError<S, SERP>> {
+    ) -> ResolvedSegmentResult<S, M, H, Idx, SERP> {
         match segment_id {
             Some(segment_id) => self
                 .read_segments
