@@ -31,11 +31,18 @@ pub enum StdFileStorageError {
     IoError(io::Error),
     StreamUnexpectedLength,
     ReadBeyondWrittenArea,
+    StdFileInUse,
 }
 
 impl From<StreamUnexpectedLength> for StdFileStorageError {
     fn from(_: StreamUnexpectedLength) -> Self {
         Self::StreamUnexpectedLength
+    }
+}
+
+impl From<io::Error> for StdFileStorageError {
+    fn from(value: io::Error) -> Self {
+        Self::IoError(value)
     }
 }
 
@@ -120,7 +127,12 @@ impl AsyncTruncate for StdFileStorage {
             .map_err(StdFileStorageError::IoError)?;
 
         let reader = Self::obtain_backing_reader_file(&self.backing_file_path).await?;
-        self.reader = Arc::new(reader);
+
+        let old_reader = std::mem::replace(&mut self.reader, Arc::new(reader));
+
+        tokio::task::spawn_blocking(|| drop(old_reader))
+            .await
+            .map_err(StdFileStorageError::JoinError)?;
 
         self.size = *position;
 
@@ -133,7 +145,11 @@ impl AsyncConsume for StdFileStorage {
     type ConsumeError = StdFileStorageError;
 
     async fn remove(mut self) -> Result<(), Self::ConsumeError> {
-        tokio::fs::remove_file(&self.backing_file_path)
+        let backing_file_path = self.backing_file_path.clone();
+
+        self.close().await?;
+
+        tokio::fs::remove_file(&backing_file_path)
             .await
             .map_err(StdFileStorageError::IoError)
     }
@@ -146,7 +162,7 @@ impl AsyncConsume for StdFileStorage {
 
         drop(self.writer);
 
-        let reader = Arc::<_>::into_inner(self.reader);
+        let reader = Arc::<_>::into_inner(self.reader).ok_or(StdFileStorageError::StdFileInUse)?;
 
         tokio::task::spawn_blocking(|| drop(reader))
             .await
@@ -154,16 +170,16 @@ impl AsyncConsume for StdFileStorage {
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct StdFileStorageProvider;
+
 #[cfg(target_family = "unix")]
 pub mod unix {
 
-    use std::os::unix::prelude::FileExt;
-
-    use tokio::io::AsyncWriteExt;
-
-    use crate::storage::Storage;
-
     use super::*;
+    use crate::storage::{impls::common::PathAddressedStorageProvider, Storage};
+    use std::os::unix::prelude::FileExt;
+    use tokio::io::AsyncWriteExt;
 
     #[async_trait(?Send)]
     impl Storage for StdFileStorage {
@@ -213,6 +229,186 @@ pub mod unix {
             .await
             .map_err(StdFileStorageError::JoinError)?
             .map_err(StdFileStorageError::IoError)
+        }
+    }
+
+    #[async_trait(?Send)]
+    impl PathAddressedStorageProvider<StdFileStorage> for StdFileStorageProvider {
+        async fn obtain_storage<P: AsRef<Path>>(
+            &self,
+            path: P,
+        ) -> Result<StdFileStorage, StdFileStorageError> {
+            StdFileStorage::new(path).await
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use crate::{
+            common::serde_compat::bincode,
+            storage::{
+                commit_log::segmented_log::{self, index, segment, store},
+                common::{self, _TestStorage},
+                impls::common::DiskBackedSegmentStorageProvider,
+            },
+        };
+        use std::marker::PhantomData;
+
+        #[tokio::test]
+        async fn test_tokio_std_file_storage_read_append_truncate_consistency() {
+            const TEST_TOKIO_STD_FILE_STORAGE_PATH: &str = "/tmp/laminarmq_test_tokio_std_file_storage_read_append_truncate_consistency.storage";
+
+            if Path::new(TEST_TOKIO_STD_FILE_STORAGE_PATH).exists() {
+                let path = TEST_TOKIO_STD_FILE_STORAGE_PATH;
+                tokio::fs::remove_file(path).await.unwrap();
+            }
+
+            common::test::_test_storage_read_append_truncate_consistency(|| async {
+                _TestStorage {
+                    storage: StdFileStorage::new(TEST_TOKIO_STD_FILE_STORAGE_PATH)
+                        .await
+                        .unwrap(),
+                    persistent: true,
+                }
+            })
+            .await;
+        }
+
+        #[tokio::test]
+        async fn test_tokio_std_file_store_read_append_truncate_consistency() {
+            const TEST_TOKIO_STD_FILE_STORE_STORAGE_PATH: &str =
+                "/tmp/laminarmq_test_tokio_std_file_store_read_append_truncate_consistency.store";
+
+            if Path::new(TEST_TOKIO_STD_FILE_STORE_STORAGE_PATH).exists() {
+                let path = TEST_TOKIO_STD_FILE_STORE_STORAGE_PATH;
+                tokio::fs::remove_file(path).await.unwrap();
+            }
+
+            store::test::_test_store_read_append_truncate_consistency(|| async {
+                (
+                    _TestStorage {
+                        storage: StdFileStorage::new(TEST_TOKIO_STD_FILE_STORE_STORAGE_PATH)
+                            .await
+                            .unwrap(),
+                        persistent: true,
+                    },
+                    PhantomData::<crc32fast::Hasher>,
+                )
+            })
+            .await;
+        }
+
+        #[tokio::test]
+        async fn test_tokio_std_file_index_read_append_truncate_consistency() {
+            const TEST_TOKIO_STD_FILE_INDEX_STORAGE_PATH: &str =
+                "/tmp/laminarmq_test_tokio_std_file_index_read_append_truncate_consistency.index";
+
+            if Path::new(TEST_TOKIO_STD_FILE_INDEX_STORAGE_PATH).exists() {
+                let path = TEST_TOKIO_STD_FILE_INDEX_STORAGE_PATH;
+                tokio::fs::remove_file(path).await.unwrap();
+            }
+
+            index::test::_test_index_read_append_truncate_consistency(|| async {
+                (
+                    _TestStorage {
+                        storage: StdFileStorage::new(TEST_TOKIO_STD_FILE_INDEX_STORAGE_PATH)
+                            .await
+                            .unwrap(),
+                        persistent: true,
+                    },
+                    PhantomData::<(crc32fast::Hasher, u32)>,
+                )
+            })
+            .await;
+        }
+
+        #[tokio::test]
+        async fn test_tokio_std_file_segment_read_append_truncate_consistency() {
+            const TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY: &str =
+                "/tmp/laminarmq_test_tokio_std_file_segment_read_append_truncate_consistency";
+
+            if Path::new(TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY).exists() {
+                let directory_path = TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY;
+                tokio::fs::remove_dir_all(directory_path).await.unwrap();
+            }
+
+            let disk_backed_storage_provider =
+                DiskBackedSegmentStorageProvider::<_, _, u32>::with_storage_directory_path_and_provider(
+                    TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY,
+                    StdFileStorageProvider,
+                )
+                .unwrap();
+
+            segment::test::_test_segment_read_append_truncate_consistency(
+                disk_backed_storage_provider,
+                PhantomData::<((), crc32fast::Hasher, bincode::BinCode)>,
+            )
+            .await;
+
+            if Path::new(TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY).exists() {
+                let directory_path = TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY;
+                tokio::fs::remove_dir_all(directory_path).await.unwrap();
+            }
+        }
+
+        #[tokio::test]
+        async fn test_tokio_std_file_segmented_log_read_append_truncate_consistency() {
+            const TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY: &str =
+                "/tmp/laminarmq_test_tokio_std_file_segmented_log_read_append_truncate_consistency";
+
+            if Path::new(TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY).exists() {
+                let directory_path = TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY;
+                tokio::fs::remove_dir_all(directory_path).await.unwrap();
+            }
+
+            let disk_backed_storage_provider =
+                DiskBackedSegmentStorageProvider::<_, _, u32>::with_storage_directory_path_and_provider(
+                    TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY,
+                    StdFileStorageProvider,
+                )
+                .unwrap();
+
+            segmented_log::test::_test_segmented_log_read_append_truncate_consistency(
+                disk_backed_storage_provider,
+                PhantomData::<((), crc32fast::Hasher, bincode::BinCode)>,
+            )
+            .await;
+
+            if Path::new(TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY).exists() {
+                let directory_path = TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY;
+                tokio::fs::remove_dir_all(directory_path).await.unwrap();
+            }
+        }
+
+        #[tokio::test]
+        async fn test_tokio_std_file_segmented_log_remove_expired_segments() {
+            const TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY: &str =
+                "/tmp/laminarmq_test_tokio_std_file_segmented_log_remove_expired_segments";
+
+            if Path::new(TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY).exists() {
+                let directory_path = TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY;
+                tokio::fs::remove_dir_all(directory_path).await.unwrap();
+            }
+
+            let disk_backed_storage_provider =
+                DiskBackedSegmentStorageProvider::<_, _, u32>::with_storage_directory_path_and_provider(
+                    TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY,
+                    StdFileStorageProvider,
+                )
+                .unwrap();
+
+            segmented_log::test::_test_segmented_log_remove_expired_segments(
+                disk_backed_storage_provider,
+                |duration| async move { tokio::time::sleep(duration).await },
+                PhantomData::<((), crc32fast::Hasher, bincode::BinCode)>,
+            )
+            .await;
+
+            if Path::new(TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY).exists() {
+                let directory_path = TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY;
+                tokio::fs::remove_dir_all(directory_path).await.unwrap();
+            }
         }
     }
 }
