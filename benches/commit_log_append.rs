@@ -1,16 +1,19 @@
-use std::convert::Infallible;
-
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{
+    async_executor::FuturesExecutor, criterion_group, criterion_main, BenchmarkId, Criterion,
+    Throughput,
+};
 use futures_lite::stream;
-use laminarmq::storage::commit_log::{segmented_log::MetaWithIdx, CommitLog, Record};
-
-#[allow(unused)]
-async fn commit_log_append<M, X, T, C>(commit_log: &mut C, record: Record<M, X>)
-where
-    C: CommitLog<M, X, T>,
-{
-    commit_log.append(record).await.unwrap();
-}
+use laminarmq::{
+    common::serde_compat::bincode,
+    storage::{
+        commit_log::{
+            segmented_log::{segment::Config as SegmentConfig, Config, MetaWithIdx, SegmentedLog},
+            CommitLog, Record,
+        },
+        impls::in_mem::{segment::InMemSegmentStorageProvider, storage::InMemStorage},
+    },
+};
+use std::{convert::Infallible, ops::Deref};
 
 fn infallible<T>(t: T) -> Result<T, Infallible> {
     Ok(t)
@@ -26,24 +29,106 @@ fn record<X, Idx>(stream: X) -> Record<MetaWithIdx<(), Idx>, X> {
     }
 }
 
-fn criterion_benchmark(_c: &mut Criterion) {
-    let _tiny_message = stream::once(infallible(b"Hello World!"));
+const LOREM_140: [&[u8]; 4] = [
+    b"Donec neque velit, pulvinar in sed.",
+    b"Pellentesque sodales, felis sit et.",
+    b"Sed lobortis magna sem, eu laoreet.",
+    b"Praesent quis varius diam. Nunc at.",
+];
 
-    let _lorem_140 = [
-        b"Donec neque velit, pulvinar in sed.",
-        b"Pellentesque sodales, felis sit et.",
-        b"Sed lobortis magna sem, eu laoreet.",
-        b"Praesent quis varius diam. Nunc at.",
-    ];
+fn criterion_benchmark_with_record_content<X, XBuf, XE>(
+    c: &mut Criterion,
+    record_content: X,
+    record_content_size: u64,
+    record_size_group_name: &str,
+) where
+    X: stream::Stream<Item = Result<XBuf, XE>> + Clone + Unpin,
+    XBuf: Deref<Target = [u8]>,
+{
+    let mut group = c.benchmark_group(record_size_group_name);
 
-    // 140 bytes: pre-2017 Twitter tweet limit
-    let _tweet = stream::iter(_lorem_140.iter().map(infallible));
+    for num_appends in (0..100000).step_by(1000) {
+        group
+            .throughput(Throughput::Bytes(record_content_size * num_appends as u64))
+            .sample_size(10)
+            .bench_with_input(
+                BenchmarkId::new("in_memory_segmented_log", num_appends),
+                &num_appends,
+                |b, &num_appends| {
+                    b.to_async(FuturesExecutor).iter(|| async {
+                        let config = Config {
+                            segment_config: SegmentConfig {
+                                max_store_size: 1024,
+                                max_store_overflow: 512,
+                                max_index_size: 1024,
+                            },
+                            initial_index: 0,
+                        };
 
-    // 2940 bytes: within 3000 character limit on LinkedIn posts
-    let _linked_in_post = stream::iter(_lorem_140.iter().cycle().take(21).map(infallible));
+                        let mut segmented_log = SegmentedLog::<
+                            InMemStorage,
+                            (),
+                            crc32fast::Hasher,
+                            u32,
+                            usize,
+                            bincode::BinCode,
+                            _,
+                        >::new(
+                            config,
+                            InMemSegmentStorageProvider::<u32>::default(),
+                        )
+                        .await
+                        .unwrap();
 
-    let _record = record::<_, u32>(_tweet);
+                        for _ in 0..num_appends {
+                            segmented_log
+                                .append(record(record_content.clone()))
+                                .await
+                                .unwrap();
+                        }
+
+                        // something
+                    });
+                },
+            );
+    }
 }
 
-criterion_group!(benches, criterion_benchmark);
+fn benchmark_tiny_message_append(c: &mut Criterion) {
+    // 12 bytes
+    let tiny_message = stream::once(infallible(b"Hello World!" as &[u8]));
+
+    criterion_benchmark_with_record_content(
+        c,
+        tiny_message,
+        12,
+        "commit_log_append_with_tiny_message",
+    );
+}
+
+fn benchmark_tweet_append(c: &mut Criterion) {
+    // 140 bytes: pre-2017 Twitter tweet limit
+    let tweet = stream::iter(LOREM_140.iter().cloned().map(infallible));
+
+    criterion_benchmark_with_record_content(c, tweet, 140, "commit_log_append_with_tweet");
+}
+
+fn benchmark_linked_in_post_append(c: &mut Criterion) {
+    // 2940 bytes: within 3000 character limit on LinkedIn posts
+    let linked_in_post = stream::iter(LOREM_140.iter().cloned().cycle().take(21).map(infallible));
+
+    criterion_benchmark_with_record_content(
+        c,
+        linked_in_post,
+        2940,
+        "commit_log_append_with_linked_in_post",
+    );
+}
+
+criterion_group!(
+    benches,
+    benchmark_tiny_message_append,
+    benchmark_tweet_append,
+    benchmark_linked_in_post_append,
+);
 criterion_main!(benches);
