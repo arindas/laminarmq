@@ -52,9 +52,5 @@ path = "./src/bin/laminarmq_server.rs"
 criterion = { version = "0.5", features = ["html_reports", "async_futures", "async_tokio"] }
 
 [[bench]]
-name = "fib_benchmark"
-harness = false
-
-[[bench]]
 name = "commit_log_append"
 harness = false
