@@ -10,10 +10,14 @@ use laminarmq::{
             segmented_log::{segment::Config as SegmentConfig, Config, MetaWithIdx, SegmentedLog},
             CommitLog, Record,
         },
-        impls::in_mem::{segment::InMemSegmentStorageProvider, storage::InMemStorage},
+        impls::{
+            common::DiskBackedSegmentStorageProvider,
+            in_mem::{segment::InMemSegmentStorageProvider, storage::InMemStorage},
+            tokio::storage::{StdFileStorage, StdFileStorageProvider},
+        },
     },
 };
-use std::{convert::Infallible, ops::Deref};
+use std::{convert::Infallible, ops::Deref, path::Path};
 
 fn infallible<T>(t: T) -> Result<T, Infallible> {
     Ok(t)
@@ -50,35 +54,102 @@ fn criterion_benchmark_with_record_content<X, XBuf, XE>(
     for num_appends in (0..10000).step_by(1000) {
         group
             .throughput(Throughput::Bytes(record_content_size * num_appends as u64))
-            .sample_size(10)
-            .bench_with_input(
-                BenchmarkId::new("in_memory_segmented_log", num_appends),
-                &num_appends,
-                |b, &num_appends| {
-                    b.to_async(FuturesExecutor).iter_with_large_drop(|| async {
+            .sample_size(10);
+
+        group.bench_with_input(
+            BenchmarkId::new("in_memory_segmented_log", num_appends),
+            &num_appends,
+            |b, &num_appends| {
+                b.to_async(FuturesExecutor).iter_custom(|_| async {
+                    let config = Config {
+                        segment_config: SegmentConfig {
+                            max_store_size: 1048576,
+                            max_store_overflow: 524288,
+                            max_index_size: 1048576,
+                        },
+                        initial_index: 0,
+                    };
+
+                    let mut segmented_log = SegmentedLog::<
+                        InMemStorage,
+                        (),
+                        crc32fast::Hasher,
+                        u32,
+                        usize,
+                        bincode::BinCode,
+                        _,
+                    >::new(
+                        config, InMemSegmentStorageProvider::<u32>::default()
+                    )
+                    .await
+                    .unwrap();
+
+                    let start = std::time::Instant::now();
+
+                    for _ in 0..num_appends {
+                        segmented_log
+                            .append(record(record_content.clone()))
+                            .await
+                            .unwrap();
+                    }
+
+                    let time_taken = start.elapsed();
+
+                    drop(segmented_log);
+
+                    time_taken
+                });
+            },
+        );
+
+        group.bench_with_input(
+            BenchmarkId::new("tokio_segmented_log", num_appends),
+            &num_appends,
+            |b, &num_appends| {
+                b.to_async(tokio::runtime::Runtime::new().unwrap())
+                    .iter_custom(|_| async {
                         let config = Config {
                             segment_config: SegmentConfig {
-                                max_store_size: 1048576,
-                                max_store_overflow: 524288,
-                                max_index_size: 1048576,
+                                max_store_size: 10000000,
+                                max_store_overflow: 10000000 / 2,
+                                max_index_size: 10000000,
                             },
                             initial_index: 0,
                         };
 
-                        let mut segmented_log = SegmentedLog::<
-                            InMemStorage,
-                            (),
-                            crc32fast::Hasher,
-                            u32,
-                            usize,
-                            bincode::BinCode,
+                        const TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY: &str =
+                            "/tmp/laminarmq_bench_tokio_std_file_segmented_log_append";
+
+                        if Path::new(TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY).exists() {
+                            let directory_path =
+                                TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY;
+                            tokio::fs::remove_dir_all(directory_path).await.unwrap();
+                        }
+
+                        let disk_backed_storage_provider = DiskBackedSegmentStorageProvider::<
                             _,
-                        >::new(
-                            config,
-                            InMemSegmentStorageProvider::<u32>::default(),
+                            _,
+                            u32,
+                        >::with_storage_directory_path_and_provider(
+                            TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY,
+                            StdFileStorageProvider,
                         )
-                        .await
                         .unwrap();
+
+                        let mut segmented_log =
+                            SegmentedLog::<
+                                StdFileStorage,
+                                (),
+                                crc32fast::Hasher,
+                                u32,
+                                u64,
+                                bincode::BinCode,
+                                _,
+                            >::new(config, disk_backed_storage_provider)
+                            .await
+                            .unwrap();
+
+                        let start = tokio::time::Instant::now();
 
                         for _ in 0..num_appends {
                             segmented_log
@@ -86,9 +157,15 @@ fn criterion_benchmark_with_record_content<X, XBuf, XE>(
                                 .await
                                 .unwrap();
                         }
+
+                        let time_taken = start.elapsed();
+
+                        drop(segmented_log);
+
+                        time_taken
                     });
-                },
-            );
+            },
+        );
     }
 }
 
