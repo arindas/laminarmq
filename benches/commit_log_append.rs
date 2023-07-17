@@ -13,7 +13,7 @@ use laminarmq::{
         impls::in_mem::{segment::InMemSegmentStorageProvider, storage::InMemStorage},
     },
 };
-use std::{convert::Infallible, ops::Deref};
+use std::{convert::Infallible, ops::Deref, time::Instant};
 
 fn infallible<T>(t: T) -> Result<T, Infallible> {
     Ok(t)
@@ -55,7 +55,7 @@ fn criterion_benchmark_with_record_content<X, XBuf, XE>(
                 BenchmarkId::new("in_memory_segmented_log", num_appends),
                 &num_appends,
                 |b, &num_appends| {
-                    b.to_async(FuturesExecutor).iter(|| async {
+                    b.to_async(FuturesExecutor).iter_custom(|_| async {
                         let config = Config {
                             segment_config: SegmentConfig {
                                 max_store_size: 1024,
@@ -80,6 +80,8 @@ fn criterion_benchmark_with_record_content<X, XBuf, XE>(
                         .await
                         .unwrap();
 
+                        let start = Instant::now();
+
                         for _ in 0..num_appends {
                             segmented_log
                                 .append(record(record_content.clone()))
@@ -87,7 +89,11 @@ fn criterion_benchmark_with_record_content<X, XBuf, XE>(
                                 .unwrap();
                         }
 
-                        // something
+                        let time_taken = start.elapsed();
+
+                        drop(segmented_log);
+
+                        time_taken
                     });
                 },
             );
