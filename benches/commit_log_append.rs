@@ -1,6 +1,6 @@
 use criterion::{
-    async_executor::FuturesExecutor, criterion_group, criterion_main, BenchmarkId, Criterion,
-    Throughput,
+    async_executor::FuturesExecutor, black_box, criterion_group, criterion_main, BenchmarkId,
+    Criterion, Throughput,
 };
 use futures_lite::stream;
 use laminarmq::{
@@ -51,7 +51,7 @@ fn criterion_benchmark_with_record_content<X, XBuf, XE>(
 {
     let mut group = c.benchmark_group(record_size_group_name);
 
-    for num_appends in (0..10000).step_by(1000) {
+    for num_appends in (1000..=10000).step_by(1000) {
         group
             .throughput(Throughput::Bytes(record_content_size * num_appends as u64))
             .sample_size(10);
@@ -87,10 +87,12 @@ fn criterion_benchmark_with_record_content<X, XBuf, XE>(
                     let start = std::time::Instant::now();
 
                     for _ in 0..num_appends {
-                        segmented_log
-                            .append(record(record_content.clone()))
-                            .await
-                            .unwrap();
+                        black_box(
+                            segmented_log
+                                .append(record(record_content.clone()))
+                                .await
+                                .unwrap(),
+                        );
                     }
 
                     let time_taken = start.elapsed();
@@ -152,10 +154,12 @@ fn criterion_benchmark_with_record_content<X, XBuf, XE>(
                         let start = tokio::time::Instant::now();
 
                         for _ in 0..num_appends {
-                            segmented_log
-                                .append(record(record_content.clone()))
-                                .await
-                                .unwrap();
+                            black_box(
+                                segmented_log
+                                    .append(record(record_content.clone()))
+                                    .await
+                                    .unwrap(),
+                            );
                         }
 
                         let time_taken = start.elapsed();
