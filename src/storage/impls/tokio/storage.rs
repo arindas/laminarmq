@@ -12,12 +12,13 @@ use std::{
 };
 use tokio::{
     fs::{File as TokioFile, OpenOptions},
+    io::{AsyncWriteExt, BufWriter},
     task,
 };
 
 #[allow(unused)]
 pub struct StdFileStorage {
-    writer: TokioFile,
+    writer: BufWriter<TokioFile>,
     reader: Arc<File>,
 
     backing_file_path: PathBuf,
@@ -69,7 +70,7 @@ impl StdFileStorage {
             .len();
 
         Ok(Self {
-            writer,
+            writer: BufWriter::new(writer),
             reader: Arc::new(reader),
             backing_file_path,
             size: initial_size,
@@ -117,14 +118,18 @@ impl AsyncTruncate for StdFileStorage {
 
     async fn truncate(&mut self, position: &Self::Mark) -> Result<(), Self::TruncError> {
         self.writer
-            .sync_all()
+            .flush()
             .await
             .map_err(StdFileStorageError::IoError)?;
 
-        self.writer
+        let writer = Self::obtain_backing_writer_file(&self.backing_file_path).await?;
+
+        writer
             .set_len(*position)
             .await
             .map_err(StdFileStorageError::IoError)?;
+
+        self.writer = BufWriter::new(writer);
 
         let reader = Self::obtain_backing_reader_file(&self.backing_file_path).await?;
 
@@ -156,7 +161,7 @@ impl AsyncConsume for StdFileStorage {
 
     async fn close(mut self) -> Result<(), Self::ConsumeError> {
         self.writer
-            .sync_all()
+            .flush()
             .await
             .map_err(StdFileStorageError::IoError)?;
 
