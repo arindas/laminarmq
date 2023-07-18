@@ -54,3 +54,7 @@ criterion = { version = "0.5", features = ["html_reports", "async_futures", "asy
 [[bench]]
 name = "commit_log_append"
 harness = false
+
+[[bench]]
+name = "segmented_log_read_stream"
+harness = false
