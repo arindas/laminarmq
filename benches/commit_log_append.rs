@@ -17,6 +17,7 @@ use laminarmq::{
         },
     },
 };
+use pprof::criterion::{Output::Flamegraph, PProfProfiler};
 use std::{convert::Infallible, ops::Deref, path::Path};
 
 fn infallible<T>(t: T) -> Result<T, Infallible> {
@@ -236,7 +237,9 @@ fn benchmark_blog_post_append(c: &mut Criterion) {
 }
 
 criterion_group!(
-    benches,
+    name = benches;
+    config = Criterion::default().with_profiler(PProfProfiler::new(100, Flamegraph(None)));
+    targets =
     benchmark_tiny_message_append,
     benchmark_tweet_append,
     benchmark_half_k_message_append,
