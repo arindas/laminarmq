@@ -43,10 +43,12 @@ bench = false
 [[bin]]
 name = "laminarmq-client-cli"
 path = "./src/bin/laminarmq_client_cli.rs"
+bench = false
 
 [[bin]]
 name = "laminarmq-server"
 path = "./src/bin/laminarmq_server.rs"
+bench = false
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports", "async_futures", "async_tokio"] }
