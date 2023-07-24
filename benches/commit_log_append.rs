@@ -12,13 +12,17 @@ use laminarmq::{
         },
         impls::{
             common::DiskBackedSegmentStorageProvider,
+            glommio::storage::{
+                buffered::{BufferedStorage, BufferedStorageProvider},
+                dma::{DmaStorage, DmaStorageProvider},
+            },
             in_mem::{segment::InMemSegmentStorageProvider, storage::InMemStorage},
             tokio::storage::{StdFileStorage, StdFileStorageProvider},
         },
     },
 };
 use pprof::criterion::{Output::Flamegraph, PProfProfiler};
-use std::{convert::Infallible, ops::Deref, path::Path};
+use std::{convert::Infallible, ops::Deref};
 
 fn infallible<T>(t: T) -> Result<T, Infallible> {
     Ok(t)
@@ -41,6 +45,32 @@ const LOREM_140: [&[u8]; 4] = [
     b"Praesent quis varius diam. Nunc at.",
 ];
 
+struct GlommioAsyncExecutor(glommio::LocalExecutor);
+
+impl criterion::async_executor::AsyncExecutor for GlommioAsyncExecutor {
+    fn block_on<T>(&self, future: impl futures_core::Future<Output = T>) -> T {
+        self.0.run(future)
+    }
+}
+
+const IN_MEMORY_SEGMENTED_LOG_CONFIG: Config<u32, usize> = Config {
+    segment_config: SegmentConfig {
+        max_store_size: 1048576, // = 1MiB
+        max_store_overflow: 524288,
+        max_index_size: 1048576,
+    },
+    initial_index: 0,
+};
+
+const PERSISTENT_SEGMENTED_LOG_CONFIG: Config<u32, u64> = Config {
+    segment_config: SegmentConfig {
+        max_store_size: 10000000, // ~ 10MB
+        max_store_overflow: 10000000 / 2,
+        max_index_size: 10000000,
+    },
+    initial_index: 0,
+};
+
 fn criterion_benchmark_with_record_content<X, XBuf, XE>(
     c: &mut Criterion,
     record_content: X,
@@ -62,15 +92,6 @@ fn criterion_benchmark_with_record_content<X, XBuf, XE>(
             &num_appends,
             |b, &num_appends| {
                 b.to_async(FuturesExecutor).iter_custom(|_| async {
-                    let config = Config {
-                        segment_config: SegmentConfig {
-                            max_store_size: 1048576,
-                            max_store_overflow: 524288,
-                            max_index_size: 1048576,
-                        },
-                        initial_index: 0,
-                    };
-
                     let mut segmented_log = SegmentedLog::<
                         InMemStorage,
                         (),
@@ -80,7 +101,8 @@ fn criterion_benchmark_with_record_content<X, XBuf, XE>(
                         bincode::BinCode,
                         _,
                     >::new(
-                        config, InMemSegmentStorageProvider::<u32>::default()
+                        IN_MEMORY_SEGMENTED_LOG_CONFIG,
+                        InMemSegmentStorageProvider::<u32>::default(),
                     )
                     .await
                     .unwrap();
@@ -105,52 +127,153 @@ fn criterion_benchmark_with_record_content<X, XBuf, XE>(
             },
         );
 
+        const BENCH_GLOMMIO_DMA_FILE_SEGMENTED_LOG_STORAGE_DIRECTORY: &str =
+            "/tmp/laminarmq_bench_glommio_dma_file_segmented_log_append";
+
+        std::fs::remove_dir_all(BENCH_GLOMMIO_DMA_FILE_SEGMENTED_LOG_STORAGE_DIRECTORY).ok();
+
+        group.bench_with_input(
+            BenchmarkId::new("glommio_dma_file_segmented_log", num_appends),
+            &num_appends,
+            |b, &num_appends| {
+                b.to_async(GlommioAsyncExecutor(glommio::LocalExecutor::default()))
+                    .iter_custom(|_| async {
+                        let disk_backed_storage_provider = DiskBackedSegmentStorageProvider::<
+                            _,
+                            _,
+                            u32,
+                        >::with_storage_directory_path_and_provider(
+                            BENCH_GLOMMIO_DMA_FILE_SEGMENTED_LOG_STORAGE_DIRECTORY,
+                            DmaStorageProvider,
+                        )
+                        .unwrap();
+
+                        let mut segmented_log = SegmentedLog::<
+                            DmaStorage,
+                            (),
+                            crc32fast::Hasher,
+                            u32,
+                            u64,
+                            bincode::BinCode,
+                            _,
+                        >::new(
+                            PERSISTENT_SEGMENTED_LOG_CONFIG,
+                            disk_backed_storage_provider,
+                        )
+                        .await
+                        .unwrap();
+
+                        let start = std::time::Instant::now();
+
+                        for _ in 0..num_appends {
+                            black_box(
+                                segmented_log
+                                    .append(record(record_content.clone()))
+                                    .await
+                                    .unwrap(),
+                            );
+                        }
+
+                        let time_taken = start.elapsed();
+
+                        drop(segmented_log);
+
+                        time_taken
+                    });
+            },
+        );
+
+        const BENCH_GLOMMIO_BUFFERED_FILE_SEGMENTED_LOG_STORAGE_DIRECTORY: &str =
+            "/tmp/laminarmq_bench_glommio_buffered_file_segmented_log_append";
+
+        std::fs::remove_dir_all(BENCH_GLOMMIO_BUFFERED_FILE_SEGMENTED_LOG_STORAGE_DIRECTORY).ok();
+
+        group.bench_with_input(
+            BenchmarkId::new("glommio_buffered_file_segmented_log", num_appends),
+            &num_appends,
+            |b, &num_appends| {
+                b.to_async(GlommioAsyncExecutor(glommio::LocalExecutor::default()))
+                    .iter_custom(|_| async {
+                        let disk_backed_storage_provider = DiskBackedSegmentStorageProvider::<
+                            _,
+                            _,
+                            u32,
+                        >::with_storage_directory_path_and_provider(
+                            BENCH_GLOMMIO_BUFFERED_FILE_SEGMENTED_LOG_STORAGE_DIRECTORY,
+                            BufferedStorageProvider,
+                        )
+                        .unwrap();
+
+                        let mut segmented_log = SegmentedLog::<
+                            BufferedStorage,
+                            (),
+                            crc32fast::Hasher,
+                            u32,
+                            u64,
+                            bincode::BinCode,
+                            _,
+                        >::new(
+                            PERSISTENT_SEGMENTED_LOG_CONFIG,
+                            disk_backed_storage_provider,
+                        )
+                        .await
+                        .unwrap();
+
+                        let start = std::time::Instant::now();
+
+                        for _ in 0..num_appends {
+                            black_box(
+                                segmented_log
+                                    .append(record(record_content.clone()))
+                                    .await
+                                    .unwrap(),
+                            );
+                        }
+
+                        let time_taken = start.elapsed();
+
+                        drop(segmented_log);
+
+                        time_taken
+                    });
+            },
+        );
+
+        const BENCH_TOKIO_SEGMENTED_LOG_STORAGE_DIRECTORY: &str =
+            "/tmp/laminarmq_bench_tokio_std_file_segmented_log_append";
+
+        std::fs::remove_dir_all(BENCH_TOKIO_SEGMENTED_LOG_STORAGE_DIRECTORY).ok();
+
         group.bench_with_input(
             BenchmarkId::new("tokio_segmented_log", num_appends),
             &num_appends,
             |b, &num_appends| {
                 b.to_async(tokio::runtime::Runtime::new().unwrap())
                     .iter_custom(|_| async {
-                        let config = Config {
-                            segment_config: SegmentConfig {
-                                max_store_size: 10000000,
-                                max_store_overflow: 10000000 / 2,
-                                max_index_size: 10000000,
-                            },
-                            initial_index: 0,
-                        };
-
-                        const TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY: &str =
-                            "/tmp/laminarmq_bench_tokio_std_file_segmented_log_append";
-
-                        if Path::new(TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY).exists() {
-                            let directory_path =
-                                TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY;
-                            tokio::fs::remove_dir_all(directory_path).await.unwrap();
-                        }
-
                         let disk_backed_storage_provider = DiskBackedSegmentStorageProvider::<
                             _,
                             _,
                             u32,
                         >::with_storage_directory_path_and_provider(
-                            TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY,
+                            BENCH_TOKIO_SEGMENTED_LOG_STORAGE_DIRECTORY,
                             StdFileStorageProvider,
                         )
                         .unwrap();
 
-                        let mut segmented_log =
-                            SegmentedLog::<
-                                StdFileStorage,
-                                (),
-                                crc32fast::Hasher,
-                                u32,
-                                u64,
-                                bincode::BinCode,
-                                _,
-                            >::new(config, disk_backed_storage_provider)
-                            .await
-                            .unwrap();
+                        let mut segmented_log = SegmentedLog::<
+                            StdFileStorage,
+                            (),
+                            crc32fast::Hasher,
+                            u32,
+                            u64,
+                            bincode::BinCode,
+                            _,
+                        >::new(
+                            PERSISTENT_SEGMENTED_LOG_CONFIG,
+                            disk_backed_storage_provider,
+                        )
+                        .await
+                        .unwrap();
 
                         let start = tokio::time::Instant::now();
 
