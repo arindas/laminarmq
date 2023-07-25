@@ -19,6 +19,7 @@ use laminarmq::{
             in_mem::{segment::InMemSegmentStorageProvider, storage::InMemStorage},
             tokio::storage::{StdFileStorage, StdFileStorageProvider},
         },
+        AsyncConsume,
     },
 };
 use pprof::criterion::{Output::Flamegraph, PProfProfiler};
@@ -120,7 +121,7 @@ fn criterion_benchmark_with_record_content<X, XBuf, XE>(
 
                     let time_taken = start.elapsed();
 
-                    drop(segmented_log);
+                    segmented_log.remove().await.unwrap();
 
                     time_taken
                 });
@@ -176,7 +177,7 @@ fn criterion_benchmark_with_record_content<X, XBuf, XE>(
 
                         let time_taken = start.elapsed();
 
-                        drop(segmented_log);
+                        segmented_log.remove().await.unwrap();
 
                         time_taken
                     });
@@ -232,7 +233,7 @@ fn criterion_benchmark_with_record_content<X, XBuf, XE>(
 
                         let time_taken = start.elapsed();
 
-                        drop(segmented_log);
+                        segmented_log.remove().await.unwrap();
 
                         time_taken
                     });
@@ -288,7 +289,7 @@ fn criterion_benchmark_with_record_content<X, XBuf, XE>(
 
                         let time_taken = start.elapsed();
 
-                        drop(segmented_log);
+                        segmented_log.remove().await.unwrap();
 
                         time_taken
                     });
