@@ -130,6 +130,8 @@ fn criterion_benchmark_with_record_content<X, XBuf, XE>(
         const BENCH_GLOMMIO_DMA_FILE_SEGMENTED_LOG_STORAGE_DIRECTORY: &str =
             "/tmp/laminarmq_bench_glommio_dma_file_segmented_log_read_stream";
 
+        std::fs::remove_dir_all(BENCH_GLOMMIO_DMA_FILE_SEGMENTED_LOG_STORAGE_DIRECTORY).ok();
+
         group.bench_with_input(
             BenchmarkId::new("glommio_dma_file_segmented_log", num_appends),
             &num_appends,
@@ -183,6 +185,8 @@ fn criterion_benchmark_with_record_content<X, XBuf, XE>(
 
         const BENCH_GLOMMIO_BUFFERED_FILE_SEGMENTED_LOG_STORAGE_DIRECTORY: &str =
             "/tmp/laminarmq_bench_glommio_buffered_file_segmented_log_read_stream";
+
+        std::fs::remove_dir_all(BENCH_GLOMMIO_BUFFERED_FILE_SEGMENTED_LOG_STORAGE_DIRECTORY).ok();
 
         group.bench_with_input(
             BenchmarkId::new("glommio_buffered_file_segmented_log", num_appends),
@@ -238,6 +242,8 @@ fn criterion_benchmark_with_record_content<X, XBuf, XE>(
         const BENCH_TOKIO_SEGMENTED_LOG_STORAGE_DIRECTORY: &str =
             "/tmp/laminarmq_bench_tokio_std_file_segmented_log_read_stream";
 
+        std::fs::remove_dir_all(BENCH_TOKIO_SEGMENTED_LOG_STORAGE_DIRECTORY).ok();
+
         group.bench_with_input(
             BenchmarkId::new("tokio_segmented_log", num_appends),
             &num_appends,
@@ -288,12 +294,6 @@ fn criterion_benchmark_with_record_content<X, XBuf, XE>(
                     });
             },
         );
-
-        std::fs::remove_dir_all(BENCH_GLOMMIO_DMA_FILE_SEGMENTED_LOG_STORAGE_DIRECTORY).ok();
-
-        std::fs::remove_dir_all(BENCH_GLOMMIO_BUFFERED_FILE_SEGMENTED_LOG_STORAGE_DIRECTORY).ok();
-
-        std::fs::remove_dir_all(BENCH_TOKIO_SEGMENTED_LOG_STORAGE_DIRECTORY).ok();
     }
 }
 
