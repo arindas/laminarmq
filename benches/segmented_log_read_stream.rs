@@ -128,17 +128,15 @@ fn criterion_benchmark_with_record_content<X, XBuf, XE>(
             },
         );
 
-        const BENCH_GLOMMIO_DMA_FILE_SEGMENTED_LOG_STORAGE_DIRECTORY: &str =
-            "/tmp/laminarmq_bench_glommio_dma_file_segmented_log_read_stream";
-
-        std::fs::remove_dir_all(BENCH_GLOMMIO_DMA_FILE_SEGMENTED_LOG_STORAGE_DIRECTORY).ok();
-
         group.bench_with_input(
             BenchmarkId::new("glommio_dma_file_segmented_log", num_appends),
             &num_appends,
             |b, &num_appends| {
                 b.to_async(GlommioAsyncExecutor(glommio::LocalExecutor::default()))
                     .iter_custom(|_| async {
+                        const BENCH_GLOMMIO_DMA_FILE_SEGMENTED_LOG_STORAGE_DIRECTORY: &str =
+                            "/tmp/laminarmq_bench_glommio_dma_file_segmented_log_read_stream";
+
                         let disk_backed_storage_provider = DiskBackedSegmentStorageProvider::<
                             _,
                             _,
@@ -177,17 +175,21 @@ fn criterion_benchmark_with_record_content<X, XBuf, XE>(
 
                         let time_taken = start.elapsed();
 
-                        segmented_log.remove().await.unwrap();
+                        segmented_log.close().await.unwrap();
+
+                        glommio::executor()
+                            .spawn_blocking(|| {
+                                std::fs::remove_dir_all(
+                                    BENCH_GLOMMIO_DMA_FILE_SEGMENTED_LOG_STORAGE_DIRECTORY,
+                                )
+                                .unwrap();
+                            })
+                            .await;
 
                         time_taken
                     });
             },
         );
-
-        const BENCH_GLOMMIO_BUFFERED_FILE_SEGMENTED_LOG_STORAGE_DIRECTORY: &str =
-            "/tmp/laminarmq_bench_glommio_buffered_file_segmented_log_read_stream";
-
-        std::fs::remove_dir_all(BENCH_GLOMMIO_BUFFERED_FILE_SEGMENTED_LOG_STORAGE_DIRECTORY).ok();
 
         group.bench_with_input(
             BenchmarkId::new("glommio_buffered_file_segmented_log", num_appends),
@@ -195,6 +197,9 @@ fn criterion_benchmark_with_record_content<X, XBuf, XE>(
             |b, &num_appends| {
                 b.to_async(GlommioAsyncExecutor(glommio::LocalExecutor::default()))
                     .iter_custom(|_| async {
+                        const BENCH_GLOMMIO_BUFFERED_FILE_SEGMENTED_LOG_STORAGE_DIRECTORY: &str =
+                            "/tmp/laminarmq_bench_glommio_buffered_file_segmented_log_read_stream";
+
                         let disk_backed_storage_provider = DiskBackedSegmentStorageProvider::<
                             _,
                             _,
@@ -233,17 +238,21 @@ fn criterion_benchmark_with_record_content<X, XBuf, XE>(
 
                         let time_taken = start.elapsed();
 
-                        segmented_log.remove().await.unwrap();
+                        segmented_log.close().await.unwrap();
+
+                        glommio::executor()
+                            .spawn_blocking(|| {
+                                std::fs::remove_dir_all(
+                                    BENCH_GLOMMIO_BUFFERED_FILE_SEGMENTED_LOG_STORAGE_DIRECTORY,
+                                )
+                                .unwrap();
+                            })
+                            .await;
 
                         time_taken
                     });
             },
         );
-
-        const BENCH_TOKIO_SEGMENTED_LOG_STORAGE_DIRECTORY: &str =
-            "/tmp/laminarmq_bench_tokio_std_file_segmented_log_read_stream";
-
-        std::fs::remove_dir_all(BENCH_TOKIO_SEGMENTED_LOG_STORAGE_DIRECTORY).ok();
 
         group.bench_with_input(
             BenchmarkId::new("tokio_segmented_log", num_appends),
@@ -251,6 +260,9 @@ fn criterion_benchmark_with_record_content<X, XBuf, XE>(
             |b, &num_appends| {
                 b.to_async(tokio::runtime::Runtime::new().unwrap())
                     .iter_custom(|_| async {
+                        const BENCH_TOKIO_SEGMENTED_LOG_STORAGE_DIRECTORY: &str =
+                            "/tmp/laminarmq_bench_tokio_std_file_segmented_log_read_stream";
+
                         let disk_backed_storage_provider = DiskBackedSegmentStorageProvider::<
                             _,
                             _,
@@ -289,7 +301,11 @@ fn criterion_benchmark_with_record_content<X, XBuf, XE>(
 
                         let time_taken = start.elapsed();
 
-                        segmented_log.remove().await.unwrap();
+                        segmented_log.close().await.unwrap();
+
+                        tokio::fs::remove_dir_all(BENCH_TOKIO_SEGMENTED_LOG_STORAGE_DIRECTORY)
+                            .await
+                            .unwrap();
 
                         time_taken
                     });
