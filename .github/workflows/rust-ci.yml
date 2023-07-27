@@ -6,8 +6,6 @@ on:
       - main
       - develop
       - 'dev/**'
-    paths:
-      - 'src/**'
 
 jobs:
   code-coverage:
