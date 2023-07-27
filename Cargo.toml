@@ -51,6 +51,7 @@ path = "./src/bin/laminarmq_server.rs"
 bench = false
 
 [dev-dependencies]
+rlimit = "0.10.1"
 criterion = { version = "0.5", features = ["html_reports", "async_futures", "async_tokio"] }
 pprof = { version = "0.12", features = ["flamegraph", "criterion"] }
 

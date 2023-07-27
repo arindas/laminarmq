@@ -72,6 +72,12 @@ const PERSISTENT_SEGMENTED_LOG_CONFIG: Config<u32, u64> = Config {
     initial_index: 0,
 };
 
+fn increase_rlimit_nofile_soft_limit_to_hard_limit() -> std::io::Result<()> {
+    use rlimit::{getrlimit, setrlimit, Resource};
+
+    getrlimit(Resource::NOFILE).and_then(|(_, hard)| setrlimit(Resource::NOFILE, hard, hard))
+}
+
 fn criterion_benchmark_with_record_content<X, XBuf, XE>(
     c: &mut Criterion,
     record_content: X,
@@ -81,6 +87,8 @@ fn criterion_benchmark_with_record_content<X, XBuf, XE>(
     X: stream::Stream<Item = Result<XBuf, XE>> + Clone + Unpin,
     XBuf: Deref<Target = [u8]>,
 {
+    increase_rlimit_nofile_soft_limit_to_hard_limit().unwrap();
+
     let mut group = c.benchmark_group(record_size_group_name);
 
     for num_appends in (1000..=10000).step_by(1000) {

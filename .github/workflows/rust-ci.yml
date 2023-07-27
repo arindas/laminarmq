@@ -1,9 +1,6 @@
 name: rust-ci
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - 'feature/**'
   pull_request:
     branches:
       - main
@@ -60,6 +57,15 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
+
+  benchmark:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v3
+      - uses: boa-dev/criterion-compare-action@v3
+        with:
+          features: "async,tokio-support"
+          branchName: ${{ github.base_ref }}
 
   clippy-check:
     runs-on: ubuntu-latest
