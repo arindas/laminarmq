@@ -3,7 +3,7 @@ use crate::storage::{
     StreamUnexpectedLength,
 };
 use async_trait::async_trait;
-use futures_lite::AsyncWriteExt;
+use futures_lite::{io::BufWriter, AsyncWriteExt};
 use glommio::{
     io::{BufferedFile, OpenOptions, ReadResult, StreamWriter, StreamWriterBuilder},
     GlommioError,
@@ -40,7 +40,7 @@ impl From<StreamUnexpectedLength> for BufferedStorageError {
 
 pub struct BufferedStorage {
     reader: BufferedFile,
-    writer: StreamWriter,
+    writer: BufWriter<StreamWriter>,
 
     backing_file_path: PathBuf,
 
@@ -67,12 +67,14 @@ impl BufferedStorage {
             .await
             .map_err(BufferedStorageError::StorageError)?;
 
+        let writer = Self::stream_writer_with_buffer_size(
+            backing_buffered_file_storage_writer_file,
+            buffer_size,
+        );
+
         Ok(Self {
             reader: Self::obtain_backing_reader_file(path).await?,
-            writer: Self::stream_writer_with_buffer_size(
-                backing_buffered_file_storage_writer_file,
-                buffer_size,
-            ),
+            writer: BufWriter::new(writer),
             backing_file_path,
             buffer_size,
             size: initial_size,
@@ -146,7 +148,7 @@ impl AsyncTruncate for BufferedStorage {
             )
         };
 
-        self.writer = writer;
+        self.writer = BufWriter::new(writer);
         self.reader = reader;
 
         self.size = *position;
