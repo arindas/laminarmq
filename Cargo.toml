@@ -37,12 +37,15 @@ async-io = "1.13.0"
 
 [lib]
 name = "laminarmq"
+bench = false
 
 [[bin]]
 name = "laminarmq-client-cli"
 path = "./src/bin/laminarmq_client_cli.rs"
+bench = false
 
 [[bin]]
 name = "laminarmq-server"
 path = "./src/bin/laminarmq_server.rs"
+bench = false
 
