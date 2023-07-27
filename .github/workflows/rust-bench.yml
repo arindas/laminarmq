@@ -1,0 +1,19 @@
+name: rust-bench
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+      - 'dev/**'
+    paths:
+      - 'src/**'
+      - 'bench/**'
+
+jobs:
+  benchmark:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v3
+      - uses: boa-dev/criterion-compare-action@v3
+        with:
+          branchName: ${{ github.base_ref }}
