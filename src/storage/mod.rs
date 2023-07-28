@@ -161,11 +161,8 @@ pub trait Storage:
             match match match (buf, append_threshold) {
                 (Ok(buf), Some(write_capacity)) => {
                     match Self::Size::from_usize(buf.deref().len()) {
-                        Some(buf_len) if buf_len + bytes_written > write_capacity => {
-                            Err::<XBuf, Self::Error>(StreamUnexpectedLength.into())
-                        }
-                        Some(_) => Ok(buf),
-                        None => Err(StreamUnexpectedLength.into()),
+                        Some(buf_len) if buf_len + bytes_written <= write_capacity => Ok(buf),
+                        _ => Err::<XBuf, Self::Error>(StreamUnexpectedLength.into()),
                     }
                 }
                 (Ok(buf), None) => Ok(buf),
