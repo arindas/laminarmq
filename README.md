@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/logo.png" alt="laminarmq">
+  <img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/logo.png" alt="laminarmq" />
 </p>
 
 <p align="center">
@@ -56,7 +56,9 @@ This section describes the internal design of `laminarmq`.
 
 ### Cluster Hierarchy
 
-![cluster-hierarchy](https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-cluster-hierarchy.svg)
+<p align-"center">
+<img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-cluster-hierarchy.svg" alt="cluster-hierarchy" />
+</p>
 
 ```text
 partition_id_x is of the form (topic_id, partition_idx)
@@ -127,8 +129,9 @@ Each partition replica is backed by a segmented log for storage.
 
 ### Service discovery and partition distribution to nodes
 
-![service-discovery-and-partition-distribution-to-nodes](https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-service-discovery-and-partition-distribution.svg)
-
+<p align="center">
+<img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-service-discovery-and-partition-distribution.svg" alt="service-discovery-and-partition-distribution-to-nodes"/>
+</p>
 <p align="center">
 <b>Fig:</b> Rendezvous hashing based partition distribution and gossip style service discovery
 mechanism used by <code>laminarmq</code>
@@ -214,7 +217,9 @@ designed our system with reusable components which can be organized to suit both
 
 #### General design
 
-![request-rouing-general](https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-node-request-routing-general.svg)
+<p align="center">
+<img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-node-request-routing-general.svg" alt="request-rouing-general"/>
+</p>
 <p align="center">
 <b>Fig:</b> Request routing mechanism in <code>laminarmq</code> nodes using the general execution
 model.
@@ -258,7 +263,9 @@ response back to `tx` where applicable.
 
 #### Thread per core execution model compatible design
 
-![request-routing-thread-per-core](https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-node-request-routing-thread-per-core.svg)
+<p align="center">
+<img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-node-request-routing-thread-per-core.svg" alt="request-routing-thread-per-core" />
+</p>
 <p align="center">
 <b>Fig:</b> Request routing mechanism in <code>laminarmq</code> nodes using the thred per core
 execution model.
@@ -286,7 +293,9 @@ components in a drastically different execution model, as promised before.
 
 ### Partition control flow and replication
 
-![partition-control-flow-replication](https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-partition-control-flow-and-replication.svg)
+<p align="center">
+<img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-partition-control-flow-and-replication.svg" alt="partition-control-flow-replication" />
+</p>
 <p align="center">
 <b>Fig:</b> Partition serving future control flow and partition replication mechanism in
 <code>laminarmq</code>
@@ -366,7 +375,9 @@ Every partition controller is backed by a `segmented_log` for persisting records
 The segmented-log data structure for storing was originally described in the [Apache
 Kafka](https://www.microsoft.com/en-us/research/wp-content/uploads/2017/09/Kafka.pdf) paper.
 
-![segmented_log](https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-segmented-log.svg)
+<p align="center">
+<img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-segmented-log.svg" alt="segmented_log"/>
+</p>
 <p align="center">
 <b>Fig:</b> File organisation for persisting the <code>segmented_log</code> data structure on a
 <code>*nix</code> file system.
@@ -410,7 +421,9 @@ a vector. This would not only incur more allocations, but also slow down our sys
 
 Hence, to accommodate this use case, we introduced an intermediate indexing layer to our design.
 
-![segmented_log](https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-indexed-segmented-log-landscape.svg)
+<p align="center">
+<img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-indexed-segmented-log-landscape.svg" alt="segmented_log" />
+</p>
 
 ```text
 //! Index and position invariants across segmented_log
@@ -457,7 +470,9 @@ operations now use `segment_capacity - segment.size + segment_overflow_capacity`
 
 #### General async runtime (e.g. `tokio`, `async-std` etc.)
 
-![async-execution-model-general](https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-async-execution-model-general.svg)
+<p align="center">
+<img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-async-execution-model-general.svg" alt="async-execution-model-general" />
+</p>
 <p align="center">
 <b>Fig:</b> General async runtime based execution model for <code>laminarmq</code>
 </p>
@@ -483,7 +498,9 @@ to specify any details as to how and where the future's corresponding task will 
 
 #### Thread per core async runtime (e.g. `glommio`)
 
-![async-execution-model-thread-per-core](https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-async-execution-model-thread-per-core.svg)
+<p align="center">
+<img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-async-execution-model-thread-per-core.svg" alt="async-execution-model-thread-per-core"/>
+</p>
 <p align="center">
 <b>Fig:</b> Thread per core async runtime based execution model for <code>laminarmq</code>
 </p>
