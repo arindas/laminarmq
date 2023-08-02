@@ -56,7 +56,7 @@ This section describes the internal design of `laminarmq`.
 
 ### Cluster Hierarchy
 
-<p align-"center">
+<p align="center">
 <img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-cluster-hierarchy.svg" alt="cluster-hierarchy" />
 </p>
 
