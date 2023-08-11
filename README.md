@@ -626,8 +626,8 @@ This section presents some selected benchmark reports:
 
 #### `commit_log` write benchmark with 1KB messages
 
-<p align="center">
-<img bgcolor="white" src="https://arindas.github.io/laminarmq/bench/latest/commit_log_append_with_k_message/report/lines.svg" alt="k-message-write-bench"/>
+<p align="center" bgcolor="white">
+<img src="https://arindas.github.io/laminarmq/bench/latest/commit_log_append_with_k_message/report/lines.svg" alt="k-message-write-bench"/>
 </p>
 <p align="center">
 <b>Fig:</b> Comparing Time taken v/s Input size in bytes (lower is better) across storage back-ends
@@ -639,8 +639,8 @@ This benchmark measures the time taken to write messages of size 1KB across diff
 
 #### `segmented_log` streaming read benchmark with 1KB messages
 
-<p align="center">
-<img bgcolor="white" src="https://arindas.github.io/laminarmq/bench/latest/segmented_log_read_stream_with_k_message/report/lines.svg" alt="k-message-read-bench"/>
+<p align="center" bgcolor="white">
+<img src="https://arindas.github.io/laminarmq/bench/latest/segmented_log_read_stream_with_k_message/report/lines.svg" alt="k-message-read-bench"/>
 </p>
 <p align="center">
 <b>Fig:</b> Comparing Time taken v/s Input size in bytes (lower is better) across storage back-ends
