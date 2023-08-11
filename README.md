@@ -592,6 +592,20 @@ cd laminarmq/
 cargo test
 ```
 
+## Benchmarking
+
+Same pre-requisites as testing. Once the pre-requisites are satisfied you may
+run benchmarks with `cargo` as usual:
+
+```sh
+git clone https://github.com/arindas/laminarmq.git
+cd laminarmq/
+cargo bench
+```
+
+The latest benchmark report is available at <https://arindas.github.io/laminarmq/bench/latest/report>.
+
+
 ## License
 
 `laminarmq` is licensed under the MIT License. See
