@@ -603,8 +603,56 @@ cd laminarmq/
 cargo bench
 ```
 
-The latest benchmark report is available at <https://arindas.github.io/laminarmq/bench/latest/report>.
+The complete latest benchmark reports are available at <https://arindas.github.io/laminarmq/bench/latest/report>.
 
+All benchmarks in the reports have been run on a machine (HP Pavilion x360 Convertible 14-ba0xx) with:
+- 4 core CPU (Intel(R) Core(TM) i5-7200U CPU @ 2.50GHz)
+- 8GB RAM (SK Hynix HMA81GS6AFR8N-UH DDR4 2133 MT/s)
+- 128GB SSD storage (SanDisk SD8SN8U-128G-1006)
+
+### Selected Benchmark Reports
+
+This section presents some selected benchmark reports:
+
+> __Note__: We use the following names for different record sizes:
+> | size_name | size | comments |
+> | --- | --- | --- |
+> | tiny | 12B | none |
+> | tweet | 140B | none |
+> | half_k | 560B | ≈ 512B |
+> | k | 1120B | ≈ 1024B |
+> | linked_in_post | 2940B | ≤ 3000B |
+> | blog | 11760B | 4x linked_in_post |
+
+#### `commit_log` write benchmark with 1KB messages
+
+<p align="center">
+<img src="https://arindas.github.io/laminarmq/bench/latest/commit_log_append_with_k_message/report/lines.svg" alt="k-message-write-bench"/>
+</p>
+<p align="center">
+<b>Fig:</b> Comparing Time taken v/s Input size in bytes (lower is better) across storage back-ends
+</p>
+
+View this benchmark report in more detail [here](https://arindas.github.io/laminarmq/bench/latest/commit_log_append_with_k_message/report/index.html)
+
+This benchmark measures the time taken to write messages of size 1KB across different `commit_log` storage back-ends.
+
+#### `segmented_log` streaming read benchmark with 1KB messages
+
+<p align="center">
+<img src="https://arindas.github.io/laminarmq/bench/latest/segmented_log_read_stream_with_k_message/report/lines.svg" alt="k-message-read-bench"/>
+</p>
+<p align="center">
+<b>Fig:</b> Comparing Time taken v/s Input size in bytes (lower is better) across storage back-ends
+</p>
+
+View this benchmark report in more detail [here](https://arindas.github.io/laminarmq/bench/latest/segmented_log_read_stream_with_k_message/report/index.html)
+
+This benchmark measures the time taken for streaming reads on messages of size
+1KB across different `segmented_log` storage back-ends.
+
+
+The remaining benchmark reports are available at <https://arindas.github.io/laminarmq/bench/latest/report>.
 
 ## License
 
