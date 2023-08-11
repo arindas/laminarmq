@@ -2,7 +2,7 @@ use criterion::{
     async_executor::FuturesExecutor, black_box, criterion_group, criterion_main, BenchmarkId,
     Criterion, Throughput,
 };
-use futures_lite::stream;
+use futures_lite::{stream, StreamExt};
 use laminarmq::{
     common::serde_compat::bincode,
     storage::{
@@ -39,12 +39,14 @@ fn record<X, Idx>(stream: X) -> Record<MetaWithIdx<(), Idx>, X> {
     }
 }
 
-const LOREM_140: [&[u8]; 4] = [
-    b"Donec neque velit, pulvinar in sed.",
-    b"Pellentesque sodales, felis sit et.",
-    b"Sed lobortis magna sem, eu laoreet.",
-    b"Praesent quis varius diam. Nunc at.",
+const LOREM_140: [[u8; 35]; 4] = [
+    *b"Donec neque velit, pulvinar in sed.",
+    *b"Pellentesque sodales, felis sit et.",
+    *b"Sed lobortis magna sem, eu laoreet.",
+    *b"Praesent quis varius diam. Nunc at.",
 ];
+
+const LOREM_140_SIZE: u64 = (LOREM_140.len() * LOREM_140[0].len()) as u64;
 
 struct GlommioAsyncExecutor(glommio::LocalExecutor);
 
@@ -334,54 +336,50 @@ fn benchmark_tiny_message_append(c: &mut Criterion) {
     );
 }
 
-fn benchmark_tweet_append(c: &mut Criterion) {
-    // 140 bytes: pre-2017 Twitter tweet limit
-    let tweet = stream::iter(LOREM_140.iter().cloned().map(infallible));
+fn lorem_140_stream(
+) -> impl stream::Stream<Item = Result<impl Deref<Target = [u8]>, Infallible>> + Clone + Unpin {
+    stream::iter(LOREM_140.iter().map(|x| x as &[u8]).map(infallible))
+}
 
-    criterion_benchmark_with_record_content(c, tweet, 140, "commit_log_append_with_tweet");
+fn benchmark_lorem_140_multiple(
+    c: &mut Criterion,
+    multiplier: usize,
+    record_size_group_name: &str,
+) {
+    let record_content_size: u64 = LOREM_140_SIZE * multiplier as u64;
+    let message = lorem_140_stream().cycle().take(multiplier);
+
+    criterion_benchmark_with_record_content(
+        c,
+        message,
+        record_content_size,
+        record_size_group_name,
+    );
+}
+
+fn benchmark_tweet_append(c: &mut Criterion) {
+    // 140 * 1 = 140 bytes = pre 2017 twitter limit
+    benchmark_lorem_140_multiple(c, 1, "commit_log_append_with_tweet");
 }
 
 fn benchmark_half_k_message_append(c: &mut Criterion) {
-    // 2940 bytes: within 3000 character limit on LinkedIn posts
-    let k_message = stream::iter(LOREM_140.iter().cloned().cycle().take(4).map(infallible));
-
-    criterion_benchmark_with_record_content(
-        c,
-        k_message,
-        2940,
-        "commit_log_append_with_half_k_message",
-    );
+    // 140 * 4 = 560 ≈ 512 bytes
+    benchmark_lorem_140_multiple(c, 4, "commit_log_append_with_half_k_message");
 }
 
 fn benchmark_k_message_append(c: &mut Criterion) {
-    // 2940 bytes: within 3000 character limit on LinkedIn posts
-    let k_message = stream::iter(LOREM_140.iter().cloned().cycle().take(8).map(infallible));
-
-    criterion_benchmark_with_record_content(c, k_message, 2940, "commit_log_append_with_k_message");
+    // 140 * 8 = 1120 ≈ 1024 bytes
+    benchmark_lorem_140_multiple(c, 8, "commit_log_append_with_k_message");
 }
 
 fn benchmark_linked_in_post_append(c: &mut Criterion) {
-    // 2940 bytes: within 3000 character limit on LinkedIn posts
-    let linked_in_post = stream::iter(LOREM_140.iter().cloned().cycle().take(21).map(infallible));
-
-    criterion_benchmark_with_record_content(
-        c,
-        linked_in_post,
-        2940,
-        "commit_log_append_with_linked_in_post",
-    );
+    // 140 * 21 = 2940 <= within 3000 bytes LinkedIn post limit
+    benchmark_lorem_140_multiple(c, 21, "commit_log_append_with_linked_in_post");
 }
 
 fn benchmark_blog_post_append(c: &mut Criterion) {
-    // 2940 * 4 bytes
-    let linked_in_post = stream::iter(LOREM_140.iter().cloned().cycle().take(84).map(infallible));
-
-    criterion_benchmark_with_record_content(
-        c,
-        linked_in_post,
-        2940,
-        "commit_log_append_with_blog_post",
-    );
+    // (140 * 21) * 4 = 11760; avg. blog size = 4x LinkedIn post
+    benchmark_lorem_140_multiple(c, 21 * 4, "commit_log_append_with_blog_post");
 }
 
 criterion_group!(

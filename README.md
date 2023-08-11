@@ -379,7 +379,7 @@ Kafka](https://www.microsoft.com/en-us/research/wp-content/uploads/2017/09/Kafka
 <img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-segmented-log.svg" alt="segmented_log"/>
 </p>
 <p align="center">
-<b>Fig:</b> File organisation for persisting the <code>segmented_log</code> data structure on a
+<b>Fig:</b> Data organisation for persisting the <code>segmented_log</code> data structure on a
 <code>*nix</code> file system.
 </p>
 
