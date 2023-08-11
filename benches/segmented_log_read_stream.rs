@@ -46,8 +46,6 @@ const LOREM_140: [[u8; 35]; 4] = [
     *b"Praesent quis varius diam. Nunc at.",
 ];
 
-const LOREM_140_SIZE: u64 = (LOREM_140.len() * LOREM_140[0].len()) as u64;
-
 struct GlommioAsyncExecutor(glommio::LocalExecutor);
 
 impl criterion::async_executor::AsyncExecutor for GlommioAsyncExecutor {
@@ -336,18 +334,20 @@ fn benchmark_tiny_message_read_stream(c: &mut Criterion) {
     );
 }
 
-fn lorem_140_stream(
-) -> impl stream::Stream<Item = Result<impl Deref<Target = [u8]>, Infallible>> + Clone + Unpin {
-    stream::iter(LOREM_140.iter().map(|x| x as &[u8]).map(infallible))
-}
-
-fn benchmark_lorem_140_multiple(
+fn benchmark_lorem_140_repeated(
     c: &mut Criterion,
-    multiplier: usize,
+    repetitions: usize,
     record_size_group_name: &str,
 ) {
-    let record_content_size: u64 = LOREM_140_SIZE * multiplier as u64;
-    let message = lorem_140_stream().cycle().take(multiplier);
+    let source_packets = LOREM_140.iter().map(|x| x as &[u8]);
+    const SOURCE_PACKETS_LEN: usize = LOREM_140.len();
+    const AVG_PACKET_LEN: usize = LOREM_140[0].len();
+
+    let bench_source_packets_len = SOURCE_PACKETS_LEN * repetitions;
+    let bench_source_packets = source_packets.cycle().take(bench_source_packets_len);
+
+    let record_content_size: u64 = (bench_source_packets_len * AVG_PACKET_LEN) as u64;
+    let message = stream::iter(bench_source_packets).map(infallible);
 
     criterion_benchmark_with_record_content(
         c,
@@ -359,27 +359,27 @@ fn benchmark_lorem_140_multiple(
 
 fn benchmark_tweet_read_stream(c: &mut Criterion) {
     // 140 * 1 = 140 bytes = pre 2017 twitter limit
-    benchmark_lorem_140_multiple(c, 1, "segmented_log_read_stream_with_tweet");
+    benchmark_lorem_140_repeated(c, 1, "segmented_log_read_stream_with_tweet");
 }
 
 fn benchmark_half_k_message_read_stream(c: &mut Criterion) {
     // 140 * 4 = 560 ≈ 512 bytes
-    benchmark_lorem_140_multiple(c, 4, "segmented_log_read_stream_with_half_k_message");
+    benchmark_lorem_140_repeated(c, 4, "segmented_log_read_stream_with_half_k_message");
 }
 
 fn benchmark_k_message_read_stream(c: &mut Criterion) {
     // 140 * 8 = 1120 ≈ 1024 bytes
-    benchmark_lorem_140_multiple(c, 8, "segmented_log_read_stream_with_k_message");
+    benchmark_lorem_140_repeated(c, 8, "segmented_log_read_stream_with_k_message");
 }
 
 fn benchmark_linked_in_post_read_stream(c: &mut Criterion) {
     // 140 * 21 = 2940 <= within 3000 bytes LinkedIn post limit
-    benchmark_lorem_140_multiple(c, 21, "segmented_log_read_stream_with_linked_in_post");
+    benchmark_lorem_140_repeated(c, 21, "segmented_log_read_stream_with_linked_in_post");
 }
 
 fn benchmark_blog_post_read_stream(c: &mut Criterion) {
     // (140 * 21) * 4 = 11760; avg. blog size = 4x LinkedIn post
-    benchmark_lorem_140_multiple(c, 21 * 4, "segmented_log_read_stream_with_blog_post");
+    benchmark_lorem_140_repeated(c, 21 * 4, "segmented_log_read_stream_with_blog_post");
 }
 
 criterion_group!(
