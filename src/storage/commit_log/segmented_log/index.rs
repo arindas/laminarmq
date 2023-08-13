@@ -233,6 +233,31 @@ where
     pub async fn with_storage(storage: S) -> Result<Self, IndexError<S::Error>> {
         Self::with_storage_and_base_index_option(storage, None).await
     }
+
+    pub(super) fn with_storage_and_index_records(
+        storage: S,
+        index_records: Vec<IndexRecord>,
+    ) -> Result<Self, IndexError<S::Error>> {
+        let base_index = index_records
+            .first()
+            .map(|x| x.index)
+            .ok_or(IndexError::NoBaseIndexFound)?;
+        let next_index = index_records
+            .last()
+            .map(|x| x.index + 1)
+            .unwrap_or(base_index);
+
+        Ok(Self {
+            index_records,
+            base_index: u64_as_idx!(base_index, Idx)?,
+            next_index: u64_as_idx!(next_index, Idx)?,
+            storage,
+        })
+    }
+
+    pub fn into_storage_index_records_and_base_index(self) -> (S, Vec<IndexRecord>, Idx) {
+        (self.storage, self.index_records, self.base_index)
+    }
 }
 
 impl<S, Idx> Index<S, Idx>

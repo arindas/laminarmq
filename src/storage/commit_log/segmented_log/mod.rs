@@ -376,7 +376,7 @@ where
     SSP: SegmentStorageProvider<S, Idx>,
 {
     pub async fn rotate_new_write_segment(&mut self) -> Result<(), LogError<S, SERP>> {
-        self.reopen_write_segment().await?;
+        self.flush_write_segment().await?;
 
         let write_segment = take_write_segment!(self)?;
         let next_index = write_segment.highest_index();
@@ -387,13 +387,15 @@ where
         Ok(())
     }
 
-    pub async fn reopen_write_segment(&mut self) -> Result<(), LogError<S, SERP>> {
+    pub async fn flush_write_segment(&mut self) -> Result<(), LogError<S, SERP>> {
         let write_segment = take_write_segment!(self)?;
-        let write_segment_base_index = write_segment.lowest_index();
 
-        consume_segment!(write_segment, close)?;
+        let write_segment = write_segment
+            .flush(&mut self.segment_storage_provider)
+            .await
+            .map_err(SegmentedLogError::SegmentError)?;
 
-        self.write_segment = Some(new_segment!(self, write_segment_base_index)?);
+        self.write_segment = Some(write_segment);
 
         Ok(())
     }
@@ -403,7 +405,7 @@ where
         expiry_duration: Duration,
     ) -> Result<Idx, LogError<S, SERP>> {
         if write_segment_ref!(self, as_ref)?.is_empty() {
-            self.reopen_write_segment().await?
+            self.flush_write_segment().await?
         }
 
         let next_index = self.highest_index();

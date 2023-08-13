@@ -421,6 +421,44 @@ where
     }
 }
 
+impl<S, M, H, Idx, SERP> Segment<S, M, H, Idx, S::Size, SERP>
+where
+    S: Storage,
+    H: Default,
+    Idx: FromPrimitive + Copy + Eq,
+    SERP: SerializationProvider,
+{
+    pub async fn flush<SSP>(
+        mut self,
+        segment_storage_provider: &mut SSP,
+    ) -> Result<Self, SegmentError<S::Error, SERP::Error>>
+    where
+        SSP: SegmentStorageProvider<S, Idx>,
+    {
+        let (index_storage, index_records, base_index) =
+            self.index.into_storage_index_records_and_base_index();
+
+        index_storage
+            .close()
+            .await
+            .map_err(SegmentError::StorageError)?;
+
+        self.store.close().await.map_err(SegmentError::StoreError)?;
+
+        let segment_storage = segment_storage_provider
+            .obtain(&base_index)
+            .await
+            .map_err(SegmentError::StorageError)?;
+
+        self.index = Index::with_storage_and_index_records(segment_storage.index, index_records)
+            .map_err(SegmentError::IndexError)?;
+
+        self.store = Store::<S, H>::new(segment_storage.store);
+
+        Ok(self)
+    }
+}
+
 pub(crate) mod test {
     use super::{
         super::{
