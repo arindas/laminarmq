@@ -74,7 +74,7 @@ impl BufferedStorage {
 
         Ok(Self {
             reader: Self::obtain_backing_reader_file(path).await?,
-            writer: BufWriter::new(writer),
+            writer: BufWriter::with_capacity(buffer_size, writer),
             backing_file_path,
             buffer_size,
             size: initial_size,
