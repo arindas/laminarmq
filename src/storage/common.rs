@@ -10,7 +10,7 @@ where
 {
     let one = <Idx as num::One>::one();
 
-    let hi_max = hi_max - one;
+    let hi_max = hi_max.checked_sub(&one).unwrap_or(hi_max);
 
     let lo = match index_bounds.start_bound() {
         std::ops::Bound::Included(x) => *x,

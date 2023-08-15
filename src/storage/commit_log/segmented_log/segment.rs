@@ -139,12 +139,12 @@ where
             .await
             .map_err(SegmentError::IndexError)?;
 
-        let position = S::Position::from_u64(index_record.position)
+        let position = S::Position::from_u64(index_record.position as u64)
             .ok_or(SegmentError::IncompatiblePositionType)?;
 
         let record_content = self
             .store
-            .read(&position, &index_record.record_header)
+            .read(&position, &index_record.into())
             .await
             .map_err(SegmentError::StoreError)?;
 
@@ -198,12 +198,8 @@ where
             .await
             .map_err(SegmentError::StoreError)?;
 
-        let index_record = IndexRecord::with_position_index_and_record_header(
-            position,
-            write_index,
-            record_header,
-        )
-        .ok_or(SegmentError::InvalidIndexRecordGenerated)?;
+        let index_record = IndexRecord::with_position_and_record_header(position, record_header)
+            .ok_or(SegmentError::InvalidIndexRecordGenerated)?;
 
         self.index
             .append(index_record)
@@ -330,7 +326,7 @@ where
             .await
             .map_err(SegmentError::IndexError)?;
 
-        let position = S::Position::from_u64(index_record.position)
+        let position = S::Position::from_u64(index_record.position as u64)
             .ok_or(SegmentError::IncompatiblePositionType)?;
 
         self.store
@@ -395,7 +391,7 @@ impl<S, M, H, Idx, SERP> Segment<S, M, H, Idx, S::Size, SERP>
 where
     S: Storage,
     H: Default,
-    Idx: FromPrimitive + Copy + Eq,
+    Idx: Unsigned + FromPrimitive + Copy + Eq,
     SERP: SerializationProvider,
 {
     pub async fn with_segment_storage_provider_config_and_base_index<SSP>(
@@ -425,7 +421,7 @@ impl<S, M, H, Idx, SERP> Segment<S, M, H, Idx, S::Size, SERP>
 where
     S: Storage,
     H: Default,
-    Idx: FromPrimitive + Copy + Eq,
+    Idx: Unsigned + FromPrimitive + Copy + Eq,
     SERP: SerializationProvider,
 {
     pub async fn flush<SSP>(
@@ -450,8 +446,12 @@ where
             .await
             .map_err(SegmentError::StorageError)?;
 
-        self.index = Index::with_storage_and_index_records(segment_storage.index, index_records)
-            .map_err(SegmentError::IndexError)?;
+        self.index = Index::with_storage_index_records_and_base_index(
+            segment_storage.index,
+            index_records,
+            base_index,
+        )
+        .map_err(SegmentError::IndexError)?;
 
         self.store = Store::<S, H>::new(segment_storage.store);
 
@@ -460,10 +460,12 @@ where
 }
 
 pub(crate) mod test {
+
     use super::{
         super::{
             super::super::commit_log::test::_test_indexed_read_contains_expected_records,
-            index::INDEX_RECORD_LENGTH, store::test::_RECORDS,
+            index::{INDEX_BASE_MARKER_LENGTH, INDEX_RECORD_LENGTH},
+            store::test::_RECORDS,
         },
         *,
     };
@@ -492,7 +494,7 @@ pub(crate) mod test {
             metadata_len_serialized_size + metadata_serialized_size + record_len;
 
         let expected_store_size = num_records * expected_store_record_length;
-        let expected_index_size = num_records * INDEX_RECORD_LENGTH;
+        let expected_index_size = INDEX_BASE_MARKER_LENGTH + num_records * INDEX_RECORD_LENGTH;
 
         Some(Config {
             max_store_size: Size::from_usize(expected_store_size)?,

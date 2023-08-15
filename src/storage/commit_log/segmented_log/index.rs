@@ -12,37 +12,132 @@ use std::{
 /// Extension used by backing files for [`Index`](Index) instances.
 pub const INDEX_FILE_EXTENSION: &str = "index";
 
+/// Number of bytes required for storing the base marker.
+pub const INDEX_BASE_MARKER_LENGTH: usize = 16;
+
 /// Number of bytes required for storing the record header.
-pub const INDEX_RECORD_LENGTH: usize = 32;
+pub const INDEX_RECORD_LENGTH: usize = 16;
+
+/// Lowest underlying storage position
+pub const INDEX_BASE_POSITION: u64 = 0;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct IndexRecord {
-    pub record_header: RecordHeader,
-    pub index: u64,
-    pub position: u64,
+    pub checksum: u64,
+    pub length: u32,
+    pub position: u32,
 }
 
-impl IndexRecord {
-    pub fn read<R: Read>(source: &mut R) -> std::io::Result<IndexRecord> {
-        let record_header = RecordHeader::read(source)?;
+impl From<IndexRecord> for RecordHeader {
+    fn from(value: IndexRecord) -> Self {
+        RecordHeader {
+            checksum: value.checksum,
+            length: value.length as u64,
+        }
+    }
+}
 
-        let index = source.read_u64::<LittleEndian>()?;
-        let position = source.read_u64::<LittleEndian>()?;
+pub struct IndexBaseMarker {
+    pub base_index: u64,
+    _padding: u64,
+}
+
+impl IndexBaseMarker {
+    pub fn new(base_index: u64) -> Self {
+        Self {
+            base_index,
+            _padding: 0,
+        }
+    }
+}
+
+trait SizedRecord: Sized {
+    fn write<W: Write>(&self, dest: &mut W) -> std::io::Result<()>;
+
+    fn read<R: Read>(source: &mut R) -> std::io::Result<Self>;
+}
+
+struct PersistentSizedRecord<SR, const REPR_SIZE: usize>(SR);
+
+impl<SR, const REPR_SIZE: usize> PersistentSizedRecord<SR, REPR_SIZE> {
+    fn into_inner(self) -> SR {
+        self.0
+    }
+}
+
+impl<SR: SizedRecord, const REPR_SIZE: usize> PersistentSizedRecord<SR, REPR_SIZE> {
+    async fn read_at<S>(source: &S, position: &S::Position) -> Result<Self, IndexError<S::Error>>
+    where
+        S: Storage,
+    {
+        let index_record_bytes = source
+            .read(
+                position,
+                &<S::Size as FromPrimitive>::from_usize(REPR_SIZE)
+                    .ok_or(IndexError::IncompatibleSizeType)?,
+            )
+            .await
+            .map_err(IndexError::StorageError)?;
+
+        let mut cursor = Cursor::new(index_record_bytes.deref());
+
+        SR::read(&mut cursor).map(Self).map_err(IndexError::IoError)
+    }
+
+    async fn append_to<S>(&self, dest: &mut S) -> Result<S::Position, IndexError<S::Error>>
+    where
+        S: Storage,
+    {
+        let mut buffer = [0_u8; REPR_SIZE];
+        let mut cursor = Cursor::new(&mut buffer as &mut [u8]);
+
+        self.0.write(&mut cursor).map_err(IndexError::IoError)?;
+
+        let (position, _) = dest
+            .append_slice(&buffer)
+            .await
+            .map_err(IndexError::StorageError)?;
+
+        Ok(position)
+    }
+}
+
+impl SizedRecord for IndexRecord {
+    fn write<W: Write>(&self, dest: &mut W) -> std::io::Result<()> {
+        dest.write_u64::<LittleEndian>(self.checksum)?;
+        dest.write_u32::<LittleEndian>(self.length)?;
+        dest.write_u32::<LittleEndian>(self.position)?;
+
+        Ok(())
+    }
+
+    fn read<R: Read>(source: &mut R) -> std::io::Result<Self> {
+        let checksum = source.read_u64::<LittleEndian>()?;
+        let length = source.read_u32::<LittleEndian>()?;
+        let position = source.read_u32::<LittleEndian>()?;
 
         Ok(IndexRecord {
-            record_header,
-            index,
+            checksum,
+            length,
             position,
         })
     }
+}
 
-    pub fn write<W: Write>(&self, dest: &mut W) -> std::io::Result<()> {
-        self.record_header.write(dest)?;
-
-        dest.write_u64::<LittleEndian>(self.index)?;
-        dest.write_u64::<LittleEndian>(self.position)?;
+impl SizedRecord for IndexBaseMarker {
+    fn write<W: Write>(&self, dest: &mut W) -> std::io::Result<()> {
+        dest.write_u64::<LittleEndian>(self.base_index)?;
 
         Ok(())
+    }
+
+    fn read<R: Read>(source: &mut R) -> std::io::Result<Self> {
+        let base_index = source.read_u64::<LittleEndian>()?;
+
+        Ok(Self {
+            base_index,
+            _padding: 0_u64,
+        })
     }
 }
 
@@ -55,7 +150,6 @@ pub enum IndexError<StorageError> {
     IncompatibleIdxType,
     IndexOutOfBounds,
     IndexGapEncountered,
-    InvalidAppendIdx,
     NoBaseIndexFound,
     BaseIndexMismatch,
 }
@@ -72,46 +166,6 @@ where
 impl<StorageError> std::error::Error for IndexError<StorageError> where
     StorageError: std::error::Error
 {
-}
-
-impl IndexRecord {
-    async fn read_from_storage_at<S>(
-        source: &S,
-        position: &S::Position,
-    ) -> Result<IndexRecord, IndexError<S::Error>>
-    where
-        S: Storage,
-    {
-        let index_record_bytes = source
-            .read(
-                position,
-                &<S::Size as FromPrimitive>::from_usize(INDEX_RECORD_LENGTH)
-                    .ok_or(IndexError::IncompatibleSizeType)?,
-            )
-            .await
-            .map_err(IndexError::StorageError)?;
-
-        let mut cursor = Cursor::new(index_record_bytes.deref());
-
-        IndexRecord::read(&mut cursor).map_err(IndexError::IoError)
-    }
-
-    async fn append_to_storage<S>(&self, dest: &mut S) -> Result<S::Position, IndexError<S::Error>>
-    where
-        S: Storage,
-    {
-        let mut buffer = [0_u8; INDEX_RECORD_LENGTH];
-        let mut cursor = Cursor::new(&mut buffer as &mut [u8]);
-
-        self.write(&mut cursor).map_err(IndexError::IoError)?;
-
-        let (position, _) = dest
-            .append_slice(&buffer)
-            .await
-            .map_err(IndexError::StorageError)?;
-
-        Ok(position)
-    }
 }
 
 #[doc(hidden)]
@@ -136,40 +190,16 @@ macro_rules! idx_as_u64 {
 }
 
 impl IndexRecord {
-    pub fn with_position_index_and_record_header<Position, Idx>(
-        position: Position,
-        index: Idx,
+    pub fn with_position_and_record_header<P: ToPrimitive>(
+        position: P,
         record_header: RecordHeader,
-    ) -> Option<IndexRecord>
-    where
-        Position: ToPrimitive,
-        Idx: ToPrimitive,
-    {
+    ) -> Option<IndexRecord> {
         Some(IndexRecord {
-            record_header,
-            index: Idx::to_u64(&index)?,
-            position: Position::to_u64(&position)?,
+            checksum: record_header.checksum,
+            length: u32::try_from(record_header.length).ok()?,
+            position: P::to_u32(&position)?,
         })
     }
-}
-
-pub async fn index_records_in_storage<S>(
-    source: &S,
-) -> Result<Vec<IndexRecord>, IndexError<S::Error>>
-where
-    S: Storage,
-{
-    let mut position = 0_u64;
-    let mut index_records = Vec::<IndexRecord>::new();
-
-    while let Ok(index_record) =
-        IndexRecord::read_from_storage_at(source, &u64_as_position!(position, S::Position)?).await
-    {
-        index_records.push(index_record);
-        position += INDEX_RECORD_LENGTH as u64;
-    }
-
-    Ok(index_records)
 }
 
 pub struct Index<S, Idx> {
@@ -188,32 +218,48 @@ impl<S, Idx> Index<S, Idx> {
 impl<S, Idx> Index<S, Idx>
 where
     S: Storage,
-    Idx: FromPrimitive + Copy + Eq,
+    Idx: Unsigned + FromPrimitive + Copy + Eq,
 {
     async fn with_storage_and_base_index_option(
         storage: S,
         base_index: Option<Idx>,
     ) -> Result<Self, IndexError<S::Error>> {
-        let index_records = index_records_in_storage(&storage).await?;
-        let read_base_index = index_records.first().map(|x| x.index);
+        let index_base_marker =
+            PersistentSizedRecord::<IndexBaseMarker, INDEX_BASE_MARKER_LENGTH>::read_at(
+                &storage,
+                &u64_as_position!(INDEX_BASE_POSITION, S::Position)?,
+            )
+            .await
+            .map(|x| x.into_inner());
+        let read_base_index = index_base_marker.map(|x| x.base_index);
+
+        let mut position = INDEX_BASE_MARKER_LENGTH as u64;
+        let mut index_records = Vec::<IndexRecord>::new();
+
+        while let Ok(index_record) =
+            PersistentSizedRecord::<IndexRecord, INDEX_RECORD_LENGTH>::read_at(
+                &storage,
+                &u64_as_position!(position, S::Position)?,
+            )
+            .await
+        {
+            index_records.push(index_record.into_inner());
+            position += INDEX_RECORD_LENGTH as u64;
+        }
 
         let base_index = match (read_base_index, base_index) {
-            (None, None) => Err(IndexError::NoBaseIndexFound),
-            (None, Some(base_index)) => Ok(base_index),
-            (Some(base_index), None) => u64_as_idx!(base_index, Idx),
-            (Some(read), Some(provided)) if u64_as_idx!(read, Idx)? != provided => {
+            (Err(_), None) => Err(IndexError::NoBaseIndexFound),
+            (Err(_), Some(base_index)) => Ok(base_index),
+            (Ok(base_index), None) => u64_as_idx!(base_index, Idx),
+            (Ok(read), Some(provided)) if u64_as_idx!(read, Idx)? != provided => {
                 Err(IndexError::BaseIndexMismatch)
             }
-            (Some(_), Some(provided)) => Ok(provided),
+            (Ok(_), Some(provided)) => Ok(provided),
         }?;
 
-        let next_index = match index_records.last() {
-            Some(index_record) => {
-                let idx = index_record.index + 1;
-                u64_as_idx!(idx, Idx)
-            }
-            None => Ok(base_index),
-        }?;
+        let len = index_records.len() as u64;
+
+        let next_index = base_index + u64_as_idx!(len, Idx)?;
 
         Ok(Self {
             index_records,
@@ -234,23 +280,18 @@ where
         Self::with_storage_and_base_index_option(storage, None).await
     }
 
-    pub(super) fn with_storage_and_index_records(
+    pub fn with_storage_index_records_and_base_index(
         storage: S,
         index_records: Vec<IndexRecord>,
+        base_index: Idx,
     ) -> Result<Self, IndexError<S::Error>> {
-        let base_index = index_records
-            .first()
-            .map(|x| x.index)
-            .ok_or(IndexError::NoBaseIndexFound)?;
-        let next_index = index_records
-            .last()
-            .map(|x| x.index + 1)
-            .unwrap_or(base_index);
+        let len = index_records.len() as u64;
+        let next_index = base_index + u64_as_idx!(len, Idx)?;
 
         Ok(Self {
             index_records,
-            base_index: u64_as_idx!(base_index, Idx)?,
-            next_index: u64_as_idx!(next_index, Idx)?,
+            base_index,
+            next_index,
             storage,
         })
     }
@@ -325,11 +366,20 @@ where
     pub async fn append(&mut self, index_record: IndexRecord) -> Result<Idx, IndexError<S::Error>> {
         let write_index = self.next_index;
 
-        if index_record.index != idx_as_u64!(write_index, Idx)? {
-            return Err(IndexError::<S::Error>::InvalidAppendIdx);
+        // if index is empty, first write index base marker
+        if write_index == self.base_index {
+            let base_index = self.base_index;
+            let base_index = idx_as_u64!(base_index, Idx)?;
+            PersistentSizedRecord::<IndexBaseMarker, INDEX_BASE_MARKER_LENGTH>(
+                IndexBaseMarker::new(base_index),
+            )
+            .append_to(&mut self.storage)
+            .await?;
         }
 
-        index_record.append_to_storage(&mut self.storage).await?;
+        PersistentSizedRecord::<IndexRecord, INDEX_RECORD_LENGTH>(index_record)
+            .append_to(&mut self.storage)
+            .await?;
         self.index_records.push(index_record);
 
         self.next_index = write_index + Idx::one();
@@ -354,7 +404,7 @@ where
             .to_usize()
             .ok_or(IndexError::IncompatibleIdxType)?;
 
-        let truncate_position = (INDEX_RECORD_LENGTH * vec_index) as u64;
+        let truncate_position = (INDEX_BASE_MARKER_LENGTH + INDEX_RECORD_LENGTH * vec_index) as u64;
         let truncate_position = u64_as_position!(truncate_position, S::Position)?;
 
         self.storage
@@ -419,12 +469,9 @@ pub(crate) mod test {
         record_source
             .map(|x| RecordHeader::compute::<H>(x.deref()))
             .scan((0, 0), |(index, position), record_header| {
-                let index_record = IndexRecord::with_position_index_and_record_header::<u32, u32>(
-                    *position,
-                    *index,
-                    record_header,
-                )
-                .unwrap();
+                let index_record =
+                    IndexRecord::with_position_and_record_header::<u32>(*position, record_header)
+                        .unwrap();
 
                 *index += 1;
                 *position += record_header.length as u32;
@@ -491,13 +538,6 @@ pub(crate) mod test {
 
         for index_record in _test_index_records_provider::<H>(_test_records_provider(&_RECORDS)) {
             index.append(index_record).await.unwrap();
-        }
-
-        match index.append(IndexRecord::default()).await {
-            Err(IndexError::InvalidAppendIdx) => {}
-            _ => unreachable!(
-                "Wrong result returned when appending IndexRecord with invalid append index"
-            ),
         }
 
         _test_index_contains_records(

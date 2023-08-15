@@ -117,7 +117,7 @@ where
     S: Storage,
     S::Size: Copy,
     H: Default,
-    Idx: FromPrimitive + Copy + Ord,
+    Idx: Unsigned + FromPrimitive + Copy + Ord,
     SERP: SerializationProvider,
     SSP: SegmentStorageProvider<S, Idx>,
 {
@@ -376,7 +376,7 @@ where
     SSP: SegmentStorageProvider<S, Idx>,
 {
     pub async fn rotate_new_write_segment(&mut self) -> Result<(), LogError<S, SERP>> {
-        self.flush_write_segment().await?;
+        self.flush().await?;
 
         let write_segment = take_write_segment!(self)?;
         let next_index = write_segment.highest_index();
@@ -387,7 +387,7 @@ where
         Ok(())
     }
 
-    pub async fn flush_write_segment(&mut self) -> Result<(), LogError<S, SERP>> {
+    pub async fn flush(&mut self) -> Result<(), LogError<S, SERP>> {
         let write_segment = take_write_segment!(self)?;
 
         let write_segment = write_segment
@@ -405,7 +405,7 @@ where
         expiry_duration: Duration,
     ) -> Result<Idx, LogError<S, SERP>> {
         if write_segment_ref!(self, as_ref)?.is_empty() {
-            self.flush_write_segment().await?
+            self.flush().await?
         }
 
         let next_index = self.highest_index();
