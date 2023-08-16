@@ -316,3 +316,49 @@ records[i+1].position = records[i].position + records[i].record_header.length
 // segment index invariants in segmented_log
 segments[i+1].base_index = segments[i].highest_index = segments[i].index[index.len - 1].index + 1
 ```
+## 16th August, 2023
+
+Currently, we required 16MB to cache index records for 1GB of storage with
+records of size 1 KB.
+
+Target: <= 160MB for cache for 1 TB of storage.
+
+Clearly, we can't reduce the storage footprint in further (already halved it
+from 32 bytes to 16 bytes per index record). The way forward is to not store
+index records for every segment in memory.
+
+We need a form of LRU Cache of segments which will dictate which segments have
+cached index records and which don't. Whenever a segment is read from we put into LRU cache.
+
+(Write segment always has index records cached)
+
+Whenever a segment enters a LRU cache, it loads index records in memory.
+Whenever it leaves, it drops the cached index records vector.
+
+With a fixed size LRU cache we can put an upper limit on the memory being used
+to cache index records for segments.
+
+Since, it's not necessary that every segment is being read from all the time.
+This will lead to better utilization.
+
+On the practical side of things, whenever a segment first enters the LRU cache
+with the first read, all the index records are loaded so the first read will
+have higher latency. Considering the amount of memory savings, this trade-off
+doesn't sound too bad.
+
+Finally, this inherently requires some form of mutation on reads. The current
+APIs have been designed to guarantee idempotence on reads.
+
+Here's a sketch for the API design:
+
+Index will have an Option<Vec<IndexRecord>>. If it has Some(vec) it reads from
+vec, otherwise it delegates reads to underlying storage.
+
+Index have a cache_records(), drop_cache()
+
+Segment has cache_index_records(), drop_index_cache()
+
+We provide a new trait StorageMut: Storage with a ::read_mut(&mut self, …)
+function.
+
+Only SegmentedLog implements this trait with the LRU cache mechanism.
