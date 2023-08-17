@@ -152,6 +152,7 @@ pub enum IndexError<StorageError> {
     IndexGapEncountered,
     NoBaseIndexFound,
     BaseIndexMismatch,
+    InconsistentIndexSize,
 }
 
 impl<StorageError> std::fmt::Display for IndexError<StorageError>
@@ -203,7 +204,7 @@ impl IndexRecord {
 }
 
 pub struct Index<S, Idx> {
-    index_records: Vec<IndexRecord>,
+    index_records: Option<Vec<IndexRecord>>,
     base_index: Idx,
     next_index: Idx,
     storage: S,
@@ -213,6 +214,10 @@ impl<S, Idx> Index<S, Idx> {
     pub fn into_storage(self) -> S {
         self.storage
     }
+
+    pub fn base_index(&self) -> &Idx {
+        &self.base_index
+    }
 }
 
 impl<S, Idx> Index<S, Idx>
@@ -220,7 +225,9 @@ where
     S: Storage,
     Idx: Unsigned + FromPrimitive + Copy + Eq,
 {
-    fn estimated_index_records_len_in_storage(storage: &S) -> Result<usize, IndexError<S::Error>> {
+    pub fn estimated_index_records_len_in_storage(
+        storage: &S,
+    ) -> Result<usize, IndexError<S::Error>> {
         let index_record_storage_size = storage
             .size()
             .to_usize()
@@ -233,9 +240,7 @@ where
         Ok(estimated_index_records_len)
     }
 
-    async fn base_index_and_index_records_from_storage(
-        storage: &S,
-    ) -> Result<(Option<u64>, Vec<IndexRecord>), IndexError<S::Error>> {
+    pub async fn base_index_from_storage(storage: &S) -> Result<Idx, IndexError<S::Error>> {
         let index_base_marker =
             PersistentSizedRecord::<IndexBaseMarker, INDEX_BASE_MARKER_LENGTH>::read_at(
                 storage,
@@ -243,8 +248,15 @@ where
             )
             .await
             .map(|x| x.into_inner());
-        let read_base_index = index_base_marker.map(|x| x.base_index).ok();
 
+        index_base_marker
+            .map(|x| x.base_index)
+            .and_then(|x| u64_as_idx!(x, Idx))
+    }
+
+    pub async fn index_records_from_storage(
+        storage: &S,
+    ) -> Result<Vec<IndexRecord>, IndexError<S::Error>> {
         let mut position = INDEX_BASE_MARKER_LENGTH as u64;
 
         let mut index_records = Vec::<IndexRecord>::with_capacity(
@@ -264,32 +276,44 @@ where
 
         index_records.shrink_to_fit();
 
-        Ok((read_base_index, index_records))
+        let estimated_index_records_len = Self::estimated_index_records_len_in_storage(storage)?;
+
+        if index_records.len() != estimated_index_records_len {
+            Err(IndexError::InconsistentIndexSize)
+        } else {
+            Ok(index_records)
+        }
     }
 
-    async fn with_storage_and_base_index_option(
+    pub async fn validated_base_index(
+        storage: &S,
+        base_index: Option<Idx>,
+    ) -> Result<Idx, IndexError<S::Error>> {
+        let read_base_index = Self::base_index_from_storage(&storage).await.ok();
+
+        match (read_base_index, base_index) {
+            (None, None) => Err(IndexError::NoBaseIndexFound),
+            (None, Some(base_index)) => Ok(base_index),
+            (Some(base_index), None) => Ok(base_index),
+            (Some(read), Some(provided)) if read != provided => Err(IndexError::BaseIndexMismatch),
+            (Some(_), Some(provided)) => Ok(provided),
+        }
+    }
+
+    pub async fn with_storage_and_base_index_option(
         storage: S,
         base_index: Option<Idx>,
     ) -> Result<Self, IndexError<S::Error>> {
-        let (read_base_index, index_records) =
-            Index::<S, Idx>::base_index_and_index_records_from_storage(&storage).await?;
+        let base_index = Self::validated_base_index(&storage, base_index).await?;
 
-        let base_index = match (read_base_index, base_index) {
-            (None, None) => Err(IndexError::NoBaseIndexFound),
-            (None, Some(base_index)) => Ok(base_index),
-            (Some(base_index), None) => u64_as_idx!(base_index, Idx),
-            (Some(read), Some(provided)) if u64_as_idx!(read, Idx)? != provided => {
-                Err(IndexError::BaseIndexMismatch)
-            }
-            (Some(_), Some(provided)) => Ok(provided),
-        }?;
+        let index_records = Self::index_records_from_storage(&storage).await?;
 
         let len = index_records.len() as u64;
 
         let next_index = base_index + u64_as_idx!(len, Idx)?;
 
         Ok(Self {
-            index_records,
+            index_records: Some(index_records),
             base_index,
             next_index,
             storage,
@@ -307,24 +331,24 @@ where
         Self::with_storage_and_base_index_option(storage, None).await
     }
 
-    pub fn with_storage_index_records_and_base_index(
+    pub fn with_storage_index_records_option_and_validated_base_index(
         storage: S,
-        index_records: Vec<IndexRecord>,
-        base_index: Idx,
+        index_records: Option<Vec<IndexRecord>>,
+        validated_base_index: Idx,
     ) -> Result<Self, IndexError<S::Error>> {
-        let len = index_records.len() as u64;
-        let next_index = base_index + u64_as_idx!(len, Idx)?;
+        let len = Self::estimated_index_records_len_in_storage(&storage)? as u64;
+        let next_index = validated_base_index + u64_as_idx!(len, Idx)?;
 
         Ok(Self {
             index_records,
-            base_index,
+            base_index: validated_base_index,
             next_index,
             storage,
         })
     }
 
-    pub fn into_storage_index_records_and_base_index(self) -> (S, Vec<IndexRecord>, Idx) {
-        (self.storage, self.index_records, self.base_index)
+    pub fn take_cached_index_records(&mut self) -> Option<Vec<IndexRecord>> {
+        self.index_records.take()
     }
 }
 
@@ -335,7 +359,7 @@ where
 {
     pub fn with_base_index(base_index: Idx) -> Self {
         Self {
-            index_records: Vec::new(),
+            index_records: Some(Vec::new()),
             base_index,
             next_index: base_index,
             storage: S::default(),
@@ -397,10 +421,22 @@ where
     }
 
     async fn read(&self, idx: &Self::Idx) -> Result<Self::Value, Self::ReadError> {
-        self.index_records
-            .get(self.internal_normalized_index(idx)?)
-            .ok_or(IndexError::IndexGapEncountered)
-            .map(|&x| x)
+        let normalized_index = self.internal_normalized_index(idx)?;
+
+        if let Some(index_records) = self.index_records.as_ref() {
+            index_records
+                .get(normalized_index)
+                .ok_or(IndexError::IndexGapEncountered)
+                .map(|&x| x)
+        } else {
+            let position = Self::underlying_storage_position(normalized_index)?;
+            PersistentSizedRecord::<IndexRecord, INDEX_RECORD_LENGTH>::read_at(
+                &self.storage,
+                &position,
+            )
+            .await
+            .map(|x| x.into_inner())
+        }
     }
 }
 
@@ -423,7 +459,10 @@ where
         PersistentSizedRecord::<IndexRecord, INDEX_RECORD_LENGTH>(index_record)
             .append_to(&mut self.storage)
             .await?;
-        self.index_records.push(index_record);
+
+        if let Some(index_records) = self.index_records.as_mut() {
+            index_records.push(index_record);
+        }
 
         self.next_index = write_index + Idx::one();
         Ok(write_index)
@@ -448,7 +487,9 @@ where
             .await
             .map_err(IndexError::StorageError)?;
 
-        self.index_records.truncate(normalized_index);
+        if let Some(index_records) = self.index_records.as_mut() {
+            index_records.truncate(normalized_index);
+        }
 
         self.next_index = *idx;
 
@@ -560,12 +601,12 @@ pub(crate) mod test {
             _ => unreachable!("Wrong result returned when creating from empty storage without providing base index"),
         }
 
-        let mut index = Index::with_storage_and_base_index(
-            test_storage_provider().await.0.storage,
-            Idx::zero(),
-        )
-        .await
-        .unwrap();
+        let base_index = Idx::zero();
+
+        let mut index =
+            Index::with_storage_and_base_index(test_storage_provider().await.0.storage, base_index)
+                .await
+                .unwrap();
 
         match index.read(&Idx::zero()).await {
             Err(IndexError::IndexOutOfBounds) => {}
@@ -593,6 +634,20 @@ pub(crate) mod test {
                 .await
                 .unwrap()
         };
+
+        let index = Index::<S, Idx>::with_storage_index_records_option_and_validated_base_index(
+            index.into_storage(),
+            None,
+            base_index,
+        )
+        .unwrap();
+
+        _test_index_contains_records(
+            &index,
+            _test_index_records_provider::<H>(_test_records_provider(&_RECORDS)),
+            _RECORDS.len(),
+        )
+        .await;
 
         let mut index =
             Index::<S, Idx>::with_storage_and_base_index(index.into_storage(), Idx::zero())

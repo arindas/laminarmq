@@ -431,14 +431,10 @@ where
     where
         SSP: SegmentStorageProvider<S, Idx>,
     {
-        let (index_storage, index_records, base_index) =
-            self.index.into_storage_index_records_and_base_index();
+        let base_index = *self.index.base_index();
+        let cached_index_records = self.index.take_cached_index_records();
 
-        index_storage
-            .close()
-            .await
-            .map_err(SegmentError::StorageError)?;
-
+        self.index.close().await.map_err(SegmentError::IndexError)?;
         self.store.close().await.map_err(SegmentError::StoreError)?;
 
         let segment_storage = segment_storage_provider
@@ -446,9 +442,9 @@ where
             .await
             .map_err(SegmentError::StorageError)?;
 
-        self.index = Index::with_storage_index_records_and_base_index(
+        self.index = Index::with_storage_index_records_option_and_validated_base_index(
             segment_storage.index,
-            index_records,
+            cached_index_records,
             base_index,
         )
         .map_err(SegmentError::IndexError)?;
