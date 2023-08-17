@@ -220,25 +220,40 @@ where
     S: Storage,
     Idx: Unsigned + FromPrimitive + Copy + Eq,
 {
-    async fn with_storage_and_base_index_option(
-        storage: S,
-        base_index: Option<Idx>,
-    ) -> Result<Self, IndexError<S::Error>> {
+    fn estimated_index_records_len_in_storage(storage: &S) -> Result<usize, IndexError<S::Error>> {
+        let index_record_storage_size = storage
+            .size()
+            .to_usize()
+            .ok_or(IndexError::IncompatibleSizeType)?;
+        let estimated_index_records_len = (index_record_storage_size
+            .checked_sub(INDEX_BASE_MARKER_LENGTH)
+            .unwrap_or(0))
+            / INDEX_RECORD_LENGTH;
+
+        Ok(estimated_index_records_len)
+    }
+
+    async fn base_index_and_index_records_from_storage(
+        storage: &S,
+    ) -> Result<(Option<u64>, Vec<IndexRecord>), IndexError<S::Error>> {
         let index_base_marker =
             PersistentSizedRecord::<IndexBaseMarker, INDEX_BASE_MARKER_LENGTH>::read_at(
-                &storage,
+                storage,
                 &u64_as_position!(INDEX_BASE_POSITION, S::Position)?,
             )
             .await
             .map(|x| x.into_inner());
-        let read_base_index = index_base_marker.map(|x| x.base_index);
+        let read_base_index = index_base_marker.map(|x| x.base_index).ok();
 
         let mut position = INDEX_BASE_MARKER_LENGTH as u64;
-        let mut index_records = Vec::<IndexRecord>::new();
+
+        let mut index_records = Vec::<IndexRecord>::with_capacity(
+            Self::estimated_index_records_len_in_storage(storage)?,
+        );
 
         while let Ok(index_record) =
             PersistentSizedRecord::<IndexRecord, INDEX_RECORD_LENGTH>::read_at(
-                &storage,
+                storage,
                 &u64_as_position!(position, S::Position)?,
             )
             .await
@@ -247,14 +262,26 @@ where
             position += INDEX_RECORD_LENGTH as u64;
         }
 
+        index_records.shrink_to_fit();
+
+        Ok((read_base_index, index_records))
+    }
+
+    async fn with_storage_and_base_index_option(
+        storage: S,
+        base_index: Option<Idx>,
+    ) -> Result<Self, IndexError<S::Error>> {
+        let (read_base_index, index_records) =
+            Index::<S, Idx>::base_index_and_index_records_from_storage(&storage).await?;
+
         let base_index = match (read_base_index, base_index) {
-            (Err(_), None) => Err(IndexError::NoBaseIndexFound),
-            (Err(_), Some(base_index)) => Ok(base_index),
-            (Ok(base_index), None) => u64_as_idx!(base_index, Idx),
-            (Ok(read), Some(provided)) if u64_as_idx!(read, Idx)? != provided => {
+            (None, None) => Err(IndexError::NoBaseIndexFound),
+            (None, Some(base_index)) => Ok(base_index),
+            (Some(base_index), None) => u64_as_idx!(base_index, Idx),
+            (Some(read), Some(provided)) if u64_as_idx!(read, Idx)? != provided => {
                 Err(IndexError::BaseIndexMismatch)
             }
-            (Ok(_), Some(provided)) => Ok(provided),
+            (Some(_), Some(provided)) => Ok(provided),
         }?;
 
         let len = index_records.len() as u64;
@@ -324,6 +351,31 @@ impl<S: Storage, Idx> Sizable for Index<S, Idx> {
     }
 }
 
+impl<S: Storage, Idx> Index<S, Idx> {
+    #[inline]
+    fn underlying_storage_position(
+        normalized_index: usize,
+    ) -> Result<S::Position, IndexError<S::Error>> {
+        let storage_position =
+            (INDEX_BASE_MARKER_LENGTH + INDEX_RECORD_LENGTH * normalized_index) as u64;
+        u64_as_position!(storage_position, S::Position)
+    }
+}
+
+impl<S, Idx> Index<S, Idx>
+where
+    S: Storage,
+    Idx: Unsigned + CheckedSub + ToPrimitive + Ord + Copy,
+{
+    #[inline]
+    fn internal_normalized_index(&self, idx: &Idx) -> Result<usize, IndexError<S::Error>> {
+        self.normalize_index(idx)
+            .ok_or(IndexError::IndexOutOfBounds)?
+            .to_usize()
+            .ok_or(IndexError::IncompatibleIdxType)
+    }
+}
+
 #[async_trait::async_trait(?Send)]
 impl<S, Idx> AsyncIndexedRead for Index<S, Idx>
 where
@@ -345,14 +397,8 @@ where
     }
 
     async fn read(&self, idx: &Self::Idx) -> Result<Self::Value, Self::ReadError> {
-        let vec_index = self
-            .normalize_index(idx)
-            .ok_or(IndexError::IndexOutOfBounds)?
-            .to_usize()
-            .ok_or(IndexError::IncompatibleIdxType)?;
-
         self.index_records
-            .get(vec_index)
+            .get(self.internal_normalized_index(idx)?)
             .ok_or(IndexError::IndexGapEncountered)
             .map(|&x| x)
     }
@@ -366,12 +412,9 @@ where
     pub async fn append(&mut self, index_record: IndexRecord) -> Result<Idx, IndexError<S::Error>> {
         let write_index = self.next_index;
 
-        // if index is empty, first write index base marker
         if write_index == self.base_index {
-            let base_index = self.base_index;
-            let base_index = idx_as_u64!(base_index, Idx)?;
             PersistentSizedRecord::<IndexBaseMarker, INDEX_BASE_MARKER_LENGTH>(
-                IndexBaseMarker::new(base_index),
+                IndexBaseMarker::new(idx_as_u64!(write_index, Idx)?),
             )
             .append_to(&mut self.storage)
             .await?;
@@ -398,21 +441,14 @@ where
     type Mark = Idx;
 
     async fn truncate(&mut self, idx: &Self::Mark) -> Result<(), Self::TruncError> {
-        let vec_index = self
-            .normalize_index(idx)
-            .ok_or(IndexError::IndexOutOfBounds)?
-            .to_usize()
-            .ok_or(IndexError::IncompatibleIdxType)?;
-
-        let truncate_position = (INDEX_BASE_MARKER_LENGTH + INDEX_RECORD_LENGTH * vec_index) as u64;
-        let truncate_position = u64_as_position!(truncate_position, S::Position)?;
+        let normalized_index = self.internal_normalized_index(idx)?;
 
         self.storage
-            .truncate(&truncate_position)
+            .truncate(&Self::underlying_storage_position(normalized_index)?)
             .await
             .map_err(IndexError::StorageError)?;
 
-        self.index_records.truncate(vec_index);
+        self.index_records.truncate(normalized_index);
 
         self.next_index = *idx;
 
