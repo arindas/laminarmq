@@ -358,7 +358,7 @@ Index have a cache_records(), drop_cache()
 
 Segment has cache_index_records(), drop_index_cache()
 
-We provide a new trait StorageMut: Storage with a ::read_mut(&mut self, …)
+We provide a new trait AsyncIndexedReadMut: AsyncIndexedRead with a ::read_mut(&mut self, …)
 function.
 
 Only SegmentedLog implements this trait with the LRU cache mechanism.
