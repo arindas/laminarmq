@@ -1,6 +1,8 @@
 use criterion::{
-    async_executor::FuturesExecutor, black_box, criterion_group, criterion_main, BenchmarkId,
-    Criterion, Throughput,
+    async_executor::{AsyncExecutor, FuturesExecutor},
+    black_box, criterion_group, criterion_main,
+    measurement::{Measurement, WallTime},
+    BenchmarkGroup, BenchmarkId, Criterion, Throughput,
 };
 use futures_lite::{stream, StreamExt};
 use laminarmq::{
@@ -78,266 +80,226 @@ fn increase_rlimit_nofile_soft_limit_to_hard_limit() -> std::io::Result<()> {
     getrlimit(Resource::NOFILE).and_then(|(_, hard)| setrlimit(Resource::NOFILE, hard, hard))
 }
 
-fn criterion_benchmark_with_record_content<X, XBuf, XE>(
-    c: &mut Criterion,
+async fn time_in_mem_seg_log<X, XBuf, XE>(
     record_content: X,
-    record_content_size: u64,
-    record_size_group_name: &str,
-) where
+    num_appends: usize,
+) -> std::time::Duration
+where
     X: stream::Stream<Item = Result<XBuf, XE>> + Clone + Unpin,
     XBuf: Deref<Target = [u8]>,
 {
-    increase_rlimit_nofile_soft_limit_to_hard_limit().unwrap();
+    let mut segmented_log =
+        SegmentedLog::<InMemStorage, (), crc32fast::Hasher, u32, usize, bincode::BinCode, _>::new(
+            IN_MEMORY_SEGMENTED_LOG_CONFIG,
+            InMemSegmentStorageProvider::<u32>::default(),
+        )
+        .await
+        .unwrap();
 
-    let mut group = c.benchmark_group(record_size_group_name);
+    let start = std::time::Instant::now();
 
-    for num_appends in (1000..=10000).step_by(1000) {
-        group
-            .throughput(Throughput::Bytes(record_content_size * num_appends as u64))
-            .sample_size(10);
-
-        group.bench_with_input(
-            BenchmarkId::new("in_memory_segmented_log", num_appends),
-            &num_appends,
-            |b, &num_appends| {
-                b.to_async(FuturesExecutor).iter_custom(|_| async {
-                    let mut segmented_log = SegmentedLog::<
-                        InMemStorage,
-                        (),
-                        crc32fast::Hasher,
-                        u32,
-                        usize,
-                        bincode::BinCode,
-                        _,
-                    >::new(
-                        IN_MEMORY_SEGMENTED_LOG_CONFIG,
-                        InMemSegmentStorageProvider::<u32>::default(),
-                    )
-                    .await
-                    .unwrap();
-
-                    let start = std::time::Instant::now();
-
-                    for _ in 0..num_appends {
-                        black_box(
-                            segmented_log
-                                .append(record(record_content.clone()))
-                                .await
-                                .unwrap(),
-                        );
-                    }
-
-                    let time_taken = start.elapsed();
-
-                    segmented_log.remove().await.unwrap();
-
-                    time_taken
-                });
-            },
+    for _ in 0..num_appends {
+        black_box(
+            segmented_log
+                .append(record(record_content.clone()))
+                .await
+                .unwrap(),
         );
+    }
 
-        group.bench_with_input(
-            BenchmarkId::new("glommio_dma_file_segmented_log", num_appends),
-            &num_appends,
-            |b, &num_appends| {
-                b.to_async(GlommioAsyncExecutor(glommio::LocalExecutor::default()))
-                    .iter_custom(|_| async {
-                        const BENCH_GLOMMIO_DMA_FILE_SEGMENTED_LOG_STORAGE_DIRECTORY: &str =
-                            "/tmp/laminarmq_bench_glommio_dma_file_segmented_log_append";
+    let time_taken = start.elapsed();
 
-                        let disk_backed_storage_provider = DiskBackedSegmentStorageProvider::<
-                            _,
-                            _,
-                            u32,
-                        >::with_storage_directory_path_and_provider(
-                            BENCH_GLOMMIO_DMA_FILE_SEGMENTED_LOG_STORAGE_DIRECTORY,
-                            DmaStorageProvider,
-                        )
-                        .unwrap();
+    segmented_log.remove().await.unwrap();
 
-                        let mut segmented_log = SegmentedLog::<
-                            DmaStorage,
-                            (),
-                            crc32fast::Hasher,
-                            u32,
-                            u64,
-                            bincode::BinCode,
-                            _,
-                        >::new(
-                            PERSISTENT_SEGMENTED_LOG_CONFIG,
-                            disk_backed_storage_provider,
-                        )
-                        .await
-                        .unwrap();
+    time_taken
+}
 
-                        let start = std::time::Instant::now();
+async fn time_glommio_dma_file_seg_log<X, XBuf, XE>(
+    record_content: X,
+    num_appends: usize,
+) -> std::time::Duration
+where
+    X: stream::Stream<Item = Result<XBuf, XE>> + Clone + Unpin,
+    XBuf: Deref<Target = [u8]>,
+{
+    const BENCH_GLOMMIO_DMA_FILE_SEGMENTED_LOG_STORAGE_DIRECTORY: &str =
+        "/tmp/laminarmq_bench_glommio_dma_file_segmented_log_append";
 
-                        for _ in 0..num_appends {
-                            black_box(
-                                segmented_log
-                                    .append(record(record_content.clone()))
-                                    .await
-                                    .unwrap(),
-                            );
-                        }
+    let disk_backed_storage_provider =
+        DiskBackedSegmentStorageProvider::<_, _, u32>::with_storage_directory_path_and_provider(
+            BENCH_GLOMMIO_DMA_FILE_SEGMENTED_LOG_STORAGE_DIRECTORY,
+            DmaStorageProvider,
+        )
+        .unwrap();
 
-                        let time_taken = start.elapsed();
+    let mut segmented_log =
+        SegmentedLog::<DmaStorage, (), crc32fast::Hasher, u32, u64, bincode::BinCode, _>::new(
+            PERSISTENT_SEGMENTED_LOG_CONFIG,
+            disk_backed_storage_provider,
+        )
+        .await
+        .unwrap();
 
-                        segmented_log.close().await.unwrap();
+    let start = std::time::Instant::now();
 
-                        glommio::executor()
-                            .spawn_blocking(|| {
-                                std::fs::remove_dir_all(
-                                    BENCH_GLOMMIO_DMA_FILE_SEGMENTED_LOG_STORAGE_DIRECTORY,
-                                )
-                                .unwrap();
-                            })
-                            .await;
-
-                        time_taken
-                    });
-            },
+    for _ in 0..num_appends {
+        black_box(
+            segmented_log
+                .append(record(record_content.clone()))
+                .await
+                .unwrap(),
         );
+    }
 
-        group.bench_with_input(
-            BenchmarkId::new("glommio_buffered_file_segmented_log", num_appends),
-            &num_appends,
-            |b, &num_appends| {
-                b.to_async(GlommioAsyncExecutor(glommio::LocalExecutor::default()))
-                    .iter_custom(|_| async {
-                        const BENCH_GLOMMIO_BUFFERED_FILE_SEGMENTED_LOG_STORAGE_DIRECTORY: &str =
-                            "/tmp/laminarmq_bench_glommio_buffered_file_segmented_log_append";
+    let time_taken = start.elapsed();
 
-                        let disk_backed_storage_provider = DiskBackedSegmentStorageProvider::<
-                            _,
-                            _,
-                            u32,
-                        >::with_storage_directory_path_and_provider(
-                            BENCH_GLOMMIO_BUFFERED_FILE_SEGMENTED_LOG_STORAGE_DIRECTORY,
-                            BufferedStorageProvider,
-                        )
-                        .unwrap();
+    segmented_log.close().await.unwrap();
 
-                        let mut segmented_log = SegmentedLog::<
-                            BufferedStorage,
-                            (),
-                            crc32fast::Hasher,
-                            u32,
-                            u64,
-                            bincode::BinCode,
-                            _,
-                        >::new(
-                            PERSISTENT_SEGMENTED_LOG_CONFIG,
-                            disk_backed_storage_provider,
-                        )
-                        .await
-                        .unwrap();
+    glommio::executor()
+        .spawn_blocking(|| {
+            std::fs::remove_dir_all(BENCH_GLOMMIO_DMA_FILE_SEGMENTED_LOG_STORAGE_DIRECTORY)
+                .unwrap();
+        })
+        .await;
 
-                        let start = std::time::Instant::now();
+    time_taken
+}
 
-                        for _ in 0..num_appends {
-                            black_box(
-                                segmented_log
-                                    .append(record(record_content.clone()))
-                                    .await
-                                    .unwrap(),
-                            );
-                        }
+async fn time_glommio_buf_file_seg_log<X, XBuf, XE>(
+    record_content: X,
+    num_appends: usize,
+) -> std::time::Duration
+where
+    X: stream::Stream<Item = Result<XBuf, XE>> + Clone + Unpin,
+    XBuf: Deref<Target = [u8]>,
+{
+    const BENCH_GLOMMIO_BUFFERED_FILE_SEGMENTED_LOG_STORAGE_DIRECTORY: &str =
+        "/tmp/laminarmq_bench_glommio_buffered_file_segmented_log_append";
 
-                        let time_taken = start.elapsed();
+    let disk_backed_storage_provider =
+        DiskBackedSegmentStorageProvider::<_, _, u32>::with_storage_directory_path_and_provider(
+            BENCH_GLOMMIO_BUFFERED_FILE_SEGMENTED_LOG_STORAGE_DIRECTORY,
+            BufferedStorageProvider,
+        )
+        .unwrap();
 
-                        segmented_log.close().await.unwrap();
+    let mut segmented_log =
+        SegmentedLog::<BufferedStorage, (), crc32fast::Hasher, u32, u64, bincode::BinCode, _>::new(
+            PERSISTENT_SEGMENTED_LOG_CONFIG,
+            disk_backed_storage_provider,
+        )
+        .await
+        .unwrap();
 
-                        glommio::executor()
-                            .spawn_blocking(|| {
-                                std::fs::remove_dir_all(
-                                    BENCH_GLOMMIO_BUFFERED_FILE_SEGMENTED_LOG_STORAGE_DIRECTORY,
-                                )
-                                .unwrap();
-                            })
-                            .await;
+    let start = std::time::Instant::now();
 
-                        time_taken
-                    });
-            },
+    for _ in 0..num_appends {
+        black_box(
+            segmented_log
+                .append(record(record_content.clone()))
+                .await
+                .unwrap(),
         );
+    }
 
-        group.bench_with_input(
-            BenchmarkId::new("tokio_segmented_log", num_appends),
-            &num_appends,
-            |b, &num_appends| {
-                b.to_async(tokio::runtime::Runtime::new().unwrap())
-                    .iter_custom(|_| async {
-                        const BENCH_TOKIO_SEGMENTED_LOG_STORAGE_DIRECTORY: &str =
-                            "/tmp/laminarmq_bench_tokio_std_file_segmented_log_append";
+    let time_taken = start.elapsed();
 
-                        let disk_backed_storage_provider = DiskBackedSegmentStorageProvider::<
-                            _,
-                            _,
-                            u32,
-                        >::with_storage_directory_path_and_provider(
-                            BENCH_TOKIO_SEGMENTED_LOG_STORAGE_DIRECTORY,
-                            StdFileStorageProvider,
-                        )
-                        .unwrap();
+    segmented_log.close().await.unwrap();
 
-                        let mut segmented_log = SegmentedLog::<
-                            StdFileStorage,
-                            (),
-                            crc32fast::Hasher,
-                            u32,
-                            u64,
-                            bincode::BinCode,
-                            _,
-                        >::new(
-                            PERSISTENT_SEGMENTED_LOG_CONFIG,
-                            disk_backed_storage_provider,
-                        )
-                        .await
-                        .unwrap();
+    glommio::executor()
+        .spawn_blocking(|| {
+            std::fs::remove_dir_all(BENCH_GLOMMIO_BUFFERED_FILE_SEGMENTED_LOG_STORAGE_DIRECTORY)
+                .unwrap();
+        })
+        .await;
 
-                        let start = tokio::time::Instant::now();
+    time_taken
+}
 
-                        for _ in 0..num_appends {
-                            black_box(
-                                segmented_log
-                                    .append(record(record_content.clone()))
-                                    .await
-                                    .unwrap(),
-                            );
-                        }
+async fn time_tokio_seg_log<X, XBuf, XE>(
+    record_content: X,
+    num_appends: usize,
+) -> tokio::time::Duration
+where
+    X: stream::Stream<Item = Result<XBuf, XE>> + Clone + Unpin,
+    XBuf: Deref<Target = [u8]>,
+{
+    const BENCH_TOKIO_SEGMENTED_LOG_STORAGE_DIRECTORY: &str =
+        "/tmp/laminarmq_bench_tokio_std_file_segmented_log_append";
 
-                        let time_taken = start.elapsed();
+    let disk_backed_storage_provider =
+        DiskBackedSegmentStorageProvider::<_, _, u32>::with_storage_directory_path_and_provider(
+            BENCH_TOKIO_SEGMENTED_LOG_STORAGE_DIRECTORY,
+            StdFileStorageProvider,
+        )
+        .unwrap();
 
-                        segmented_log.close().await.unwrap();
+    let mut segmented_log =
+        SegmentedLog::<StdFileStorage, (), crc32fast::Hasher, u32, u64, bincode::BinCode, _>::new(
+            PERSISTENT_SEGMENTED_LOG_CONFIG,
+            disk_backed_storage_provider,
+        )
+        .await
+        .unwrap();
 
-                        tokio::fs::remove_dir_all(BENCH_TOKIO_SEGMENTED_LOG_STORAGE_DIRECTORY)
-                            .await
-                            .unwrap();
+    let start = tokio::time::Instant::now();
 
-                        time_taken
-                    });
-            },
+    for _ in 0..num_appends {
+        black_box(
+            segmented_log
+                .append(record(record_content.clone()))
+                .await
+                .unwrap(),
         );
+    }
+
+    let time_taken = start.elapsed();
+
+    segmented_log.close().await.unwrap();
+
+    tokio::fs::remove_dir_all(BENCH_TOKIO_SEGMENTED_LOG_STORAGE_DIRECTORY)
+        .await
+        .unwrap();
+
+    time_taken
+}
+
+#[allow(unused)]
+struct BenchGroup<'a, 'b, M: Measurement> {
+    group: &'b mut BenchmarkGroup<'a, M>,
+}
+#[allow(unused)]
+impl<'a, 'b, M> BenchGroup<'a, 'b, M>
+where
+    M: Measurement,
+{
+    fn bench<MA, A, MR, R, F, I>(
+        &'b mut self,
+        input: I,
+        bench_name: &str,
+        make_async_executor_fn: MA,
+        make_routine_fn: MR,
+    ) where
+        MA: Fn() -> A,
+        A: AsyncExecutor,
+        MR: Fn() -> R,
+        R: FnMut(u64) -> F,
+        F: futures_util::Future<Output = M::Value>,
+        I: std::fmt::Display + Copy,
+    {
+        self.group
+            .bench_with_input(BenchmarkId::new(bench_name, input), &input, |b, _| {
+                b.to_async(make_async_executor_fn())
+                    .iter_custom(make_routine_fn());
+            });
     }
 }
 
-fn benchmark_tiny_message_append(c: &mut Criterion) {
-    // 12 bytes
-    let tiny_message = stream::once(infallible(b"Hello World!" as &[u8]));
-
-    criterion_benchmark_with_record_content(
-        c,
-        tiny_message,
-        12,
-        "commit_log_append_with_tiny_message",
-    );
-}
-
-fn benchmark_lorem_140_repeated(
-    c: &mut Criterion,
+fn lorem_140_repeated_message(
     repetitions: usize,
-    record_size_group_name: &str,
+) -> (
+    impl stream::Stream<Item = impl Deref<Target = [u8]>> + Clone + Unpin,
+    u64,
 ) {
     let source_packets = LOREM_140.iter().map(|x| x as &[u8]);
     const SOURCE_PACKETS_LEN: usize = LOREM_140.len();
@@ -347,50 +309,127 @@ fn benchmark_lorem_140_repeated(
     let bench_source_packets = source_packets.cycle().take(bench_source_packets_len);
 
     let record_content_size: u64 = (bench_source_packets_len * AVG_PACKET_LEN) as u64;
-    let message = stream::iter(bench_source_packets).map(infallible);
+    let message = stream::iter(bench_source_packets);
 
-    criterion_benchmark_with_record_content(
-        c,
-        message,
-        record_content_size,
-        record_size_group_name,
+    (message, record_content_size)
+}
+
+fn input_message_lorem_ipsum_repetitions_with_names() -> impl Iterator<Item = (&'static str, usize)>
+{
+    std::iter::empty()
+        .chain(std::iter::once(("tweet", 1)))
+        .chain(std::iter::once(("half_k_message", 4)))
+        .chain(std::iter::once(("k_message", 8)))
+        .chain(std::iter::once(("linked_in_post", 21)))
+        .chain(std::iter::once(("blog_post", 21 * 4)))
+}
+
+fn bench_helper<X, XBuf>(group: &mut BenchmarkGroup<WallTime>, message: X, num_appends: usize)
+where
+    X: stream::Stream<Item = XBuf> + Clone + Unpin,
+    XBuf: Deref<Target = [u8]>,
+{
+    let content = message.map(infallible);
+
+    let mut bench_group = BenchGroup { group };
+
+    bench_group.bench(
+        &num_appends,
+        "in_memory_segmented_log",
+        || FuturesExecutor,
+        || |_| async { time_in_mem_seg_log(content.clone(), num_appends).await },
+    );
+
+    let mut bench_group = BenchGroup { group };
+
+    bench_group.bench(
+        &num_appends,
+        "glommio_dma_file_segmented_log",
+        || GlommioAsyncExecutor(glommio::LocalExecutor::default()),
+        || |_| async { time_glommio_dma_file_seg_log(content.clone(), num_appends).await },
+    );
+
+    let mut bench_group = BenchGroup { group };
+
+    bench_group.bench(
+        &num_appends,
+        "glommio_buffered_file_segmented_log",
+        || GlommioAsyncExecutor(glommio::LocalExecutor::default()),
+        || |_| async { time_glommio_buf_file_seg_log(content.clone(), num_appends).await },
+    );
+
+    let mut bench_group = BenchGroup { group };
+
+    bench_group.bench(
+        &num_appends,
+        "tokio_segmented_log",
+        || tokio::runtime::Runtime::new().unwrap(),
+        || |_| async { time_tokio_seg_log(content.clone(), num_appends).await },
     );
 }
 
-fn benchmark_tweet_append(c: &mut Criterion) {
-    // 140 * 1 = 140 bytes = pre 2017 twitter limit
-    benchmark_lorem_140_repeated(c, 1, "commit_log_append_with_tweet");
+fn bench_message_kind<I, X, XBuf>(
+    criterion: &mut Criterion,
+    num_appends_iter: I,
+    message: X,
+    message_size: u64,
+    group_name: &str,
+) where
+    I: Iterator<Item = usize>,
+    X: stream::Stream<Item = XBuf> + Clone + Unpin,
+    XBuf: Deref<Target = [u8]>,
+{
+    let mut group = criterion.benchmark_group(group_name);
+    for num_appends in num_appends_iter {
+        group
+            .throughput(Throughput::Bytes(message_size * num_appends as u64))
+            .sample_size(10);
+
+        bench_helper(&mut group, message.clone(), num_appends);
+    }
 }
 
-fn benchmark_half_k_message_append(c: &mut Criterion) {
-    // 140 * 4 = 560 ≈ 512 bytes
-    benchmark_lorem_140_repeated(c, 4, "commit_log_append_with_half_k_message");
-}
+fn bench_commit_log_append(criterion: &mut Criterion) {
+    increase_rlimit_nofile_soft_limit_to_hard_limit().unwrap();
 
-fn benchmark_k_message_append(c: &mut Criterion) {
-    // 140 * 8 = 1120 ≈ 1024 bytes
-    benchmark_lorem_140_repeated(c, 8, "commit_log_append_with_k_message");
-}
+    let input_message_kinds =
+        input_message_lorem_ipsum_repetitions_with_names().map(|(kind_name, reps)| {
+            let (message, record_content_size) = lorem_140_repeated_message(reps);
 
-fn benchmark_linked_in_post_append(c: &mut Criterion) {
-    // 140 * 21 = 2940 <= within 3000 bytes LinkedIn post limit
-    benchmark_lorem_140_repeated(c, 21, "commit_log_append_with_linked_in_post");
-}
+            (kind_name, message, record_content_size)
+        });
 
-fn benchmark_blog_post_append(c: &mut Criterion) {
-    // (140 * 21) * 4 = 11760; avg. blog size = 4x LinkedIn post
-    benchmark_lorem_140_repeated(c, 21 * 4, "commit_log_append_with_blog_post");
+    let input_num_appends_range = (1000..=10000).step_by(1000);
+
+    {
+        let tiny_message = stream::once(b"Hello World!" as &[u8]);
+        let tiny_message_content_size = 12;
+
+        bench_message_kind(
+            criterion,
+            input_num_appends_range.clone(),
+            tiny_message,
+            tiny_message_content_size,
+            "commit_log_append_with_tiny_message",
+        );
+    }
+
+    for message_kind in input_message_kinds {
+        let (kind_name, message, record_content_size) = message_kind;
+
+        bench_message_kind(
+            criterion,
+            input_num_appends_range.clone(),
+            message,
+            record_content_size,
+            &format!("commit_log_append_with_{}", kind_name),
+        );
+    }
 }
 
 criterion_group!(
     name = benches;
     config = Criterion::default().with_profiler(PProfProfiler::new(100, Flamegraph(None)));
-    targets =
-    benchmark_tiny_message_append,
-    benchmark_tweet_append,
-    benchmark_half_k_message_append,
-    benchmark_k_message_append,
-    benchmark_linked_in_post_append,
-    benchmark_blog_post_append
+    targets = bench_commit_log_append
 );
 criterion_main!(benches);
