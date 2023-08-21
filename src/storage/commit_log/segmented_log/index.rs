@@ -350,6 +350,20 @@ where
     pub fn take_cached_index_records(&mut self) -> Option<Vec<IndexRecord>> {
         self.index_records.take()
     }
+
+    pub fn cached_index_records(&self) -> Option<&Vec<IndexRecord>> {
+        self.index_records.as_ref()
+    }
+
+    pub async fn cache(&mut self) -> Result<(), IndexError<S::Error>> {
+        if self.index_records.as_ref().is_some() {
+            return Ok(());
+        }
+
+        self.index_records = Some(Self::index_records_from_storage(&self.storage).await?);
+
+        Ok(())
+    }
 }
 
 impl<S, Idx> Index<S, Idx>

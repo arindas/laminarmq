@@ -372,6 +372,25 @@ where
     }
 }
 
+impl<S, M, H, Idx, SERP> Segment<S, M, H, Idx, S::Size, SERP>
+where
+    S: Storage,
+    SERP: SerializationProvider,
+    Idx: Unsigned + FromPrimitive + Copy + Eq,
+{
+    pub async fn cache_index(&mut self) -> Result<(), SegmentError<S::Error, SERP::Error>> {
+        self.index.cache().await.map_err(SegmentError::IndexError)
+    }
+
+    pub fn take_cached_index_records(&mut self) -> Option<Vec<IndexRecord>> {
+        self.index.take_cached_index_records()
+    }
+
+    pub fn cached_index_records(&self) -> Option<&Vec<IndexRecord>> {
+        self.index.cached_index_records()
+    }
+}
+
 pub struct SegmentStorage<S> {
     pub store: S,
     pub index: S,
