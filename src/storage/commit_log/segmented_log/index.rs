@@ -232,9 +232,7 @@ where
             .size()
             .to_usize()
             .ok_or(IndexError::IncompatibleSizeType)?;
-        let estimated_index_records_len = (index_record_storage_size
-            .checked_sub(INDEX_BASE_MARKER_LENGTH)
-            .unwrap_or(0))
+        let estimated_index_records_len = index_record_storage_size.saturating_sub(INDEX_BASE_MARKER_LENGTH)
             / INDEX_RECORD_LENGTH;
 
         Ok(estimated_index_records_len)
@@ -289,7 +287,7 @@ where
         storage: &S,
         base_index: Option<Idx>,
     ) -> Result<Idx, IndexError<S::Error>> {
-        let read_base_index = Self::base_index_from_storage(&storage).await.ok();
+        let read_base_index = Self::base_index_from_storage(storage).await.ok();
 
         match (read_base_index, base_index) {
             (None, None) => Err(IndexError::NoBaseIndexFound),
