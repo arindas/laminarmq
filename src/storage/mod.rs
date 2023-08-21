@@ -59,6 +59,15 @@ pub trait AsyncIndexedRead {
     }
 }
 
+#[async_trait(?Send)]
+pub trait AsyncIndexedExclusiveRead: AsyncIndexedRead {
+    /// Exclusively reads the value at the given index from this abstraction.
+    ///
+    /// Implementations are free to mutate internal state as necessary. An example use-case could
+    /// be managing some internal caching mechanism for caching reads.
+    async fn exclusive_read(&mut self, idx: &Self::Idx) -> Result<Self::Value, Self::ReadError>;
+}
+
 /// Trait representing a truncable collection of records, which can be truncated after a "mark".
 #[async_trait(?Send)]
 pub trait AsyncTruncate {

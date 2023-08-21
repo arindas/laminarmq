@@ -417,6 +417,7 @@ where
         segment_storage_provider: &mut SSP,
         config: Config<S::Size>,
         base_index: Idx,
+        cache_index_records: bool,
     ) -> Result<Self, SegmentError<S::Error, SERP::Error>>
     where
         SSP: SegmentStorageProvider<S, Idx>,
@@ -426,9 +427,16 @@ where
             .await
             .map_err(SegmentError::StorageError)?;
 
-        let index = Index::with_storage_and_base_index(segment_storage.index, base_index)
-            .await
-            .map_err(SegmentError::IndexError)?;
+        let index = if cache_index_records {
+            Index::with_storage_and_base_index(segment_storage.index, base_index).await
+        } else {
+            Index::with_storage_index_records_option_and_validated_base_index(
+                segment_storage.index,
+                None,
+                base_index,
+            )
+        }
+        .map_err(SegmentError::IndexError)?;
 
         let store = Store::<S, H>::new(segment_storage.store);
 
@@ -543,6 +551,7 @@ pub(crate) mod test {
             &mut _segment_storage_provider,
             config,
             segment_base_index,
+            true,
         )
         .await
         .unwrap();
@@ -573,6 +582,7 @@ pub(crate) mod test {
             &mut _segment_storage_provider,
             config,
             segment_base_index,
+            true,
         )
         .await
         .unwrap();
@@ -648,6 +658,7 @@ pub(crate) mod test {
             &mut _segment_storage_provider,
             config,
             segment_base_index,
+            true,
         )
         .await
         .unwrap();
