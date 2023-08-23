@@ -42,6 +42,23 @@ pub mod ref_ops {
     }
 }
 
+pub mod lru_cache {
+    pub use generational_cache::{
+        cache::lru_cache::LRUCacheBlockArenaEntry,
+        prelude::{AllocBTreeMap, AllocVec, Cache, LRUCache, LRUCacheError, Link, Map},
+    };
+    use std::convert::Infallible;
+
+    pub type AllocLRUCache<K, T> =
+        LRUCache<AllocVec<LRUCacheBlockArenaEntry<K, T>>, K, T, AllocBTreeMap<K, Link>>;
+
+    pub type CacheError = LRUCacheError<Infallible, Infallible>;
+
+    pub fn lru_cache_with_capacity<K: Ord, T>(capacity: usize) -> AllocLRUCache<K, T> {
+        AllocLRUCache::<K, T>::with_backing_vector(AllocVec::with_capacity(capacity))
+    }
+}
+
 pub mod http;
 pub mod serde_compat;
 pub mod split;

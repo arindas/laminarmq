@@ -5,9 +5,13 @@ pub mod store;
 use self::segment::{Segment, SegmentStorageProvider};
 use super::{
     super::super::{
-        common::{serde_compat::SerializationProvider, split::SplitAt},
+        common::{
+            lru_cache::{lru_cache_with_capacity, AllocLRUCache, Cache, CacheError},
+            serde_compat::SerializationProvider,
+            split::SplitAt,
+        },
         storage::common::{index_bounds_for_range, indexed_read_stream},
-        storage::{AsyncConsume, AsyncIndexedRead, AsyncTruncate},
+        storage::{AsyncConsume, AsyncIndexedExclusiveRead, AsyncIndexedRead, AsyncTruncate},
         storage::{Sizable, Storage},
     },
     CommitLog,
@@ -15,6 +19,7 @@ use super::{
 use async_trait::async_trait;
 use futures_core::Stream;
 use futures_lite::{stream, StreamExt};
+use generational_cache::prelude::Eviction;
 use num::{CheckedSub, FromPrimitive, ToPrimitive, Unsigned};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
@@ -53,6 +58,7 @@ pub type Record<M, Idx, T> = super::Record<MetaWithIdx<M, Idx>, T>;
 pub enum SegmentedLogError<SE, SDE> {
     StorageError(SE),
     SegmentError(segment::SegmentError<SE, SDE>),
+    CacheError(CacheError),
     BaseIndexLesserThanInitialIndex,
     NoSegmentsCreated,
     WriteSegmentLost,
@@ -89,6 +95,8 @@ pub struct SegmentedLog<S, M, H, Idx, Size, SERP, SSP> {
     read_segments: Vec<Segment<S, M, H, Idx, Size, SERP>>,
 
     config: Config<Idx, Size>,
+
+    segments_with_cached_index: AllocLRUCache<usize, ()>,
 
     segment_storage_provider: SSP,
 }
@@ -165,6 +173,9 @@ where
             write_segment: Some(write_segment),
             read_segments,
             config,
+            segments_with_cached_index: lru_cache_with_capacity(
+                config.index_cached_segments.unwrap_or(0),
+            ),
             segment_storage_provider,
         })
     }
@@ -253,6 +264,94 @@ where
     }
 }
 
+enum CacheOpKind {
+    Uncache,
+    Cache,
+    None,
+}
+
+struct CacheOp {
+    segment_id: usize,
+    kind: CacheOpKind,
+}
+
+impl CacheOp {
+    fn new(segment_id: usize, kind: CacheOpKind) -> Self {
+        Self { segment_id, kind }
+    }
+}
+
+#[async_trait(?Send)]
+impl<S, M, H, Idx, SERP, SSP> AsyncIndexedExclusiveRead
+    for SegmentedLog<S, M, H, Idx, S::Size, SERP, SSP>
+where
+    S: Storage,
+    S::Content: SplitAt<u8>,
+    SERP: SerializationProvider,
+    H: Hasher + Default,
+    Idx: Unsigned + CheckedSub + FromPrimitive + ToPrimitive + Ord + Copy,
+    Idx: Serialize + DeserializeOwned,
+    M: Serialize + DeserializeOwned,
+{
+    async fn exclusive_read(&mut self, idx: &Self::Idx) -> Result<Self::Value, Self::ReadError> {
+        if !self.has_index(idx) {
+            return Err(SegmentedLogError::IndexOutOfBounds);
+        }
+
+        let segment_id = self.position_read_segment_with_idx(idx);
+
+        let mut cache_op_buf = [
+            CacheOp::new(0, CacheOpKind::None),
+            CacheOp::new(0, CacheOpKind::None),
+        ];
+
+        let cache = &mut self.segments_with_cached_index;
+
+        let cache_ops = match (cache.capacity(), segment_id) {
+            (0, _) | (_, None) => Ok(&cache_op_buf[..0]),
+            (_, Some(segment_id)) => match cache.query(&segment_id) {
+                Ok(_) => Ok(&cache_op_buf[..0]),
+                Err(CacheError::CacheMiss) => match cache.insert(segment_id, ()) {
+                    Ok(Eviction::None) => {
+                        cache_op_buf[0] = CacheOp::new(segment_id, CacheOpKind::Cache);
+                        Ok(&cache_op_buf[..1])
+                    }
+                    Ok(Eviction::Block {
+                        key: evicted_id,
+                        value: _,
+                    }) => {
+                        cache_op_buf[0] = CacheOp::new(evicted_id, CacheOpKind::Uncache);
+                        cache_op_buf[1] = CacheOp::new(segment_id, CacheOpKind::Cache);
+                        Ok(&cache_op_buf[..])
+                    }
+                    Ok(Eviction::Value(_)) => Ok(&cache_op_buf[..0]),
+                    Err(error) => Err(error),
+                },
+                Err(error) => Err(error),
+            },
+        }
+        .map_err(SegmentedLogError::CacheError)?;
+
+        for segment_cache_op in cache_ops {
+            let segment = self.resolve_segment_mut(Some(segment_cache_op.segment_id))?;
+
+            match segment_cache_op.kind {
+                CacheOpKind::Uncache => drop(segment.take_cached_index_records()),
+                CacheOpKind::Cache => segment
+                    .cache_index()
+                    .await
+                    .map_err(SegmentedLogError::SegmentError)?,
+                CacheOpKind::None => {}
+            }
+        }
+
+        self.resolve_segment(segment_id)?
+            .read(idx)
+            .await
+            .map_err(SegmentedLogError::SegmentError)
+    }
+}
+
 pub enum SeqRead<M, Idx, C> {
     Read {
         record: Record<M, Idx, C>,
@@ -263,6 +362,9 @@ pub enum SeqRead<M, Idx, C> {
         next_idx: Idx,
     },
 }
+
+pub type ResolvedSegmentMutResult<'a, S, M, H, Idx, SERP> =
+    Result<&'a mut Segment<S, M, H, Idx, <S as Sizable>::Size, SERP>, LogError<S, SERP>>;
 
 pub type ResolvedSegmentResult<'a, S, M, H, Idx, SERP> =
     Result<&'a Segment<S, M, H, Idx, <S as Sizable>::Size, SERP>, LogError<S, SERP>>;
@@ -287,6 +389,19 @@ where
                 _ => Ordering::Equal,
             })
             .ok()
+    }
+
+    fn resolve_segment_mut(
+        &mut self,
+        segment_id: Option<usize>,
+    ) -> ResolvedSegmentMutResult<S, M, H, Idx, SERP> {
+        match segment_id {
+            Some(segment_id) => self
+                .read_segments
+                .get_mut(segment_id)
+                .ok_or(SegmentedLogError::IndexGapEncountered),
+            None => write_segment_ref!(self, as_mut),
+        }
     }
 
     fn resolve_segment(
