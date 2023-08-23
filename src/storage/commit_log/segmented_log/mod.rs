@@ -558,11 +558,24 @@ where
         self.read_segments = to_keep;
         self.write_segment = Some(write_segment);
 
+        let to_remove_len = to_remove.len();
+
         let mut num_records_removed = <Idx as num::Zero>::zero();
         for segment in to_remove.drain(..) {
             num_records_removed = num_records_removed + segment.len();
             consume_segment!(segment, remove)?;
         }
+
+        if self.segments_with_cached_index.capacity() > 0 {
+            for segment_id in 0..to_remove_len {
+                match self.segments_with_cached_index.remove(&segment_id) {
+                    Ok(_) | Err(CacheError::CacheMiss) => Ok(()),
+                    Err(error) => Err(error),
+                }
+                .map_err(SegmentedLogError::CacheError)?;
+            }
+        }
+
         Ok(num_records_removed)
     }
 }
@@ -647,11 +660,26 @@ where
         let mut segments_to_remove = self.read_segments.split_off(segment_pos_in_vec + 1);
         segments_to_remove.push(take_write_segment!(self)?);
 
+        let segments_to_remove_len = segments_to_remove.len();
+
         for segment in segments_to_remove.drain(..) {
             consume_segment!(segment, remove)?;
         }
 
         self.write_segment = Some(new_write_segment!(self, next_index)?);
+
+        if self.segments_with_cached_index.capacity() > 0 {
+            let segments_removed_len = segments_to_remove_len;
+            let segment_id_offset = segment_pos_in_vec + 1;
+
+            for segment_id in (0..segments_removed_len).map(|x| x + segment_id_offset) {
+                match self.segments_with_cached_index.remove(&segment_id) {
+                    Ok(_) | Err(CacheError::CacheMiss) => Ok(()),
+                    Err(error) => Err(error),
+                }
+                .map_err(SegmentedLogError::CacheError)?;
+            }
+        }
 
         Ok(())
     }
