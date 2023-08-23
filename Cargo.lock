@@ -651,6 +651,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "generational-cache"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ecaef8ea8301c67efddc2285a1fc1c8b5b061d0f1fae4fa347747a5b7b631256"
+
+[[package]]
 name = "getrandom"
 version = "0.2.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -908,6 +914,7 @@ dependencies = [
  "futures-lite",
  "futures-time",
  "futures-util",
+ "generational-cache",
  "glommio",
  "hyper",
  "num",
