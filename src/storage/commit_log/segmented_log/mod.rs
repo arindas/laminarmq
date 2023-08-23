@@ -148,7 +148,7 @@ where
                     config.segment_config,
                     segment_base_index,
                     // Cache read segments on init only if index_cached_segments is *not* configured.
-                    // If index_cached_segments is configued, read_segments are to be index_cached
+                    // If index_cached_segments is configured, read_segments are to be index_cached
                     // only when they are inserted into the index cached segments lru cache.
                     config.index_cached_segments.is_none(),
                 )
@@ -170,7 +170,7 @@ where
     }
 }
 
-macro_rules! new_segment {
+macro_rules! new_write_segment {
     ($segmented_log:ident, $base_index:ident) => {
         Segment::with_segment_storage_provider_config_and_base_index(
             &mut $segmented_log.segment_storage_provider,
@@ -392,7 +392,7 @@ where
         }
 
         self.read_segments.push(write_segment);
-        self.write_segment = Some(new_segment!(self, next_index)?);
+        self.write_segment = Some(new_write_segment!(self, next_index)?);
 
         Ok(())
     }
@@ -437,7 +437,7 @@ where
         let write_segment = if let Some(write_segment) = to_keep.pop() {
             write_segment
         } else {
-            new_segment!(self, next_index)?
+            new_write_segment!(self, next_index)?
         };
 
         self.read_segments = to_keep;
@@ -536,7 +536,7 @@ where
             consume_segment!(segment, remove)?;
         }
 
-        self.write_segment = Some(new_segment!(self, next_index)?);
+        self.write_segment = Some(new_write_segment!(self, next_index)?);
 
         Ok(())
     }
