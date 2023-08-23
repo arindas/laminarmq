@@ -551,7 +551,7 @@ pub(crate) mod test {
             &mut _segment_storage_provider,
             config,
             segment_base_index,
-            true,
+            false,
         )
         .await
         .unwrap();
