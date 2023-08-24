@@ -966,6 +966,15 @@ pub(crate) mod test {
             unreachable!("Wrong result on exceeding max_store_bytes");
         }
 
+        let write_segment_truncate_index = Idx::from_usize(INITIAL_INDEX).unwrap()
+            + segmented_log.len()
+            - Idx::from_usize(1).unwrap();
+
+        segmented_log
+            .truncate(&write_segment_truncate_index)
+            .await
+            .unwrap();
+
         let len_before_close = segmented_log.len();
 
         segmented_log.close().await.unwrap();
