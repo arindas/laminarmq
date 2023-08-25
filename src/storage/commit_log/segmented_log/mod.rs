@@ -281,9 +281,7 @@ impl CacheOp {
     }
 }
 
-#[async_trait(?Send)]
-impl<S, M, H, Idx, SERP, SSP> AsyncIndexedExclusiveRead
-    for SegmentedLog<S, M, H, Idx, S::Size, SERP, SSP>
+impl<S, M, H, Idx, SERP, SSP> SegmentedLog<S, M, H, Idx, S::Size, SERP, SSP>
 where
     S: Storage,
     S::Content: SplitAt<u8>,
@@ -293,12 +291,10 @@ where
     Idx: Serialize + DeserializeOwned,
     M: Serialize + DeserializeOwned,
 {
-    async fn exclusive_read(&mut self, idx: &Self::Idx) -> Result<Self::Value, Self::ReadError> {
-        if !self.has_index(idx) {
-            return Err(SegmentedLogError::IndexOutOfBounds);
+    async fn probe_segment(&mut self, segment_id: Option<usize>) -> Result<(), LogError<S, SERP>> {
+        if self.config.index_cached_segments.is_none() {
+            return Ok(());
         }
-
-        let segment_id = self.position_read_segment_with_idx(idx);
 
         let mut cache_op_buf = [
             CacheOp::new(0, CacheOpKind::None),
@@ -344,6 +340,52 @@ where
                 CacheOpKind::None => {}
             }
         }
+
+        Ok(())
+    }
+
+    fn unregister_cache_for_segments<I: Iterator<Item = usize>>(
+        &mut self,
+        segment_ids: I,
+    ) -> Result<(), LogError<S, SERP>> {
+        let cache = &mut self.segments_with_cached_index;
+
+        if cache.capacity() <= 0 {
+            return Ok(());
+        }
+
+        for segment_id in segment_ids {
+            match self.segments_with_cached_index.remove(&segment_id) {
+                Ok(_) | Err(CacheError::CacheMiss) => Ok(()),
+                Err(error) => Err(error),
+            }
+            .map_err(SegmentedLogError::CacheError)?;
+        }
+
+        Ok(())
+    }
+}
+
+#[async_trait(?Send)]
+impl<S, M, H, Idx, SERP, SSP> AsyncIndexedExclusiveRead
+    for SegmentedLog<S, M, H, Idx, S::Size, SERP, SSP>
+where
+    S: Storage,
+    S::Content: SplitAt<u8>,
+    SERP: SerializationProvider,
+    H: Hasher + Default,
+    Idx: Unsigned + CheckedSub + FromPrimitive + ToPrimitive + Ord + Copy,
+    Idx: Serialize + DeserializeOwned,
+    M: Serialize + DeserializeOwned,
+{
+    async fn exclusive_read(&mut self, idx: &Self::Idx) -> Result<Self::Value, Self::ReadError> {
+        if !self.has_index(idx) {
+            return Err(SegmentedLogError::IndexOutOfBounds);
+        }
+
+        let segment_id = self.position_read_segment_with_idx(idx);
+
+        self.probe_segment(segment_id).await?;
 
         self.resolve_segment(segment_id)?
             .read(idx)
@@ -502,11 +544,15 @@ where
         let mut write_segment = take_write_segment!(self)?;
         let next_index = write_segment.highest_index();
 
-        if self.config.index_cached_segments.is_some() {
-            drop(write_segment.take_cached_index_records())
+        if let Some(0) = self.config.index_cached_segments {
+            drop(write_segment.take_cached_index_records());
         }
 
+        let rotated_segment_id = self.read_segments.len();
         self.read_segments.push(write_segment);
+
+        self.probe_segment(Some(rotated_segment_id)).await?;
+
         self.write_segment = Some(new_write_segment!(self, next_index)?);
 
         Ok(())
@@ -566,15 +612,7 @@ where
             consume_segment!(segment, remove)?;
         }
 
-        if self.segments_with_cached_index.capacity() > 0 {
-            for segment_id in 0..to_remove_len {
-                match self.segments_with_cached_index.remove(&segment_id) {
-                    Ok(_) | Err(CacheError::CacheMiss) => Ok(()),
-                    Err(error) => Err(error),
-                }
-                .map_err(SegmentedLogError::CacheError)?;
-            }
-        }
+        self.unregister_cache_for_segments(0..to_remove_len)?;
 
         Ok(num_records_removed)
     }
@@ -668,18 +706,9 @@ where
 
         self.write_segment = Some(new_write_segment!(self, next_index)?);
 
-        if self.segments_with_cached_index.capacity() > 0 {
-            let segments_removed_len = segments_to_remove_len;
-            let segment_id_offset = segment_pos_in_vec + 1;
-
-            for segment_id in (0..segments_removed_len).map(|x| x + segment_id_offset) {
-                match self.segments_with_cached_index.remove(&segment_id) {
-                    Ok(_) | Err(CacheError::CacheMiss) => Ok(()),
-                    Err(error) => Err(error),
-                }
-                .map_err(SegmentedLogError::CacheError)?;
-            }
-        }
+        self.unregister_cache_for_segments(
+            (0..segments_to_remove_len).map(|x| x + segment_pos_in_vec + 1),
+        )?;
 
         Ok(())
     }
