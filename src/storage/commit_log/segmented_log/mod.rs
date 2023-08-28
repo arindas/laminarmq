@@ -461,7 +461,7 @@ where
 
     pub async fn read_seq(
         &self,
-        segment_pos_in_log: usize,
+        segment_id: usize,
         idx: &Idx,
     ) -> Result<SeqRead<M, Idx, S::Content>, LogError<S, SERP>> {
         if !self.has_index(idx) {
@@ -470,24 +470,23 @@ where
 
         let num_read_segments = self.read_segments.len();
 
-        let segment_id = Some(segment_pos_in_log).filter(|x| x < &num_read_segments);
+        let segment_id = Some(segment_id).filter(|x| x < &num_read_segments);
 
         let segment = self.resolve_segment(segment_id)?;
 
-        if idx >= &segment.highest_index() && segment_id.is_some() {
-            Ok(SeqRead::Seek {
-                next_segment: segment_pos_in_log + 1,
+        match (idx, segment_id) {
+            (idx, Some(segment_id)) if idx >= &segment.highest_index() => Ok(SeqRead::Seek {
+                next_segment: segment_id + 1,
                 next_idx: *idx,
-            })
-        } else {
-            segment
+            }),
+            _ => segment
                 .read(idx)
                 .await
                 .map_err(SegmentedLogError::SegmentError)
                 .map(|record| SeqRead::Read {
                     record,
                     next_idx: *idx + Idx::one(),
-                })
+                }),
         }
     }
 
@@ -931,18 +930,18 @@ pub(crate) mod test {
         };
 
         {
-            let (mut segment_pos_in_log, mut idx) = (0_usize, segmented_log.lowest_index());
+            let (mut segment_id, mut idx) = (0_usize, segmented_log.lowest_index());
 
             let mut expected_records =
                 _test_records_provider(&_RECORDS, NUM_SEGMENTS, _RECORDS.len());
 
             loop {
-                let seq_read_result = segmented_log.read_seq(segment_pos_in_log, &idx).await;
+                let seq_read = segmented_log.read_seq(segment_id, &idx).await;
 
-                (segment_pos_in_log, idx) = match seq_read_result {
+                (segment_id, idx) = match seq_read {
                     Ok(SeqRead::Read { record, next_idx }) => {
                         assert_eq!(Some(record.value.deref()), expected_records.next());
-                        (segment_pos_in_log, next_idx)
+                        (segment_id, next_idx)
                     }
 
                     Ok(SeqRead::Seek {
