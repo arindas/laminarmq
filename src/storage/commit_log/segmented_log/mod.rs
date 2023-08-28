@@ -366,6 +366,35 @@ where
     }
 }
 
+impl<S, M, H, Idx, SERP, SSP> SegmentedLog<S, M, H, Idx, S::Size, SERP, SSP>
+where
+    S: Storage,
+    S::Content: SplitAt<u8>,
+    SERP: SerializationProvider,
+    H: Hasher + Default,
+    Idx: Unsigned + CheckedSub + FromPrimitive + ToPrimitive + Ord + Copy,
+    Idx: Serialize + DeserializeOwned,
+    M: Serialize + DeserializeOwned,
+{
+    pub async fn read_seq_exclusive(
+        &mut self,
+        segment_id: usize,
+        idx: &Idx,
+    ) -> Result<SeqRead<M, Idx, S::Content>, LogError<S, SERP>> {
+        if !self.has_index(idx) {
+            return Err(SegmentedLogError::IndexOutOfBounds);
+        }
+
+        let num_read_segments = self.read_segments.len();
+
+        let segment_id = Some(segment_id).filter(|x| x < &num_read_segments);
+
+        self.probe_segment(segment_id).await?;
+
+        self.read_seq_unchecked(segment_id, idx).await
+    }
+}
+
 #[async_trait(?Send)]
 impl<S, M, H, Idx, SERP, SSP> AsyncIndexedExclusiveRead
     for SegmentedLog<S, M, H, Idx, S::Size, SERP, SSP>
@@ -459,19 +488,11 @@ where
         }
     }
 
-    pub async fn read_seq(
+    async fn read_seq_unchecked(
         &self,
-        segment_id: usize,
+        segment_id: Option<usize>,
         idx: &Idx,
     ) -> Result<SeqRead<M, Idx, S::Content>, LogError<S, SERP>> {
-        if !self.has_index(idx) {
-            return Err(SegmentedLogError::IndexOutOfBounds);
-        }
-
-        let num_read_segments = self.read_segments.len();
-
-        let segment_id = Some(segment_id).filter(|x| x < &num_read_segments);
-
         let segment = self.resolve_segment(segment_id)?;
 
         match (idx, segment_id) {
@@ -488,6 +509,22 @@ where
                     next_idx: *idx + Idx::one(),
                 }),
         }
+    }
+
+    pub async fn read_seq(
+        &self,
+        segment_id: usize,
+        idx: &Idx,
+    ) -> Result<SeqRead<M, Idx, S::Content>, LogError<S, SERP>> {
+        if !self.has_index(idx) {
+            return Err(SegmentedLogError::IndexOutOfBounds);
+        }
+
+        let num_read_segments = self.read_segments.len();
+
+        let segment_id = Some(segment_id).filter(|x| x < &num_read_segments);
+
+        self.read_seq_unchecked(segment_id, idx).await
     }
 
     pub fn stream<RB>(
