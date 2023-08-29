@@ -165,9 +165,14 @@ where
             );
         }
 
-        let write_segment = read_segments
+        let mut write_segment = read_segments
             .pop()
             .ok_or(SegmentedLogError::NoSegmentsCreated)?;
+
+        write_segment
+            .cache_index()
+            .await
+            .map_err(SegmentedLogError::SegmentError)?;
 
         Ok(Self {
             write_segment: Some(write_segment),
@@ -1187,5 +1192,81 @@ pub(crate) mod test {
         );
 
         segmented_log.remove().await.unwrap();
+    }
+
+    pub(crate) async fn _test_segmented_log_segment_index_caching<
+        S,
+        M,
+        H,
+        Idx,
+        SERP,
+        SSP,
+        MTF,
+        TF,
+    >(
+        _segment_storage_provider: SSP,
+        _make_sleep_future: MTF,
+        _: PhantomData<(M, H, SERP)>,
+    ) where
+        S: Storage,
+        S::Size: FromPrimitive + Copy,
+        S::Content: SplitAt<u8>,
+        S::Position: ToPrimitive + Debug,
+        M: Default + Serialize + DeserializeOwned + Clone,
+        H: Hasher + Default,
+        Idx: Unsigned + CheckedSub + FromPrimitive + ToPrimitive,
+        Idx: Ord + Copy + Debug,
+        Idx: Serialize + DeserializeOwned,
+        SERP: SerializationProvider,
+        SSP: SegmentStorageProvider<S, Idx> + Clone,
+        MTF: Fn(Duration) -> TF,
+        TF: Future<Output = ()>,
+    {
+        const INITIAL_INDEX: usize = 42;
+
+        const NUM_INDEX_CACHED_SEGMENTS: usize = 3;
+
+        let initial_index = Idx::from_usize(INITIAL_INDEX).unwrap();
+
+        let config = Config {
+            segment_config: _segment_config::<M, Idx, S::Size, SERP>(
+                _RECORDS[0].len(),
+                _RECORDS.len(),
+            )
+            .unwrap(),
+            initial_index,
+            index_cached_segments: Some(NUM_INDEX_CACHED_SEGMENTS),
+        };
+
+        let mut segmented_log =
+            SegmentedLog::<_, M, H, _, _, SERP, _>::new(config, _segment_storage_provider.clone())
+                .await
+                .unwrap();
+
+        segmented_log
+            .append(Record {
+                metadata: MetaWithIdx {
+                    metadata: M::default(),
+                    index: None,
+                },
+                value: futures_lite::stream::once(Ok::<&[u8], Infallible>(_RECORDS[0])),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(segmented_log.segments().count(), 1);
+
+        assert!(segmented_log
+            .segments()
+            .nth(0)
+            .unwrap()
+            .cached_index_records()
+            .is_some());
+
+        // TODO: check indexing behaviour on segment rotation
+        // TODO: check indexing behaviour on exclusive_read
+        // TODO: check indexing behaviour on seq_read
+        // TODO: check indexing behaviour on truncate
+        // TODO: check indexing behaviour on remove_expired
     }
 }

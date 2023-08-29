@@ -30,5 +30,17 @@ pub mod segmented_log {
                 .await;
             });
         }
+
+        #[test]
+        fn test_segmented_log_segment_index_caching() {
+            async_io::block_on(async {
+                segmented_log::test::_test_segmented_log_segment_index_caching(
+                    InMemSegmentStorageProvider::<u32>::default(),
+                    |duration| async { () }.delay(Duration::from(duration)),
+                    PhantomData::<((), crc32fast::Hasher, bincode::BinCode)>,
+                )
+                .await;
+            });
+        }
     }
 }
