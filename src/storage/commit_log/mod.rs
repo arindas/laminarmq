@@ -6,7 +6,7 @@ pub struct Record<M, T> {
 }
 
 #[async_trait::async_trait(?Send)]
-pub trait CommitLog<M, X, T>:
+pub trait CommitLog<M, T>:
     AsyncIndexedRead<Value = Record<M, T>, ReadError = Self::Error>
     + AsyncTruncate<Mark = Self::Idx, TruncError = Self::Error>
     + AsyncConsume<ConsumeError = Self::Error>
@@ -14,9 +14,11 @@ pub trait CommitLog<M, X, T>:
 {
     type Error: std::error::Error;
 
-    async fn append(&mut self, record: Record<M, X>) -> Result<Self::Idx, Self::Error>
+    async fn append<X, XBuf, XE>(&mut self, record: Record<M, X>) -> Result<Self::Idx, Self::Error>
     where
-        X: 'async_trait;
+        X: futures_lite::Stream<Item = Result<XBuf, XE>>,
+        X: Unpin + 'async_trait,
+        XBuf: std::ops::Deref<Target = [u8]>;
 
     async fn remove_expired(
         &mut self,

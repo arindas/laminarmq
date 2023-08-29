@@ -780,7 +780,7 @@ where
 }
 
 #[async_trait(?Send)]
-impl<S, M, H, Idx, SERP, SSP, XBuf, X, XE> CommitLog<MetaWithIdx<M, Idx>, X, S::Content>
+impl<S, M, H, Idx, SERP, SSP> CommitLog<MetaWithIdx<M, Idx>, S::Content>
     for SegmentedLog<S, M, H, Idx, S::Size, SERP, SSP>
 where
     S: Storage,
@@ -792,8 +792,6 @@ where
     M: Default + Serialize + DeserializeOwned,
     SERP: SerializationProvider,
     SSP: SegmentStorageProvider<S, Idx>,
-    XBuf: Deref<Target = [u8]>,
-    X: Stream<Item = Result<XBuf, XE>> + Unpin,
 {
     type Error = LogError<S, SERP>;
 
@@ -804,9 +802,14 @@ where
         self.remove_expired_segments(expiry_duration).await
     }
 
-    async fn append(&mut self, record: Record<M, Idx, X>) -> Result<Self::Idx, Self::Error>
+    async fn append<X, XBuf, XE>(
+        &mut self,
+        record: Record<M, Idx, X>,
+    ) -> Result<Self::Idx, Self::Error>
     where
-        X: 'async_trait,
+        X: Stream<Item = Result<XBuf, XE>>,
+        X: Unpin + 'async_trait,
+        XBuf: Deref<Target = [u8]>,
     {
         if write_segment_ref!(self, as_ref)?.is_maxed() {
             self.rotate_new_write_segment().await?;
@@ -1167,10 +1170,7 @@ pub(crate) mod test {
             need_to_sleep = false;
         }
 
-        segmented_log
-            .remove_expired_segments(expiry_duration)
-            .await
-            .unwrap();
+        segmented_log.remove_expired(expiry_duration).await.unwrap();
 
         assert!(
             segmented_log_highest_index_before_sleep <= segmented_log.lowest_index(),
@@ -1179,10 +1179,7 @@ pub(crate) mod test {
 
         _make_sleep_future(expiry_duration).await;
 
-        segmented_log
-            .remove_expired_segments(expiry_duration)
-            .await
-            .unwrap();
+        segmented_log.remove_expired(expiry_duration).await.unwrap();
 
         assert!(
             segmented_log.is_empty(),
