@@ -87,7 +87,7 @@ where
 pub struct Config<Idx, Size> {
     pub segment_config: segment::Config<Size>,
     pub initial_index: Idx,
-    pub index_cached_segments: Option<usize>,
+    pub num_cached_indexes: Option<usize>,
 }
 
 pub struct SegmentedLog<S, M, H, Idx, Size, SERP, SSP> {
@@ -158,7 +158,7 @@ where
                     // Cache read segments on init only if index_cached_segments is *not* configured.
                     // If index_cached_segments is configured, read_segments are to be index_cached
                     // only when they are inserted into the index cached segments lru cache.
-                    config.index_cached_segments.is_none(),
+                    config.num_cached_indexes.is_none(),
                 )
                 .await
                 .map_err(SegmentedLogError::SegmentError)?,
@@ -179,7 +179,7 @@ where
             read_segments,
             config,
             segments_with_cached_index: lru_cache_with_capacity(
-                config.index_cached_segments.unwrap_or(0),
+                config.num_cached_indexes.unwrap_or(0),
             ),
             segment_storage_provider,
         })
@@ -297,7 +297,7 @@ where
     M: Serialize + DeserializeOwned,
 {
     async fn probe_segment(&mut self, segment_id: Option<usize>) -> Result<(), LogError<S, SERP>> {
-        if self.config.index_cached_segments.is_none() {
+        if self.config.num_cached_indexes.is_none() {
             return Ok(());
         }
 
@@ -585,7 +585,7 @@ where
         let mut write_segment = take_write_segment!(self)?;
         let next_index = write_segment.highest_index();
 
-        if let Some(0) = self.config.index_cached_segments {
+        if let Some(0) = self.config.num_cached_indexes {
             drop(write_segment.take_cached_index_records());
         }
 
@@ -886,7 +886,7 @@ pub(crate) mod test {
             )
             .unwrap(),
             initial_index,
-            index_cached_segments: None,
+            num_cached_indexes: None,
         };
 
         let mut segmented_log = SegmentedLog::<S, M, H, Idx, S::Size, SERP, SSP>::new(
@@ -1121,7 +1121,7 @@ pub(crate) mod test {
             )
             .unwrap(),
             initial_index,
-            index_cached_segments: None,
+            num_cached_indexes: None,
         };
 
         let mut segmented_log = SegmentedLog::<S, M, H, Idx, S::Size, SERP, SSP>::new(
@@ -1235,7 +1235,7 @@ pub(crate) mod test {
             )
             .unwrap(),
             initial_index,
-            index_cached_segments: Some(NUM_INDEX_CACHED_SEGMENTS),
+            num_cached_indexes: Some(NUM_INDEX_CACHED_SEGMENTS),
         };
 
         let mut segmented_log =
