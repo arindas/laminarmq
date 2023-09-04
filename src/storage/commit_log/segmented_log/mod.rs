@@ -85,9 +85,9 @@ where
 
 #[derive(Default, Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Config<Idx, Size> {
+    pub num_index_cached_read_segments: Option<usize>,
     pub segment_config: segment::Config<Size>,
     pub initial_index: Idx,
-    pub num_cached_indexes: Option<usize>,
 }
 
 pub struct SegmentedLog<S, M, H, Idx, Size, SERP, SSP> {
@@ -149,16 +149,15 @@ where
 
         let mut read_segments = Vec::<Segment<S, M, H, Idx, S::Size, SERP>>::new();
 
+        let index_cache_read_segments = config.num_index_cached_read_segments.is_none();
+
         for segment_base_index in segment_base_indices {
             read_segments.push(
                 Segment::with_segment_storage_provider_config_and_base_index(
                     &mut segment_storage_provider,
                     config.segment_config,
                     segment_base_index,
-                    // Cache read segments on init only if index_cached_segments is *not* configured.
-                    // If index_cached_segments is configured, read_segments are to be index_cached
-                    // only when they are inserted into the index cached segments lru cache.
-                    config.num_cached_indexes.is_none(),
+                    index_cache_read_segments,
                 )
                 .await
                 .map_err(SegmentedLogError::SegmentError)?,
@@ -179,7 +178,7 @@ where
             read_segments,
             config,
             segments_with_cached_index: lru_cache_with_capacity(
-                config.num_cached_indexes.unwrap_or(0),
+                config.num_index_cached_read_segments.unwrap_or(0),
             ),
             segment_storage_provider,
         })
@@ -269,12 +268,14 @@ where
     }
 }
 
+#[derive(Debug)]
 enum CacheOpKind {
     Uncache,
     Cache,
     None,
 }
 
+#[derive(Debug)]
 struct CacheOp {
     segment_id: usize,
     kind: CacheOpKind,
@@ -297,7 +298,7 @@ where
     M: Serialize + DeserializeOwned,
 {
     async fn probe_segment(&mut self, segment_id: Option<usize>) -> Result<(), LogError<S, SERP>> {
-        if self.config.num_cached_indexes.is_none() {
+        if self.config.num_index_cached_read_segments.is_none() {
             return Ok(());
         }
 
@@ -585,7 +586,7 @@ where
         let mut write_segment = take_write_segment!(self)?;
         let next_index = write_segment.highest_index();
 
-        if let Some(0) = self.config.num_cached_indexes {
+        if let Some(0) = self.config.num_index_cached_read_segments {
             drop(write_segment.take_cached_index_records());
         }
 
@@ -886,7 +887,7 @@ pub(crate) mod test {
             )
             .unwrap(),
             initial_index,
-            num_cached_indexes: None,
+            num_index_cached_read_segments: None,
         };
 
         let mut segmented_log = SegmentedLog::<S, M, H, Idx, S::Size, SERP, SSP>::new(
@@ -1121,7 +1122,7 @@ pub(crate) mod test {
             )
             .unwrap(),
             initial_index,
-            num_cached_indexes: None,
+            num_index_cached_read_segments: None,
         };
 
         let mut segmented_log = SegmentedLog::<S, M, H, Idx, S::Size, SERP, SSP>::new(
@@ -1226,16 +1227,20 @@ pub(crate) mod test {
 
         const NUM_INDEX_CACHED_SEGMENTS: usize = 3;
 
+        const RECORDS_PER_SEGMENT: usize = _RECORDS.len();
+
+        const RECORD_LEN: usize = _RECORDS[0].len();
+
         let initial_index = Idx::from_usize(INITIAL_INDEX).unwrap();
 
         let config = Config {
+            num_index_cached_read_segments: Some(NUM_INDEX_CACHED_SEGMENTS),
             segment_config: _segment_config::<M, Idx, S::Size, SERP>(
-                _RECORDS[0].len(),
-                _RECORDS.len(),
+                RECORD_LEN,
+                RECORDS_PER_SEGMENT,
             )
             .unwrap(),
             initial_index,
-            num_cached_indexes: Some(NUM_INDEX_CACHED_SEGMENTS),
         };
 
         let mut segmented_log =
@@ -1263,7 +1268,54 @@ pub(crate) mod test {
             .cached_index_records()
             .is_some());
 
-        // TODO: check indexing behaviour on segment rotation
+        for record in _test_records_provider(&_RECORDS, 1, RECORDS_PER_SEGMENT) {
+            let stream = futures_lite::stream::once(Ok::<&[u8], Infallible>(record));
+
+            segmented_log
+                .append(Record {
+                    metadata: MetaWithIdx {
+                        metadata: M::default(),
+                        index: None,
+                    },
+                    value: stream,
+                })
+                .await
+                .unwrap();
+        }
+
+        assert_eq!(segmented_log.segments().count(), 2);
+
+        assert!(segmented_log
+            .segments()
+            .all(|x| x.cached_index_records().is_some()));
+
+        for record in
+            _test_records_provider(&_RECORDS, NUM_INDEX_CACHED_SEGMENTS, RECORDS_PER_SEGMENT)
+        {
+            let stream = futures_lite::stream::once(Ok::<&[u8], Infallible>(record));
+
+            segmented_log
+                .append(Record {
+                    metadata: MetaWithIdx {
+                        metadata: M::default(),
+                        index: None,
+                    },
+                    value: stream,
+                })
+                .await
+                .unwrap();
+        }
+
+        assert_eq!(
+            segmented_log.segments().count(),
+            NUM_INDEX_CACHED_SEGMENTS + 2
+        );
+
+        let mut segments = segmented_log.segments();
+
+        assert!(segments.next().unwrap().cached_index_records().is_none());
+        assert!(segments.all(|x| x.cached_index_records().is_some()));
+
         // TODO: check indexing behaviour on exclusive_read
         // TODO: check indexing behaviour on seq_read
         // TODO: check indexing behaviour on truncate

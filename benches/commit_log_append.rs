@@ -63,7 +63,7 @@ const IN_MEMORY_SEGMENTED_LOG_CONFIG: Config<u32, usize> = Config {
         max_index_size: 1048576,
     },
     initial_index: 0,
-    num_cached_indexes: None,
+    num_index_cached_read_segments: None,
 };
 
 const PERSISTENT_SEGMENTED_LOG_CONFIG: Config<u32, u64> = Config {
@@ -73,7 +73,7 @@ const PERSISTENT_SEGMENTED_LOG_CONFIG: Config<u32, u64> = Config {
         max_index_size: 10000000,
     },
     initial_index: 0,
-    num_cached_indexes: None,
+    num_index_cached_read_segments: None,
 };
 
 fn increase_rlimit_nofile_soft_limit_to_hard_limit() -> std::io::Result<()> {
