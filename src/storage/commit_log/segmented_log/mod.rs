@@ -350,10 +350,13 @@ where
         Ok(())
     }
 
-    fn unregister_cache_for_segments<I: Iterator<Item = usize>>(
+    fn unregister_cache_for_segments<SI>(
         &mut self,
-        segment_ids: I,
-    ) -> Result<(), LogError<S, SERP>> {
+        segment_ids: SI,
+    ) -> Result<(), LogError<S, SERP>>
+    where
+        SI: Iterator<Item = usize>,
+    {
         let cache = &mut self.segments_with_cached_index;
 
         if cache.capacity() <= 0 {
