@@ -1377,7 +1377,68 @@ pub(crate) mod test {
             .cached_index_records()
             .is_some());
 
-        // TODO: check indexing behaviour on read_seq_exclusive
+        segmented_log.close().await.unwrap();
+
+        let mut segmented_log =
+            SegmentedLog::<_, M, H, _, _, SERP, _>::new(config, _segment_storage_provider.clone())
+                .await
+                .unwrap();
+
+        const NUM_SEGMENTS: usize = NUM_INDEX_CACHED_SEGMENTS + 3;
+
+        assert!(segmented_log
+            .segments()
+            .take(NUM_SEGMENTS - 1)
+            .all(|x| x.cached_index_records().is_none()));
+
+        {
+            let expected_records =
+                _test_records_provider(&_RECORDS, NUM_SEGMENTS - 1, RECORDS_PER_SEGMENT);
+
+            let mut expected_records =
+                std::iter::once(_RECORDS[0] as &[u8]).chain(expected_records);
+
+            let (mut segment_id, mut idx) = (0_usize, segmented_log.lowest_index());
+
+            loop {
+                let seq_read = segmented_log.read_seq_exclusive(segment_id, &idx).await;
+
+                (segment_id, idx) = match seq_read {
+                    Ok(SeqRead::Read { record, next_idx }) => {
+                        assert_eq!(Some(record.value.deref()), expected_records.next());
+
+                        assert!(segmented_log
+                            .segments()
+                            .nth(segment_id)
+                            .unwrap()
+                            .cached_index_records()
+                            .is_some());
+
+                        if segment_id < NUM_SEGMENTS - 1 {
+                            let segment = segment_id
+                                .checked_sub(NUM_INDEX_CACHED_SEGMENTS)
+                                .and_then(|x| segmented_log.segments().nth(x));
+
+                            assert!(segment
+                                .map(|x| x.cached_index_records().is_none())
+                                .unwrap_or(true));
+                        }
+
+                        (segment_id, next_idx)
+                    }
+
+                    Ok(SeqRead::Seek {
+                        next_segment,
+                        next_idx,
+                    }) => (next_segment, next_idx),
+
+                    _ => break,
+                }
+            }
+
+            assert_eq!(idx, segmented_log.highest_index());
+        }
+
         // TODO: check indexing behaviour on truncate
         // TODO: check indexing behaviour on remove_expired
     }
