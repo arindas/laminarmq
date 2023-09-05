@@ -1311,13 +1311,73 @@ pub(crate) mod test {
             NUM_INDEX_CACHED_SEGMENTS + 2
         );
 
-        let mut segments = segmented_log.segments();
+        {
+            let mut segments = segmented_log.segments();
 
-        assert!(segments.next().unwrap().cached_index_records().is_none());
-        assert!(segments.all(|x| x.cached_index_records().is_some()));
+            assert!(segments.next().unwrap().cached_index_records().is_none());
+            assert!(segments.all(|x| x.cached_index_records().is_some()));
+        }
 
-        // TODO: check indexing behaviour on exclusive_read
-        // TODO: check indexing behaviour on seq_read
+        {
+            segmented_log.exclusive_read(&initial_index).await.unwrap();
+            segmented_log.exclusive_read(&initial_index).await.unwrap();
+
+            let mut segments = segmented_log.segments();
+
+            assert!(segments.next().unwrap().cached_index_records().is_some());
+            assert!(segments.next().unwrap().cached_index_records().is_none());
+            assert!(segments.all(|x| x.cached_index_records().is_some()));
+        }
+
+        let cache_disabled_config = Config {
+            num_index_cached_read_segments: Some(0),
+            ..config
+        };
+
+        segmented_log.close().await.unwrap();
+
+        let mut segmented_log = SegmentedLog::<_, M, H, _, _, SERP, _>::new(
+            cache_disabled_config,
+            _segment_storage_provider.clone(),
+        )
+        .await
+        .unwrap();
+
+        segmented_log.exclusive_read(&initial_index).await.unwrap();
+
+        for record in _test_records_provider(&_RECORDS, 1, RECORDS_PER_SEGMENT) {
+            let stream = futures_lite::stream::once(Ok::<&[u8], Infallible>(record));
+
+            segmented_log
+                .append(Record {
+                    metadata: MetaWithIdx {
+                        metadata: M::default(),
+                        index: None,
+                    },
+                    value: stream,
+                })
+                .await
+                .unwrap();
+        }
+
+        assert_eq!(
+            segmented_log.segments().count(),
+            NUM_INDEX_CACHED_SEGMENTS + 3
+        );
+
+        assert!(segmented_log
+            .segments()
+            .take(NUM_INDEX_CACHED_SEGMENTS + 2)
+            .all(|x| x.cached_index_records().is_none()));
+
+        assert!(segmented_log
+            .segments()
+            .last()
+            .unwrap()
+            .cached_index_records()
+            .is_some());
+
+        // TODO: check indexing behaviour on read_seq_exclusive
         // TODO: check indexing behaviour on truncate
         // TODO: check indexing behaviour on remove_expired
     }
