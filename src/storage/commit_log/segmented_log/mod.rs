@@ -1475,6 +1475,40 @@ pub(crate) mod test {
             }
         }
 
-        // TODO: check indexing behaviour on remove_expired
+        let expiry_duration = Duration::from_millis(10);
+
+        _make_sleep_future(expiry_duration).await;
+
+        for record in _test_records_provider(&_RECORDS, 3, RECORDS_PER_SEGMENT) {
+            let stream = futures_lite::stream::once(Ok::<&[u8], Infallible>(record));
+
+            segmented_log
+                .append(Record {
+                    metadata: MetaWithIdx {
+                        metadata: M::default(),
+                        index: None,
+                    },
+                    value: stream,
+                })
+                .await
+                .unwrap();
+        }
+
+        const NUM_SEGMENTS_ON_APPEND_AFTER_SLEEP: usize = NUM_SEGMENTS_AFTER_TRUNCATE + 2;
+
+        assert_eq!(
+            segmented_log.segments().count(),
+            NUM_SEGMENTS_ON_APPEND_AFTER_SLEEP
+        );
+
+        segmented_log.remove_expired(expiry_duration).await.unwrap();
+
+        assert_eq!(segmented_log.segments().count(), 2);
+
+        assert!(segmented_log
+            .segments()
+            .all(|x| x.cached_index_records().is_some()));
+
+        segmented_log.remove().await.unwrap();
     }
 }
