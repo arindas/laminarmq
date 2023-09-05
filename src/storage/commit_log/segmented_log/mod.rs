@@ -1442,7 +1442,39 @@ pub(crate) mod test {
             assert_eq!(idx, segmented_log.highest_index());
         }
 
-        // TODO: check indexing behaviour on truncate
+        const WRITE_SEGMENT_ID: usize = NUM_SEGMENTS - 1;
+
+        const SECOND_LAST_READ_SEGMENT_ID: usize = WRITE_SEGMENT_ID - 2;
+
+        let truncate_index =
+            INITIAL_INDEX + (SECOND_LAST_READ_SEGMENT_ID) * _RECORDS.len() + _RECORDS.len() / 2;
+
+        let truncate_index = Idx::from_usize(truncate_index).unwrap();
+
+        let expected_length_after_truncate = truncate_index - segmented_log.lowest_index();
+
+        segmented_log.truncate(&truncate_index).await.unwrap();
+
+        assert_eq!(segmented_log.len(), expected_length_after_truncate);
+
+        const NUM_SEGMENTS_AFTER_TRUNCATE: usize = NUM_SEGMENTS - 1;
+
+        assert_eq!(
+            segmented_log.segments().count(),
+            NUM_SEGMENTS_AFTER_TRUNCATE
+        );
+
+        const FIRST_REMAINING_CACHED_SEGMENT: usize =
+            NUM_SEGMENTS_AFTER_TRUNCATE - NUM_INDEX_CACHED_SEGMENTS;
+
+        for (segment_id, segment) in segmented_log.segments().enumerate() {
+            if segment_id >= FIRST_REMAINING_CACHED_SEGMENT {
+                assert!(segment.cached_index_records().is_some());
+            } else {
+                assert!(segment.cached_index_records().is_none());
+            }
+        }
+
         // TODO: check indexing behaviour on remove_expired
     }
 }
