@@ -458,6 +458,7 @@ mod tests {
                 segmented_log::test::_test_segmented_log_segment_index_caching(
                     disk_backed_storage_provider,
                     |duration| async move { glommio::timer::sleep(duration).await },
+                    false,
                     PhantomData::<((), crc32fast::Hasher, bincode::BinCode)>,
                 )
                 .await;

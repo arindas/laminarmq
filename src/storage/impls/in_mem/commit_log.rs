@@ -37,6 +37,7 @@ pub mod segmented_log {
                 segmented_log::test::_test_segmented_log_segment_index_caching(
                     InMemSegmentStorageProvider::<u32>::default(),
                     |duration| async { () }.delay(Duration::from(duration)),
+                    true,
                     PhantomData::<((), crc32fast::Hasher, bincode::BinCode)>,
                 )
                 .await;

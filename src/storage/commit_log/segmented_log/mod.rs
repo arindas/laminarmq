@@ -1214,6 +1214,7 @@ pub(crate) mod test {
     >(
         _segment_storage_provider: SSP,
         _make_sleep_future: MTF,
+        _test_zero_cap_cache: bool,
         _: PhantomData<(M, H, SERP)>,
     ) where
         S: Storage,
@@ -1336,26 +1337,32 @@ pub(crate) mod test {
             assert!(segments.all(|x| x.cached_index_records().is_some()));
         }
 
-        segmented_log.close().await.unwrap();
+        segmented_log = if _test_zero_cap_cache {
+            segmented_log.close().await.unwrap();
 
-        let cache_disabled_config = Config {
-            num_index_cached_read_segments: Some(0),
-            ..config
+            let cache_disabled_config = Config {
+                num_index_cached_read_segments: Some(0),
+                ..config
+            };
+
+            let segmented_log = SegmentedLog::<_, M, H, _, _, SERP, _>::new(
+                cache_disabled_config,
+                _segment_storage_provider.clone(),
+            )
+            .await
+            .unwrap();
+
+            assert!(segmented_log
+                .segments()
+                .last()
+                .unwrap()
+                .cached_index_records()
+                .is_some());
+
+            segmented_log
+        } else {
+            segmented_log
         };
-
-        let mut segmented_log = SegmentedLog::<_, M, H, _, _, SERP, _>::new(
-            cache_disabled_config,
-            _segment_storage_provider.clone(),
-        )
-        .await
-        .unwrap();
-
-        assert!(segmented_log
-            .segments()
-            .last()
-            .unwrap()
-            .cached_index_records()
-            .is_some());
 
         segmented_log.exclusive_read(&initial_index).await.unwrap();
 
@@ -1374,22 +1381,24 @@ pub(crate) mod test {
                 .unwrap();
         }
 
-        assert_eq!(
-            segmented_log.segments().count(),
-            NUM_INDEX_CACHED_SEGMENTS + 3
-        );
+        if _test_zero_cap_cache {
+            assert_eq!(
+                segmented_log.segments().count(),
+                NUM_INDEX_CACHED_SEGMENTS + 3
+            );
 
-        assert!(segmented_log
-            .segments()
-            .take(NUM_INDEX_CACHED_SEGMENTS + 2)
-            .all(|x| x.cached_index_records().is_none()));
+            assert!(segmented_log
+                .segments()
+                .take(NUM_INDEX_CACHED_SEGMENTS + 2)
+                .all(|x| x.cached_index_records().is_none()));
 
-        assert!(segmented_log
-            .segments()
-            .last()
-            .unwrap()
-            .cached_index_records()
-            .is_some());
+            assert!(segmented_log
+                .segments()
+                .last()
+                .unwrap()
+                .cached_index_records()
+                .is_some());
+        }
 
         segmented_log.close().await.unwrap();
 

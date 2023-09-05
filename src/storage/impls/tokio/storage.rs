@@ -436,6 +436,7 @@ pub mod unix {
             segmented_log::test::_test_segmented_log_segment_index_caching(
                 disk_backed_storage_provider,
                 |duration| async move { tokio::time::sleep(duration).await },
+                true,
                 PhantomData::<((), crc32fast::Hasher, bincode::BinCode)>,
             )
             .await;
