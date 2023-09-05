@@ -232,7 +232,8 @@ where
             .size()
             .to_usize()
             .ok_or(IndexError::IncompatibleSizeType)?;
-        let estimated_index_records_len = index_record_storage_size.saturating_sub(INDEX_BASE_MARKER_LENGTH)
+        let estimated_index_records_len = index_record_storage_size
+            .saturating_sub(INDEX_BASE_MARKER_LENGTH)
             / INDEX_RECORD_LENGTH;
 
         Ok(estimated_index_records_len)

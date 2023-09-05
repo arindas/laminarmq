@@ -60,7 +60,6 @@ pub enum SegmentedLogError<SE, SDE> {
     SegmentError(segment::SegmentError<SE, SDE>),
     CacheError(CacheError),
     BaseIndexLesserThanInitialIndex,
-    NoSegmentsCreated,
     WriteSegmentLost,
     IndexOutOfBounds,
     IndexGapEncountered,
@@ -141,17 +140,22 @@ where
 
         match segment_base_indices.first() {
             Some(base_index) if base_index < &config.initial_index => {
-                return Err(SegmentedLogError::BaseIndexLesserThanInitialIndex);
+                Err(SegmentedLogError::BaseIndexLesserThanInitialIndex)
             }
-            None => segment_base_indices.push(config.initial_index),
-            _ => (),
-        };
+            _ => Ok(()),
+        }?;
 
-        let mut read_segments = Vec::<Segment<S, M, H, Idx, S::Size, SERP>>::new();
+        let write_segment_base_index = segment_base_indices.pop().unwrap_or(config.initial_index);
+
+        let read_segment_base_indices = segment_base_indices;
+
+        let mut read_segments = Vec::<Segment<S, M, H, Idx, S::Size, SERP>>::with_capacity(
+            read_segment_base_indices.len(),
+        );
 
         let index_cache_read_segments = config.num_index_cached_read_segments.is_none();
 
-        for segment_base_index in segment_base_indices {
+        for segment_base_index in read_segment_base_indices {
             read_segments.push(
                 Segment::with_segment_storage_provider_config_and_base_index(
                     &mut segment_storage_provider,
@@ -164,14 +168,14 @@ where
             );
         }
 
-        let mut write_segment = read_segments
-            .pop()
-            .ok_or(SegmentedLogError::NoSegmentsCreated)?;
-
-        write_segment
-            .cache_index()
-            .await
-            .map_err(SegmentedLogError::SegmentError)?;
+        let write_segment = Segment::with_segment_storage_provider_config_and_base_index(
+            &mut segment_storage_provider,
+            config.segment_config,
+            write_segment_base_index,
+            true, // write segment is always cached
+        )
+        .await
+        .map_err(SegmentedLogError::SegmentError)?;
 
         Ok(Self {
             write_segment: Some(write_segment),
@@ -1228,7 +1232,7 @@ pub(crate) mod test {
     {
         const INITIAL_INDEX: usize = 42;
 
-        const NUM_INDEX_CACHED_SEGMENTS: usize = 3;
+        const NUM_INDEX_CACHED_SEGMENTS: usize = 5;
 
         const RECORDS_PER_SEGMENT: usize = _RECORDS.len();
 
@@ -1332,12 +1336,12 @@ pub(crate) mod test {
             assert!(segments.all(|x| x.cached_index_records().is_some()));
         }
 
+        segmented_log.close().await.unwrap();
+
         let cache_disabled_config = Config {
             num_index_cached_read_segments: Some(0),
             ..config
         };
-
-        segmented_log.close().await.unwrap();
 
         let mut segmented_log = SegmentedLog::<_, M, H, _, _, SERP, _>::new(
             cache_disabled_config,
@@ -1345,6 +1349,13 @@ pub(crate) mod test {
         )
         .await
         .unwrap();
+
+        assert!(segmented_log
+            .segments()
+            .last()
+            .unwrap()
+            .cached_index_records()
+            .is_some());
 
         segmented_log.exclusive_read(&initial_index).await.unwrap();
 
@@ -1475,7 +1486,7 @@ pub(crate) mod test {
             }
         }
 
-        let expiry_duration = Duration::from_millis(10);
+        let expiry_duration = Duration::from_millis(50);
 
         _make_sleep_future(expiry_duration).await;
 

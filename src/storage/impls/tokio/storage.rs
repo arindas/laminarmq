@@ -415,5 +415,35 @@ pub mod unix {
                 tokio::fs::remove_dir_all(directory_path).await.unwrap();
             }
         }
+
+        #[tokio::test]
+        async fn test_tokio_std_file_segmented_log_segment_index_caching() {
+            const TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY: &str =
+                "/tmp/laminarmq_test_tokio_std_file_segmented_log_segment_index_caching";
+
+            if Path::new(TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY).exists() {
+                let directory_path = TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY;
+                tokio::fs::remove_dir_all(directory_path).await.unwrap();
+            }
+
+            let disk_backed_storage_provider =
+                DiskBackedSegmentStorageProvider::<_, _, u32>::with_storage_directory_path_and_provider(
+                    TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY,
+                    StdFileStorageProvider,
+                )
+                .unwrap();
+
+            segmented_log::test::_test_segmented_log_segment_index_caching(
+                disk_backed_storage_provider,
+                |duration| async move { tokio::time::sleep(duration).await },
+                PhantomData::<((), crc32fast::Hasher, bincode::BinCode)>,
+            )
+            .await;
+
+            if Path::new(TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY).exists() {
+                let directory_path = TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY;
+                tokio::fs::remove_dir_all(directory_path).await.unwrap();
+            }
+        }
     }
 }

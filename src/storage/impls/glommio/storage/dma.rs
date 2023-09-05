@@ -433,4 +433,41 @@ mod tests {
             fs::remove_dir_all(TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY).unwrap();
         }
     }
+
+    #[test]
+    fn test_dma_segmented_log_segment_index_caching() {
+        const TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY: &str =
+            "/tmp/laminarmq_test_dma_segmented_log_segment_index_caching";
+
+        if Path::new(TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY).exists() {
+            fs::remove_dir_all(TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY).unwrap();
+        }
+
+        let local_executor = LocalExecutorBuilder::new(Placement::Unbound)
+            .spawn(move || async move {
+                let disk_backed_storage_provider = DiskBackedSegmentStorageProvider::<
+                    DmaStorage,
+                    DmaStorageProvider,
+                    u32,
+                >::with_storage_directory_path_and_provider(
+                    TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY,
+                    DmaStorageProvider,
+                )
+                .unwrap();
+
+                segmented_log::test::_test_segmented_log_segment_index_caching(
+                    disk_backed_storage_provider,
+                    |duration| async move { glommio::timer::sleep(duration).await },
+                    PhantomData::<((), crc32fast::Hasher, bincode::BinCode)>,
+                )
+                .await;
+            })
+            .unwrap();
+
+        local_executor.join().unwrap();
+
+        if Path::new(TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY).exists() {
+            fs::remove_dir_all(TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY).unwrap();
+        }
+    }
 }
