@@ -1460,6 +1460,8 @@ pub(crate) mod test {
             }
 
             assert_eq!(idx, segmented_log.highest_index());
+
+            assert!(expected_records.next().is_none());
         }
 
         const WRITE_SEGMENT_ID: usize = NUM_SEGMENTS - 1;
