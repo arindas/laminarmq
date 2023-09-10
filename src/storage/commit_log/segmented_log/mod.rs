@@ -6,7 +6,7 @@ use self::segment::{Segment, SegmentStorageProvider};
 use super::{
     super::super::{
         common::{
-            lru_cache::{lru_cache_with_capacity, AllocLRUCache, Cache, CacheError},
+            lru_cache::{lru_cache_with_capacity, AllocLRUCache, CacheError},
             serde_compat::SerializationProvider,
             split::SplitAt,
         },
@@ -16,10 +16,11 @@ use super::{
     },
     CommitLog,
 };
+
 use async_trait::async_trait;
 use futures_core::Stream;
 use futures_lite::{stream, StreamExt};
-use generational_cache::prelude::Eviction;
+use generational_cache::prelude::{Cache, Eviction, Lookup};
 use num::{CheckedSub, FromPrimitive, ToPrimitive, Unsigned};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
@@ -316,8 +317,8 @@ where
         let cache_ops = match (cache.capacity(), segment_id) {
             (0, _) | (_, None) => Ok(&cache_op_buf[..0]),
             (_, Some(segment_id)) => match cache.query(&segment_id) {
-                Ok(_) => Ok(&cache_op_buf[..0]),
-                Err(CacheError::CacheMiss) => match cache.insert(segment_id, ()) {
+                Ok(Lookup::Hit(_)) => Ok(&cache_op_buf[..0]),
+                Ok(Lookup::Miss) => match cache.insert(segment_id, ()) {
                     Ok(Eviction::None) => {
                         cache_op_buf[0] = CacheOp::new(segment_id, CacheOpKind::Cache);
                         Ok(&cache_op_buf[..1])
@@ -368,11 +369,9 @@ where
         }
 
         for segment_id in segment_ids {
-            match self.segments_with_cached_index.remove(&segment_id) {
-                Ok(_) | Err(CacheError::CacheMiss) => Ok(()),
-                Err(error) => Err(error),
-            }
-            .map_err(SegmentedLogError::CacheError)?;
+            self.segments_with_cached_index
+                .remove(&segment_id)
+                .map_err(SegmentedLogError::CacheError)?;
         }
 
         Ok(())
