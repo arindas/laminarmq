@@ -6,7 +6,7 @@ use criterion::{
 };
 use futures_lite::{stream, StreamExt};
 use laminarmq::{
-    common::serde_compat::bincode,
+    common::{cache::NoOpCache, serde_compat::bincode},
     storage::{
         commit_log::{
             segmented_log::{segment::Config as SegmentConfig, Config, MetaWithIdx, SegmentedLog},
@@ -90,13 +90,21 @@ where
     X: stream::Stream<Item = Result<XBuf, XE>> + Clone + Unpin,
     XBuf: Deref<Target = [u8]>,
 {
-    let mut segmented_log =
-        SegmentedLog::<InMemStorage, (), crc32fast::Hasher, u32, usize, bincode::BinCode, _>::new(
-            IN_MEMORY_SEGMENTED_LOG_CONFIG,
-            InMemSegmentStorageProvider::<u32>::default(),
-        )
-        .await
-        .unwrap();
+    let mut segmented_log = SegmentedLog::<
+        InMemStorage,
+        (),
+        crc32fast::Hasher,
+        u32,
+        usize,
+        bincode::BinCode,
+        _,
+        NoOpCache<usize, ()>,
+    >::new(
+        IN_MEMORY_SEGMENTED_LOG_CONFIG,
+        InMemSegmentStorageProvider::<u32>::default(),
+    )
+    .await
+    .unwrap();
 
     let start = std::time::Instant::now();
 
@@ -134,13 +142,21 @@ where
         )
         .unwrap();
 
-    let mut segmented_log =
-        SegmentedLog::<DmaStorage, (), crc32fast::Hasher, u32, u64, bincode::BinCode, _>::new(
-            PERSISTENT_SEGMENTED_LOG_CONFIG,
-            disk_backed_storage_provider,
-        )
-        .await
-        .unwrap();
+    let mut segmented_log = SegmentedLog::<
+        DmaStorage,
+        (),
+        crc32fast::Hasher,
+        u32,
+        u64,
+        bincode::BinCode,
+        _,
+        NoOpCache<usize, ()>,
+    >::new(
+        PERSISTENT_SEGMENTED_LOG_CONFIG,
+        disk_backed_storage_provider,
+    )
+    .await
+    .unwrap();
 
     let start = std::time::Instant::now();
 
@@ -185,13 +201,21 @@ where
         )
         .unwrap();
 
-    let mut segmented_log =
-        SegmentedLog::<BufferedStorage, (), crc32fast::Hasher, u32, u64, bincode::BinCode, _>::new(
-            PERSISTENT_SEGMENTED_LOG_CONFIG,
-            disk_backed_storage_provider,
-        )
-        .await
-        .unwrap();
+    let mut segmented_log = SegmentedLog::<
+        BufferedStorage,
+        (),
+        crc32fast::Hasher,
+        u32,
+        u64,
+        bincode::BinCode,
+        _,
+        NoOpCache<usize, ()>,
+    >::new(
+        PERSISTENT_SEGMENTED_LOG_CONFIG,
+        disk_backed_storage_provider,
+    )
+    .await
+    .unwrap();
 
     let start = std::time::Instant::now();
 
@@ -236,13 +260,21 @@ where
         )
         .unwrap();
 
-    let mut segmented_log =
-        SegmentedLog::<StdFileStorage, (), crc32fast::Hasher, u32, u64, bincode::BinCode, _>::new(
-            PERSISTENT_SEGMENTED_LOG_CONFIG,
-            disk_backed_storage_provider,
-        )
-        .await
-        .unwrap();
+    let mut segmented_log = SegmentedLog::<
+        StdFileStorage,
+        (),
+        crc32fast::Hasher,
+        u32,
+        u64,
+        bincode::BinCode,
+        _,
+        NoOpCache<usize, ()>,
+    >::new(
+        PERSISTENT_SEGMENTED_LOG_CONFIG,
+        disk_backed_storage_provider,
+    )
+    .await
+    .unwrap();
 
     let start = tokio::time::Instant::now();
 
