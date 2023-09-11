@@ -387,6 +387,10 @@ where
     where
         SI: Iterator<Item = usize>,
     {
+        if self.config.num_index_cached_read_segments.is_none() {
+            return Ok(());
+        }
+
         let cache = &mut self.segments_with_cached_index;
 
         if cache.capacity() <= 0 {
