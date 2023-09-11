@@ -61,6 +61,7 @@ pub enum SegmentedLogError<SE, SDE, CE> {
     StorageError(SE),
     SegmentError(segment::SegmentError<SE, SDE>),
     CacheError(CE),
+    CacheNotFound,
     BaseIndexLesserThanInitialIndex,
     WriteSegmentLost,
     IndexOutOfBounds,
@@ -99,7 +100,7 @@ pub struct SegmentedLog<S, M, H, Idx, Size, SERP, SSP, C> {
 
     config: Config<Idx, Size>,
 
-    segments_with_cached_index: C,
+    segments_with_cached_index: Option<C>,
 
     segment_storage_provider: SSP,
 }
@@ -186,16 +187,19 @@ where
         .await
         .map_err(SegmentedLogError::SegmentError)?;
 
-        let mut cache = C::default();
-
-        if let Some(cache_cacpacity) = config.num_index_cached_read_segments {
-            cache
-                .reserve(cache_cacpacity)
-                .map_err(SegmentedLogError::CacheError)?;
-            cache
-                .shrink(cache_cacpacity)
-                .map_err(SegmentedLogError::CacheError)?;
-        }
+        let cache = match config.num_index_cached_read_segments {
+            Some(cache_cacpacity) => {
+                let mut cache = C::default();
+                cache
+                    .reserve(cache_cacpacity)
+                    .map_err(SegmentedLogError::CacheError)?;
+                cache
+                    .shrink(cache_cacpacity)
+                    .map_err(SegmentedLogError::CacheError)?;
+                Some(cache)
+            }
+            None => None,
+        };
 
         Ok(Self {
             write_segment: Some(write_segment),
@@ -337,7 +341,10 @@ where
             CacheOp::new(0, CacheOpKind::None),
         ];
 
-        let cache = &mut self.segments_with_cached_index;
+        let cache = self
+            .segments_with_cached_index
+            .as_mut()
+            .ok_or(SegmentedLogError::CacheNotFound)?;
 
         let cache_ops = match (cache.capacity(), segment_id) {
             (0, _) | (_, None) => Ok(&cache_op_buf[..0]),
@@ -391,14 +398,17 @@ where
             return Ok(());
         }
 
-        let cache = &mut self.segments_with_cached_index;
+        let cache = self
+            .segments_with_cached_index
+            .as_mut()
+            .ok_or(SegmentedLogError::CacheNotFound)?;
 
         if cache.capacity() <= 0 {
             return Ok(());
         }
 
         for segment_id in segment_ids {
-            self.segments_with_cached_index
+            cache
                 .remove(&segment_id)
                 .map_err(SegmentedLogError::CacheError)?;
         }
