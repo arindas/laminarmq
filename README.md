@@ -641,7 +641,7 @@ All benchmarks in the reports have been run on a machine (HP Pavilion x360 Conve
     </tr>
     <tr>
         <td><code>linked_in_post</code></td>
-        <td><code>2940 bytes<code></td>
+        <td><code>2940 bytes</code></td>
         <td><code>≤ 3000 bytes (3 KB)</code></td>
     </tr>
     <tr>
@@ -656,7 +656,7 @@ This section presents some selected benchmark reports:
 #### `commit_log` write benchmark with 1KB messages
 
 <p align="center">
-<img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/bench/k-message-write-bench.svg" alt="k-message-write-bench"/>
+<img src="https://arindas.github.io/laminarmq/bench/latest/commit_log_append_with_k_message/report/lines.svg" alt="k-message-write-bench"/>
 </p>
 <p align="center">
 <b>Fig:</b> Comparing Time taken v/s Input size in bytes (lower is better) across storage back-ends
@@ -666,10 +666,24 @@ View this benchmark report in more detail [here](https://arindas.github.io/lamin
 
 This benchmark measures the time taken to write messages of size 1KB across different `commit_log` storage back-ends.
 
+We also profile our implementation across different storage backends. Here's a
+profile using the
+[`DmaStorage`](https://arindas.github.io/laminarmq/docs/laminarmq/storage/impls/glommio/storage/dma/struct.DmaStorage.html)
+backend.
+
+<p align="center">
+<img src="https://arindas.github.io/laminarmq/bench/latest/commit_log_append_with_k_message/glommio_dma_file_segmented_log/10000/profile/flamegraph.svg" alt="flamegraph">
+</p>
+<p align="center">
+<b>Fig:</b> Flamgraph for 10,000 writes of 1KB messages on DmaStorage backend
+</p>
+
+As you can see, a lot of time is spent simply hashing the request bytes.
+
 #### `segmented_log` streaming read benchmark with 1KB messages
 
 <p align="center" bgcolor="white">
-<img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/bench/k-message-read-bench.svg" alt="k-message-read-bench"/>
+<img src="https://arindas.github.io/laminarmq/bench/latest/segmented_log_read_stream_with_k_message/report/lines.svg" alt="k-message-read-bench"/>
 </p>
 <p align="center">
 <b>Fig:</b> Comparing Time taken v/s Input size in bytes (lower is better) across storage back-ends
@@ -680,6 +694,19 @@ View this benchmark report in more detail [here](https://arindas.github.io/lamin
 This benchmark measures the time taken for streaming reads on messages of size
 1KB across different `segmented_log` storage back-ends.
 
+We also profile our implementation across different storage backends. Here's a
+profile using the
+[`DmaStorage`](https://arindas.github.io/laminarmq/docs/laminarmq/storage/impls/glommio/storage/dma/struct.DmaStorage.html)
+backend.
+
+<p align="center">
+<img src="https://arindas.github.io/laminarmq/bench/latest/segmented_log_read_stream_with_k_message/glommio_dma_file_segmented_log/10000/profile/flamegraph.svg" alt="flamegraph">
+</p>
+<p align="center">
+<b>Fig:</b> Flamgraph for 10,000 reads of 1KB messages on DmaStorage backend
+</p>
+
+As you can see, a lot of time is spent simply hashing the request bytes.
 
 The remaining benchmark reports are available at <https://arindas.github.io/laminarmq/bench/latest/report>.
 
