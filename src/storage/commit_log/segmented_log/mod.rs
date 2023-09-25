@@ -188,13 +188,13 @@ where
         .map_err(SegmentedLogError::SegmentError)?;
 
         let cache = match config.num_index_cached_read_segments {
-            Some(cache_cacpacity) => {
+            Some(cache_capacity) => {
                 let mut cache = C::default();
                 cache
-                    .reserve(cache_cacpacity)
+                    .reserve(cache_capacity)
                     .map_err(SegmentedLogError::CacheError)?;
                 cache
-                    .shrink(cache_cacpacity)
+                    .shrink(cache_capacity)
                     .map_err(SegmentedLogError::CacheError)?;
                 Some(cache)
             }
