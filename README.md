@@ -672,7 +672,9 @@ profile using the
 backend.
 
 <p align="center">
+<a href="https://arindas.github.io/laminarmq/bench/latest/commit_log_append_with_k_message/glommio_dma_file_segmented_log/10000/profile/flamegraph.svg">
 <img src="https://arindas.github.io/laminarmq/bench/latest/commit_log_append_with_k_message/glommio_dma_file_segmented_log/10000/profile/flamegraph.svg" alt="flamegraph">
+</a>
 </p>
 <p align="center">
 <b>Fig:</b> Flamgraph for 10,000 writes of 1KB messages on DmaStorage backend
@@ -700,13 +702,15 @@ profile using the
 backend.
 
 <p align="center">
+<a href="https://arindas.github.io/laminarmq/bench/latest/segmented_log_read_stream_with_k_message/glommio_dma_file_segmented_log/10000/profile/flamegraph.svg">
 <img src="https://arindas.github.io/laminarmq/bench/latest/segmented_log_read_stream_with_k_message/glommio_dma_file_segmented_log/10000/profile/flamegraph.svg" alt="flamegraph">
+</a>
 </p>
 <p align="center">
 <b>Fig:</b> Flamgraph for 10,000 reads of 1KB messages on DmaStorage backend
 </p>
 
-As you can see, a lot of time is spent simply hashing the request bytes.
+In this case, more time is spent on system calls and I/O.
 
 The remaining benchmark reports are available at <https://arindas.github.io/laminarmq/bench/latest/report>.
 
