@@ -1,6 +1,15 @@
 name: rust-ci
 on:
   workflow_dispatch:
+
+  push:
+    branches:
+      - main
+      - develop
+      - 'dev/**'
+    paths:
+      - 'src/**'
+
   pull_request:
     branches:
       - main

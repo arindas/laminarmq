@@ -403,7 +403,7 @@ where
             .as_mut()
             .ok_or(SegmentedLogError::CacheNotFound)?;
 
-        if cache.capacity() <= 0 {
+        if cache.capacity() == 0 {
             return Ok(());
         }
 
@@ -1335,7 +1335,7 @@ pub(crate) mod test {
 
         assert!(segmented_log
             .segments()
-            .nth(0)
+            .next()
             .unwrap()
             .cached_index_records()
             .is_some());

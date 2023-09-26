@@ -677,7 +677,7 @@ backend.
 </a>
 </p>
 <p align="center">
-<b>Fig:</b> Flamgraph for 10,000 writes of 1KB messages on DmaStorage backend
+<b>Fig:</b> Flamegraph for 10,000 writes of 1KB messages on DmaStorage backend
 </p>
 
 As you can see, a lot of time is spent simply hashing the request bytes.
@@ -707,7 +707,7 @@ backend.
 </a>
 </p>
 <p align="center">
-<b>Fig:</b> Flamgraph for 10,000 reads of 1KB messages on DmaStorage backend
+<b>Fig:</b> Flamegraph for 10,000 reads of 1KB messages on DmaStorage backend
 </p>
 
 In this case, more time is spent on system calls and I/O.
