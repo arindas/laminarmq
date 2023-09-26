@@ -656,7 +656,7 @@ This section presents some selected benchmark reports:
 #### `commit_log` write benchmark with 1KB messages
 
 <p align="center">
-<img src="https://arindas.github.io/laminarmq/bench/latest/commit_log_append_with_k_message/report/lines.svg" alt="k-message-write-bench"/>
+<img src="https://svg-add-bg-fn.vercel.app/?svg=https://arindas.github.io/laminarmq/bench/latest/commit_log_append_with_k_message/report/lines.svg" alt="k-message-write-bench"/>
 </p>
 <p align="center">
 <b>Fig:</b> Comparing Time taken v/s Input size in bytes (lower is better) across storage back-ends
@@ -684,8 +684,8 @@ As you can see, a lot of time is spent simply hashing the request bytes.
 
 #### `segmented_log` streaming read benchmark with 1KB messages
 
-<p align="center" bgcolor="white">
-<img src="https://arindas.github.io/laminarmq/bench/latest/segmented_log_read_stream_with_k_message/report/lines.svg" alt="k-message-read-bench"/>
+<p align="center">
+<img src="https://svg-add-bg-fn.vercel.app/?svg=https://arindas.github.io/laminarmq/bench/latest/segmented_log_read_stream_with_k_message/report/lines.svg" alt="k-message-read-bench"/>
 </p>
 <p align="center">
 <b>Fig:</b> Comparing Time taken v/s Input size in bytes (lower is better) across storage back-ends
