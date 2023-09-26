@@ -515,7 +515,7 @@ with specific fractions of CPU time shares. Generally tasks with similar latency
 executed on the same task queue. For instance web server tasks will be executed on a different queue
 than the one that runs tasks for persisting data to the disk.
 
-We re-use the same constructs that we use the general async runtim execution model. The only
+We re-use the same constructs that we use in the general async runtime execution model. The only
 difference being, we explicitly care about in which task queue a class of future's tasks are
 executed. In our case, we have the following 4 task queues:
 - Request router task queue
