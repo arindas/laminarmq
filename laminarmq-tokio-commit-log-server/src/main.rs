@@ -11,48 +11,17 @@ use laminarmq::common::serde_compat::bincode;
 use laminarmq::{
     common::cache::NoOpCache,
     storage::{
-        commit_log::{
-            segmented_log::{MetaWithIdx, SegmentedLog},
-            CommitLog,
-        },
+        commit_log::segmented_log::SegmentedLog,
         impls::in_mem::{segment::InMemSegmentStorageProvider, storage::InMemStorage},
     },
 };
 use serde::{Deserialize, Serialize};
-use std::{net::SocketAddr, sync::Arc, time::Duration};
-use tokio::sync::RwLock;
+use std::{net::SocketAddr, time::Duration};
 use tower::{BoxError, ServiceBuilder};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-trait AppState {
-    type CL: CommitLog<MetaWithIdx<(), u32>, Vec<u8>>;
-
-    fn commit_log_mut(&mut self) -> &mut Self::CL;
-
-    fn commit_log(&self) -> &Self::CL;
-}
-
-struct ParameterizedAppState<CL> {
-    commit_log: CL,
-}
-
-impl<CL> AppState for ParameterizedAppState<CL>
-where
-    CL: CommitLog<MetaWithIdx<(), u32>, Vec<u8>>,
-{
-    type CL = CL;
-
-    fn commit_log_mut(&mut self) -> &mut Self::CL {
-        &mut self.commit_log
-    }
-
-    fn commit_log(&self) -> &Self::CL {
-        &self.commit_log
-    }
-}
-
-type InMemSegLog = SegmentedLog<
+pub type InMemSegLog = SegmentedLog<
     InMemStorage,
     (),
     crc32fast::Hasher,
@@ -63,20 +32,8 @@ type InMemSegLog = SegmentedLog<
     NoOpCache<usize, ()>,
 >;
 
-#[derive(Default)]
-struct BadCL;
-
-impl AppState for BadCL {
-    type CL = InMemSegLog;
-
-    fn commit_log_mut(&mut self) -> &mut Self::CL {
-        todo!()
-    }
-
-    fn commit_log(&self) -> &Self::CL {
-        todo!()
-    }
-}
+#[derive(Default, Clone)]
+struct AppState {}
 
 #[tokio::main]
 async fn main() {
@@ -89,13 +46,12 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let state = SharedState::<BadCL>::default();
-
     // Compose the routes
     let app = Router::new()
-        .route("/rpc/truncate", post(truncate))
+        .route("/index_bounds", get(index_bounds))
         .route("/records/:index", get(read))
         .route("/records", post(append))
+        .route("/rpc/truncate", post(truncate))
         // Add middleware to all routes
         .layer(
             ServiceBuilder::new()
@@ -113,7 +69,7 @@ async fn main() {
                 .layer(TraceLayer::new_for_http())
                 .into_inner(),
         )
-        .with_state(state);
+        .with_state(AppState::default());
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
     tracing::debug!("listening on {}", addr);
@@ -123,18 +79,32 @@ async fn main() {
         .unwrap();
 }
 
-async fn append<S: AppState + 'static>(
-    State(_state): State<SharedState<S>>,
-    _request: Request<Body>,
-) -> Result<impl IntoResponse, StatusCode> {
-    Ok("")
+#[derive(Debug, Serialize, Deserialize)]
+pub struct IndexBoundsResponse {
+    highest_index: u32,
+    lowest_index: u32,
 }
 
-async fn read<S: AppState>(
-    Path(_index): Path<u32>,
-    State(_state): State<SharedState<S>>,
-) -> Result<impl IntoResponse, StatusCode> {
-    Ok("")
+async fn index_bounds(State(_state): State<AppState>) -> Json<IndexBoundsResponse> {
+    let index_bounds_response = IndexBoundsResponse {
+        highest_index: 0,
+        lowest_index: 0,
+    };
+
+    Json(index_bounds_response)
+}
+
+async fn read(Path(_index): Path<u32>, State(_state): State<AppState>) -> impl IntoResponse {
+    ""
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AppendResponse {
+    write_index: u32,
+}
+
+async fn append(State(_state): State<AppState>, _request: Request<Body>) -> Json<AppendResponse> {
+    Json(AppendResponse { write_index: 0 })
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -142,11 +112,9 @@ struct TruncateRequest {
     truncate_index: u32,
 }
 
-async fn truncate<S: AppState>(
-    State(_state): State<SharedState<S>>,
+async fn truncate(
+    State(_state): State<AppState>,
     Json(_truncate_request): Json<TruncateRequest>,
-) -> Result<impl IntoResponse, StatusCode> {
-    Ok("")
+) -> impl IntoResponse {
+    ""
 }
-
-type SharedState<S> = Arc<RwLock<S>>;
