@@ -1,0 +1,7 @@
+[package]
+name = "laminarmq-tokio-commit-log-server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+laminarmq = { git = "https://github.com/arindas/laminarmq.git", branch = "dev/1" }
