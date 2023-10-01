@@ -20,7 +20,7 @@ use laminarmq::{
 use serde::{Deserialize, Serialize};
 use std::{io, net::SocketAddr, rc::Rc, time::Duration};
 use tokio::{
-    sync::{mpsc, oneshot, RwLock},
+    sync::{mpsc, oneshot, AcquireError, RwLock, Semaphore},
     task,
 };
 use tower::{BoxError, ServiceBuilder};
@@ -150,13 +150,19 @@ pub struct Message {
 pub struct CommitLogServer<CL> {
     message_rx: mpsc::Receiver<Message>,
     commit_log: CL,
+    max_connections: usize,
 }
 
 impl<CL> CommitLogServer<CL> {
-    pub fn new(message_rx: mpsc::Receiver<Message>, commit_log: CL) -> Self {
+    pub fn new(
+        message_rx: mpsc::Receiver<Message>,
+        commit_log: CL,
+        max_connections: usize,
+    ) -> Self {
         Self {
             message_rx,
             commit_log,
+            max_connections,
         }
     }
 }
@@ -165,18 +171,72 @@ impl<CL> CommitLogServer<CL> {
 pub enum CommitLogServerError<CLE> {
     CommitLogError(CLE),
     IoError(io::Error),
+    PermitAcquireError(AcquireError),
 }
 
 impl<CL> CommitLogServer<CL>
 where
     CL: CommitLog<MetaWithIdx<(), u32>, Vec<u8>, Idx = u32> + 'static,
 {
+    pub async fn handle_request(
+        commit_log: Rc<RwLock<CL>>,
+        request: AppRequest,
+    ) -> Result<AppResponse, CommitLogServerError<CL::Error>> {
+        match request {
+            AppRequest::IndexBounds => {
+                let commit_log = commit_log.read().await;
+
+                Ok(AppResponse::IndexBounds(IndexBoundsResponse {
+                    highest_index: commit_log.highest_index(),
+                    lowest_index: commit_log.lowest_index(),
+                }))
+            }
+
+            AppRequest::Read { index: idx } => commit_log
+                .read()
+                .await
+                .read(&idx)
+                .await
+                .map(|Record { metadata: _, value }| AppResponse::Read {
+                    record_value: value,
+                })
+                .map_err(CommitLogServerError::CommitLogError),
+
+            AppRequest::Append { record_value } => commit_log
+                .write()
+                .await
+                .append(Record {
+                    metadata: MetaWithIdx {
+                        metadata: (),
+                        index: None,
+                    },
+                    value: record_value,
+                })
+                .await
+                .map(|write_index| AppResponse::Append(AppendResponse { write_index }))
+                .map_err(CommitLogServerError::CommitLogError),
+
+            AppRequest::Truncate(TruncateRequest {
+                truncate_index: idx,
+            }) => commit_log
+                .write()
+                .await
+                .truncate(&idx)
+                .await
+                .map(|_| AppResponse::Truncate)
+                .map_err(CommitLogServerError::CommitLogError),
+        }
+    }
+
     pub fn serve(self) -> Result<(), CommitLogServerError<CL::Error>> {
-        let (mut message_rx, commit_log) = (self.message_rx, self.commit_log);
+        let (mut message_rx, commit_log, max_connections) =
+            (self.message_rx, self.commit_log, self.max_connections);
 
         let rt = tokio::runtime::Builder::new_current_thread()
             .build()
             .map_err(CommitLogServerError::IoError)?;
+
+        let conn_semaphore = Rc::new(Semaphore::new(max_connections));
 
         rt.block_on(async move {
             let local = task::LocalSet::new();
@@ -186,56 +246,18 @@ where
                     let commit_log = Rc::new(RwLock::new(commit_log));
 
                     while let Some(Message { resp_tx, request }) = message_rx.recv().await {
-                        let commit_log_copy = commit_log.clone();
+                        let (conn_semaphore, commit_log_copy) =
+                            (conn_semaphore.clone(), commit_log.clone());
 
                         task::spawn_local(async move {
+                            let _semaphore_permit = conn_semaphore
+                                .acquire()
+                                .await
+                                .map_err(CommitLogServerError::PermitAcquireError)?;
+
                             let commit_log = commit_log_copy;
-                            let response = match request {
-                                AppRequest::IndexBounds => {
-                                    let commit_log = commit_log.read().await;
 
-                                    Ok(AppResponse::IndexBounds(IndexBoundsResponse {
-                                        highest_index: commit_log.highest_index(),
-                                        lowest_index: commit_log.lowest_index(),
-                                    }))
-                                }
-
-                                AppRequest::Read { index: idx } => commit_log
-                                    .read()
-                                    .await
-                                    .read(&idx)
-                                    .await
-                                    .map(|Record { metadata: _, value }| AppResponse::Read {
-                                        record_value: value,
-                                    })
-                                    .map_err(CommitLogServerError::CommitLogError),
-
-                                AppRequest::Append { record_value } => commit_log
-                                    .write()
-                                    .await
-                                    .append(Record {
-                                        metadata: MetaWithIdx {
-                                            metadata: (),
-                                            index: None,
-                                        },
-                                        value: record_value,
-                                    })
-                                    .await
-                                    .map(|write_index| {
-                                        AppResponse::Append(AppendResponse { write_index })
-                                    })
-                                    .map_err(CommitLogServerError::CommitLogError),
-
-                                AppRequest::Truncate(TruncateRequest {
-                                    truncate_index: idx,
-                                }) => commit_log
-                                    .write()
-                                    .await
-                                    .truncate(&idx)
-                                    .await
-                                    .map(|_| AppResponse::Truncate)
-                                    .map_err(CommitLogServerError::CommitLogError),
-                            }?;
+                            let response = Self::handle_request(commit_log, request).await?;
 
                             resp_tx
                                 .send(response)
