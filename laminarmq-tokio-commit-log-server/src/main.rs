@@ -11,14 +11,21 @@ use laminarmq::{
     common::{cache::NoOpCache, serde_compat::bincode},
     storage::{
         commit_log::{
-            segmented_log::{MetaWithIdx, SegmentedLog},
+            segmented_log::{segment::Config as SegmentConfig, Config, MetaWithIdx, SegmentedLog},
             CommitLog, Record,
         },
         impls::in_mem::{segment::InMemSegmentStorageProvider, storage::InMemStorage},
     },
 };
 use serde::{Deserialize, Serialize};
-use std::{io, net::SocketAddr, rc::Rc, time::Duration};
+use std::{
+    future::Future,
+    io,
+    net::SocketAddr,
+    rc::Rc,
+    thread::{self, JoinHandle},
+    time::Duration,
+};
 use tokio::{
     sync::{mpsc, oneshot, AcquireError, RwLock, Semaphore},
     task,
@@ -38,8 +45,71 @@ pub type InMemSegLog = SegmentedLog<
     NoOpCache<usize, ()>,
 >;
 
-#[derive(Default, Clone)]
-struct AppState {}
+#[allow(unused)]
+#[derive(Clone)]
+struct AppState {
+    message_tx: mpsc::Sender<Message>,
+}
+
+pub struct ServerConfig {
+    message_buffer_size: usize,
+    max_connections: usize,
+}
+
+pub fn commit_log_server_join_handle<CLPP, CL, CLF, CLP>(
+    commit_log_provider_params: CLPP,
+    mut commit_log_provider: CLP,
+    server_config: ServerConfig,
+) -> (
+    JoinHandle<Result<(), CommitLogServerError<CL::Error>>>,
+    mpsc::Sender<Message>,
+)
+where
+    CL: CommitLog<MetaWithIdx<(), u32>, Vec<u8>, Idx = u32> + 'static,
+    CL::Error: Send + 'static,
+    CLF: Future<Output = CL>,
+    CLP: FnMut(CLPP) -> CLF + Send + 'static,
+    CLPP: Send + 'static,
+{
+    let ServerConfig {
+        message_buffer_size,
+        max_connections,
+    } = server_config;
+
+    let (message_tx, message_rx) = mpsc::channel::<Message>(message_buffer_size);
+
+    (
+        thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .build()
+                .map_err(CommitLogServerError::IoError)?;
+
+            rt.block_on(async move {
+                let commit_log = commit_log_provider(commit_log_provider_params).await;
+
+                let commit_log_server =
+                    CommitLogServer::new(message_rx, commit_log, max_connections);
+
+                commit_log_server.serve().await?;
+
+                Ok::<(), CommitLogServerError<CL::Error>>(())
+            })?;
+
+            Ok(())
+        }),
+        message_tx,
+    )
+}
+
+const IN_MEMORY_SEGMENTED_LOG_CONFIG: Config<u32, usize> = Config {
+    segment_config: SegmentConfig {
+        max_store_size: 1048576, // = 1MiB
+        max_store_overflow: 524288,
+        max_index_size: 1048576,
+    },
+    initial_index: 0,
+    num_index_cached_read_segments: None,
+};
 
 #[tokio::main]
 async fn main() {
@@ -51,6 +121,22 @@ async fn main() {
         )
         .with(tracing_subscriber::fmt::layer())
         .init();
+
+    let (join_handle, message_tx) = commit_log_server_join_handle(
+        (),
+        |_| async {
+            InMemSegLog::new(
+                IN_MEMORY_SEGMENTED_LOG_CONFIG,
+                InMemSegmentStorageProvider::<u32>::default(),
+            )
+            .await
+            .unwrap()
+        },
+        ServerConfig {
+            message_buffer_size: 1024,
+            max_connections: 512,
+        },
+    );
 
     // Compose the routes
     let app = Router::new()
@@ -75,14 +161,26 @@ async fn main() {
                 .layer(TraceLayer::new_for_http())
                 .into_inner(),
         )
-        .with_state(AppState::default());
+        .with_state(AppState {
+            message_tx: message_tx.clone(),
+        });
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
+
     tracing::debug!("listening on {}", addr);
+
     axum::Server::bind(&addr)
         .serve(app.into_make_service())
         .await
         .unwrap();
+
+    tokio::task::spawn_blocking(move || join_handle.join())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+
+    message_tx.send(Message::Terminate).await.unwrap();
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -141,9 +239,13 @@ pub enum AppRequest {
     Truncate(TruncateRequest),
 }
 
-pub struct Message {
-    resp_tx: oneshot::Sender<AppResponse>,
-    request: AppRequest,
+pub enum Message {
+    Job {
+        resp_tx: oneshot::Sender<AppResponse>,
+        request: AppRequest,
+    },
+
+    Terminate,
 }
 
 #[allow(unused)]
@@ -169,9 +271,10 @@ impl<CL> CommitLogServer<CL> {
 
 #[derive(Debug)]
 pub enum CommitLogServerError<CLE> {
+    ConnPermitAcquireError(AcquireError),
     CommitLogError(CLE),
     IoError(io::Error),
-    PermitAcquireError(AcquireError),
+    ResponseSendError,
 }
 
 impl<CL> CommitLogServer<CL>
@@ -228,53 +331,41 @@ where
         }
     }
 
-    pub fn serve(self) -> Result<(), CommitLogServerError<CL::Error>> {
+    pub async fn serve(self) -> Result<(), CommitLogServerError<CL::Error>> {
         let (mut message_rx, commit_log, max_connections) =
             (self.message_rx, self.commit_log, self.max_connections);
 
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .build()
-            .map_err(CommitLogServerError::IoError)?;
-
         let conn_semaphore = Rc::new(Semaphore::new(max_connections));
 
-        rt.block_on(async move {
-            let local = task::LocalSet::new();
+        let local = task::LocalSet::new();
 
-            local
-                .run_until(async move {
-                    let commit_log = Rc::new(RwLock::new(commit_log));
+        local
+            .run_until(async move {
+                let commit_log = Rc::new(RwLock::new(commit_log));
 
-                    while let Some(Message { resp_tx, request }) = message_rx.recv().await {
-                        let (conn_semaphore, commit_log_copy) =
-                            (conn_semaphore.clone(), commit_log.clone());
+                while let Some(Message::Job { resp_tx, request }) = message_rx.recv().await {
+                    let (conn_semaphore, commit_log_copy) =
+                        (conn_semaphore.clone(), commit_log.clone());
 
-                        task::spawn_local(async move {
-                            let _semaphore_permit = conn_semaphore
-                                .acquire()
-                                .await
-                                .map_err(CommitLogServerError::PermitAcquireError)?;
+                    task::spawn_local(async move {
+                        let _semaphore_permit = conn_semaphore
+                            .acquire()
+                            .await
+                            .map_err(CommitLogServerError::ConnPermitAcquireError)?;
 
-                            let commit_log = commit_log_copy;
+                        let commit_log = commit_log_copy;
 
-                            let response = Self::handle_request(commit_log, request).await?;
+                        let response = Self::handle_request(commit_log, request).await?;
 
-                            resp_tx
-                                .send(response)
-                                .map_err(|_| {
-                                    io::Error::new(
-                                        io::ErrorKind::Other,
-                                        "response_tx.send() failed",
-                                    )
-                                })
-                                .map_err(CommitLogServerError::IoError)?;
+                        resp_tx
+                            .send(response)
+                            .map_err(|_| CommitLogServerError::ResponseSendError)?;
 
-                            Ok::<(), CommitLogServerError<CL::Error>>(())
-                        });
-                    }
-                })
-                .await;
-        });
+                        Ok::<(), CommitLogServerError<CL::Error>>(())
+                    });
+                }
+            })
+            .await;
 
         Ok(())
     }
