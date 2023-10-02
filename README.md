@@ -50,6 +50,11 @@ order they need.
   [SWIM](https://www.cs.cornell.edu/projects/Quicksilver/public_pdfs/SWIM.pdf).
 - [ ] Replication and consensus of replicated records with [Raft](https://raft.github.io/raft.pdf).
 
+## Examples
+
+Find examples demonstrating different capabilities of `laminarmq` in the
+[examples branch](https://github.com/arindas/laminarmq/tree/examples).
+
 ## Design
 
 This section describes the internal design of `laminarmq`.
