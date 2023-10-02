@@ -2,7 +2,6 @@ use axum::{
     error_handling::HandleErrorLayer,
     extract::{Path, State},
     http::StatusCode,
-    response::IntoResponse,
     routing::{get, post},
     Json, Router,
 };
@@ -19,6 +18,7 @@ use laminarmq::{
 };
 use serde::{Deserialize, Serialize};
 use std::{
+    fmt::Debug,
     future::Future,
     io,
     net::SocketAddr,
@@ -27,11 +27,13 @@ use std::{
     time::Duration,
 };
 use tokio::{
+    signal,
     sync::{mpsc, oneshot, AcquireError, RwLock, Semaphore},
     task,
 };
 use tower::{BoxError, ServiceBuilder};
 use tower_http::trace::TraceLayer;
+use tracing::{error_span, info, info_span, Instrument};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 pub type InMemSegLog = SegmentedLog<
@@ -51,54 +53,33 @@ struct AppState {
     message_tx: mpsc::Sender<Message>,
 }
 
-pub struct ServerConfig {
-    message_buffer_size: usize,
-    max_connections: usize,
+#[derive(Debug)]
+pub enum ChannelError {
+    SendError,
+    RecvError,
 }
 
-pub fn commit_log_server_join_handle<CLPP, CL, CLF, CLP>(
-    commit_log_provider_params: CLPP,
-    mut commit_log_provider: CLP,
-    server_config: ServerConfig,
-) -> (
-    JoinHandle<Result<(), CommitLogServerError<CL::Error>>>,
-    mpsc::Sender<Message>,
-)
-where
-    CL: CommitLog<MetaWithIdx<(), u32>, Vec<u8>, Idx = u32> + 'static,
-    CL::Error: Send + 'static,
-    CLF: Future<Output = CL>,
-    CLP: FnMut(CLPP) -> CLF + Send + 'static,
-    CLPP: Send + 'static,
-{
-    let ServerConfig {
-        message_buffer_size,
-        max_connections,
-    } = server_config;
+impl AppState {
+    pub async fn enqueue_request(
+        &self,
+        request: AppRequest,
+    ) -> Result<oneshot::Receiver<ResponseResult>, ChannelError> {
+        let (resp_tx, resp_rx) = oneshot::channel();
 
-    let (message_tx, message_rx) = mpsc::channel::<Message>(message_buffer_size);
+        let message = Message::Connection { resp_tx, request };
 
-    (
-        thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .build()
-                .map_err(CommitLogServerError::IoError)?;
+        self.message_tx
+            .send(message)
+            .await
+            .map_err(|_| ChannelError::SendError)?;
 
-            rt.block_on(async move {
-                let commit_log = commit_log_provider(commit_log_provider_params).await;
+        Ok(resp_rx)
+    }
+}
 
-                let commit_log_server =
-                    CommitLogServer::new(message_rx, commit_log, max_connections);
-
-                commit_log_server.serve().await?;
-
-                Ok::<(), CommitLogServerError<CL::Error>>(())
-            })?;
-
-            Ok(())
-        }),
-        message_tx,
-    )
+pub struct CommitLogServerConfig {
+    message_buffer_size: usize,
+    max_connections: usize,
 }
 
 const IN_MEMORY_SEGMENTED_LOG_CONFIG: Config<u32, usize> = Config {
@@ -122,19 +103,18 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let (join_handle, message_tx) = commit_log_server_join_handle(
-        (),
-        |_| async {
+    let (join_handle, message_tx) = CommitLogServer::orchestrate(
+        CommitLogServerConfig {
+            message_buffer_size: 1024,
+            max_connections: 512,
+        },
+        || async {
             InMemSegLog::new(
                 IN_MEMORY_SEGMENTED_LOG_CONFIG,
                 InMemSegmentStorageProvider::<u32>::default(),
             )
             .await
             .unwrap()
-        },
-        ServerConfig {
-            message_buffer_size: 1024,
-            max_connections: 512,
         },
     );
 
@@ -169,18 +149,43 @@ async fn main() {
 
     tracing::debug!("listening on {}", addr);
 
-    axum::Server::bind(&addr)
+    hyper::Server::bind(&addr)
         .serve(app.into_make_service())
+        .with_graceful_shutdown(shutdown_signal())
         .await
-        .unwrap();
-
-    tokio::task::spawn_blocking(move || join_handle.join())
-        .await
-        .unwrap()
-        .unwrap()
         .unwrap();
 
     message_tx.send(Message::Terminate).await.unwrap();
+
+    tokio::task::spawn_blocking(|| join_handle.join())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+
+    info!("Exiting application.");
+}
+
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("failed to install signal handler")
+            .recv()
+            .await;
+    };
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
+
+    tracing::info!("signal received, starting graceful shutdown");
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -189,17 +194,38 @@ pub struct IndexBoundsResponse {
     lowest_index: u32,
 }
 
-async fn index_bounds(State(_state): State<AppState>) -> impl IntoResponse {
-    let index_bounds_response = IndexBoundsResponse {
-        highest_index: 0,
-        lowest_index: 0,
-    };
+async fn index_bounds(State(state): State<AppState>) -> Result<Json<IndexBoundsResponse>, String> {
+    let resp_rx = state
+        .enqueue_request(AppRequest::IndexBounds)
+        .await
+        .map_err(|err| format!("error sending request to commit_log_server: {:?}", err))?;
 
-    Json(index_bounds_response)
+    let response = resp_rx
+        .await
+        .map_err(|err| format!("error receiving response: {:?}", err))??;
+
+    if let AppResponse::IndexBounds(index_bounds_response) = response {
+        Ok(Json(index_bounds_response))
+    } else {
+        Err("invalid response type".into())
+    }
 }
 
-async fn read(Path(_index): Path<u32>, State(_state): State<AppState>) -> impl IntoResponse {
-    ""
+async fn read(Path(index): Path<u32>, State(state): State<AppState>) -> Result<Vec<u8>, String> {
+    let resp_rx = state
+        .enqueue_request(AppRequest::Read { index })
+        .await
+        .map_err(|err| format!("error sending request to commit_log_server: {:?}", err))?;
+
+    let response = resp_rx
+        .await
+        .map_err(|err| format!("error receiving response: {:?}", err))??;
+
+    if let AppResponse::Read { record_value } = response {
+        Ok(record_value)
+    } else {
+        Err("invalid response type".into())
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -207,8 +233,26 @@ pub struct AppendResponse {
     write_index: u32,
 }
 
-async fn append(State(_state): State<AppState>, _request: Request<Body>) -> impl IntoResponse {
-    Json(AppendResponse { write_index: 0 })
+async fn append(
+    State(state): State<AppState>,
+    request: Request<Body>,
+) -> Result<Json<AppendResponse>, String> {
+    let resp_rx = state
+        .enqueue_request(AppRequest::Append {
+            record_value: request.into_body(),
+        })
+        .await
+        .map_err(|err| format!("error sending request to commit_log_server: {:?}", err))?;
+
+    let response = resp_rx
+        .await
+        .map_err(|err| format!("error receiving reponse: {:?}", err))??;
+
+    if let AppResponse::Append(append_reponse) = response {
+        Ok(Json(append_reponse))
+    } else {
+        Err("invalid response type".into())
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -217,10 +261,23 @@ pub struct TruncateRequest {
 }
 
 async fn truncate(
-    State(_state): State<AppState>,
-    Json(_truncate_request): Json<TruncateRequest>,
-) -> impl IntoResponse {
-    ""
+    State(state): State<AppState>,
+    Json(truncate_request): Json<TruncateRequest>,
+) -> Result<(), String> {
+    let resp_rx = state
+        .enqueue_request(AppRequest::Truncate(truncate_request))
+        .await
+        .map_err(|err| format!("error sending request to commit_log_server: {:?}", err))?;
+
+    let response = resp_rx
+        .await
+        .map_err(|err| format!("error receiving response: {:?}", err))??;
+
+    if let AppResponse::Truncate = response {
+        Ok(())
+    } else {
+        Err("invalid response type".into())
+    }
 }
 
 #[derive(Debug)]
@@ -239,9 +296,11 @@ pub enum AppRequest {
     Truncate(TruncateRequest),
 }
 
+type ResponseResult = Result<AppResponse, String>;
+
 pub enum Message {
-    Job {
-        resp_tx: oneshot::Sender<AppResponse>,
+    Connection {
+        resp_tx: oneshot::Sender<ResponseResult>,
         request: AppRequest,
     },
 
@@ -276,6 +335,8 @@ pub enum CommitLogServerError<CLE> {
     IoError(io::Error),
     ResponseSendError,
 }
+
+pub type CommitLogServerResult<T, CLE> = Result<T, CommitLogServerError<CLE>>;
 
 impl<CL> CommitLogServer<CL>
 where
@@ -331,7 +392,7 @@ where
         }
     }
 
-    pub async fn serve(self) -> Result<(), CommitLogServerError<CL::Error>> {
+    pub async fn serve(self) {
         let (mut message_rx, commit_log, max_connections) =
             (self.message_rx, self.commit_log, self.max_connections);
 
@@ -343,30 +404,76 @@ where
             .run_until(async move {
                 let commit_log = Rc::new(RwLock::new(commit_log));
 
-                while let Some(Message::Job { resp_tx, request }) = message_rx.recv().await {
+                while let Some(Message::Connection { resp_tx, request }) = message_rx.recv().await {
                     let (conn_semaphore, commit_log_copy) =
                         (conn_semaphore.clone(), commit_log.clone());
 
-                    task::spawn_local(async move {
-                        let _semaphore_permit = conn_semaphore
-                            .acquire()
+                    task::spawn_local(
+                        async move {
+                            let response = async move {
+                                let _semaphore_permit = conn_semaphore
+                                    .acquire()
+                                    .await
+                                    .map_err(CommitLogServerError::ConnPermitAcquireError)?;
+
+                                let commit_log = commit_log_copy;
+
+                                let response = Self::handle_request(commit_log, request).await?;
+
+                                Ok::<_, CommitLogServerError<CL::Error>>(response)
+                            }
                             .await
-                            .map_err(CommitLogServerError::ConnPermitAcquireError)?;
+                            .map_err(|err| format!("{:?}", err));
 
-                        let commit_log = commit_log_copy;
-
-                        let response = Self::handle_request(commit_log, request).await?;
-
-                        resp_tx
-                            .send(response)
-                            .map_err(|_| CommitLogServerError::ResponseSendError)?;
-
-                        Ok::<(), CommitLogServerError<CL::Error>>(())
-                    });
+                            if let Err(err) = resp_tx.send(response) {
+                                tracing::error!("error sending response: {:?}", err)
+                            }
+                        }
+                        .instrument(error_span!("commit_log_server_handler_task")),
+                    );
                 }
             })
             .await;
+    }
 
-        Ok(())
+    pub fn orchestrate<CLP, CLF>(
+        server_config: CommitLogServerConfig,
+        mut commit_log_provider: CLP,
+    ) -> (JoinHandle<Result<(), io::Error>>, mpsc::Sender<Message>)
+    where
+        CLP: FnMut() -> CLF + Send + 'static,
+        CLF: Future<Output = CL>,
+        CL::Error: Send + 'static,
+    {
+        let CommitLogServerConfig {
+            message_buffer_size,
+            max_connections,
+        } = server_config;
+
+        let (message_tx, message_rx) = mpsc::channel::<Message>(message_buffer_size);
+
+        (
+            thread::spawn(move || {
+                let rt = tokio::runtime::Builder::new_current_thread().build()?;
+
+                rt.block_on(
+                    async move {
+                        let commit_log_server = CommitLogServer::new(
+                            message_rx,
+                            commit_log_provider().await,
+                            max_connections,
+                        );
+
+                        commit_log_server.serve().await;
+
+                        info!("Done serving requests.");
+                    }
+                    .instrument(info_span!("commit_log_server")),
+                );
+
+                Ok(())
+            }),
+            message_tx,
+        )
     }
 }
