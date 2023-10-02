@@ -2,6 +2,7 @@ use axum::{
     error_handling::HandleErrorLayer,
     extract::{Path, State},
     http::StatusCode,
+    response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
 };
@@ -194,7 +195,23 @@ pub struct IndexBoundsResponse {
     lowest_index: u32,
 }
 
-async fn index_bounds(State(state): State<AppState>) -> Result<Json<IndexBoundsResponse>, String> {
+pub struct StringError(String);
+
+impl From<String> for StringError {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl IntoResponse for StringError {
+    fn into_response(self) -> Response {
+        (StatusCode::INTERNAL_SERVER_ERROR, self.0).into_response()
+    }
+}
+
+async fn index_bounds(
+    State(state): State<AppState>,
+) -> Result<Json<IndexBoundsResponse>, StringError> {
     let resp_rx = state
         .enqueue_request(AppRequest::IndexBounds)
         .await
@@ -207,11 +224,14 @@ async fn index_bounds(State(state): State<AppState>) -> Result<Json<IndexBoundsR
     if let AppResponse::IndexBounds(index_bounds_response) = response {
         Ok(Json(index_bounds_response))
     } else {
-        Err("invalid response type".into())
+        Err(StringError("invalid response type".into()))
     }
 }
 
-async fn read(Path(index): Path<u32>, State(state): State<AppState>) -> Result<Vec<u8>, String> {
+async fn read(
+    Path(index): Path<u32>,
+    State(state): State<AppState>,
+) -> Result<Vec<u8>, StringError> {
     let resp_rx = state
         .enqueue_request(AppRequest::Read { index })
         .await
@@ -224,7 +244,7 @@ async fn read(Path(index): Path<u32>, State(state): State<AppState>) -> Result<V
     if let AppResponse::Read { record_value } = response {
         Ok(record_value)
     } else {
-        Err("invalid response type".into())
+        Err(StringError("invalid response type".into()))
     }
 }
 
@@ -236,7 +256,7 @@ pub struct AppendResponse {
 async fn append(
     State(state): State<AppState>,
     request: Request<Body>,
-) -> Result<Json<AppendResponse>, String> {
+) -> Result<Json<AppendResponse>, StringError> {
     let resp_rx = state
         .enqueue_request(AppRequest::Append {
             record_value: request.into_body(),
@@ -251,7 +271,7 @@ async fn append(
     if let AppResponse::Append(append_reponse) = response {
         Ok(Json(append_reponse))
     } else {
-        Err("invalid response type".into())
+        Err(StringError("invalid response type".into()))
     }
 }
 
@@ -263,7 +283,7 @@ pub struct TruncateRequest {
 async fn truncate(
     State(state): State<AppState>,
     Json(truncate_request): Json<TruncateRequest>,
-) -> Result<(), String> {
+) -> Result<(), StringError> {
     let resp_rx = state
         .enqueue_request(AppRequest::Truncate(truncate_request))
         .await
@@ -276,7 +296,7 @@ async fn truncate(
     if let AppResponse::Truncate = response {
         Ok(())
     } else {
-        Err("invalid response type".into())
+        Err(StringError("invalid response type".into()))
     }
 }
 
