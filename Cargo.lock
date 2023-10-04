@@ -898,7 +898,7 @@ dependencies = [
 
 [[package]]
 name = "laminarmq"
-version = "0.0.5-rc1"
+version = "0.0.5-rc2"
 dependencies = [
  "async-io",
  "async-stream",
