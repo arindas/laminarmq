@@ -251,17 +251,15 @@ where
 async fn time_tokio_std_random_read_segmented_log<X, XBuf, XE>(
     record_content: X,
     num_appends: usize,
+    storage_directory: &str,
 ) -> tokio::time::Duration
 where
     X: Stream<Item = Result<XBuf, XE>> + Clone + Unpin,
     XBuf: Deref<Target = [u8]>,
 {
-    const BENCH_TOKIO_SEGMENTED_LOG_STORAGE_DIRECTORY: &str =
-        "/tmp/laminarmq_bench_tokio_std_random_read_segmented_log_append";
-
     let disk_backed_storage_provider =
         DiskBackedSegmentStorageProvider::<_, _, u32>::with_storage_directory_path_and_provider(
-            BENCH_TOKIO_SEGMENTED_LOG_STORAGE_DIRECTORY,
+            storage_directory,
             StdRandomReadFileStorageProvider,
         )
         .unwrap();
@@ -297,9 +295,7 @@ where
 
     segmented_log.close().await.unwrap();
 
-    tokio::fs::remove_dir_all(BENCH_TOKIO_SEGMENTED_LOG_STORAGE_DIRECTORY)
-        .await
-        .unwrap();
+    tokio::fs::remove_dir_all(storage_directory).await.unwrap();
 
     time_taken
 }
@@ -307,17 +303,15 @@ where
 async fn time_tokio_std_seek_read_segmented_log<X, XBuf, XE>(
     record_content: X,
     num_appends: usize,
+    storage_directory: &str,
 ) -> tokio::time::Duration
 where
     X: Stream<Item = Result<XBuf, XE>> + Clone + Unpin,
     XBuf: Deref<Target = [u8]>,
 {
-    const BENCH_TOKIO_SEGMENTED_LOG_STORAGE_DIRECTORY: &str =
-        "/tmp/laminarmq_bench_tokio_std_seek_read_segmented_log_append";
-
     let disk_backed_storage_provider =
         DiskBackedSegmentStorageProvider::<_, _, u32>::with_storage_directory_path_and_provider(
-            BENCH_TOKIO_SEGMENTED_LOG_STORAGE_DIRECTORY,
+            storage_directory,
             StdSeekReadFileStorageProvider,
         )
         .unwrap();
@@ -353,9 +347,7 @@ where
 
     segmented_log.close().await.unwrap();
 
-    tokio::fs::remove_dir_all(BENCH_TOKIO_SEGMENTED_LOG_STORAGE_DIRECTORY)
-        .await
-        .unwrap();
+    tokio::fs::remove_dir_all(storage_directory).await.unwrap();
 
     time_taken
 }
@@ -460,24 +452,110 @@ where
 
     let mut bench_group = BenchGroup { group };
 
+    const BENCH_TOKIO_MULTITHREAD_STD_RANDOM_READ_SEGMENTED_LOG: &str =
+        "tokio_multithread_std_random_read_segmented_log";
+
     bench_group.bench(
         &num_appends,
-        "tokio_std_random_read_segmented_log",
+        BENCH_TOKIO_MULTITHREAD_STD_RANDOM_READ_SEGMENTED_LOG,
         || tokio::runtime::Runtime::new().unwrap(),
         || {
             |_| async {
-                time_tokio_std_random_read_segmented_log(content.clone(), num_appends).await
+                time_tokio_std_random_read_segmented_log(
+                    content.clone(),
+                    num_appends,
+                    &format!(
+                        "/tmp/laminarmq_bench_{}_append",
+                        BENCH_TOKIO_MULTITHREAD_STD_RANDOM_READ_SEGMENTED_LOG
+                    ),
+                )
+                .await
             }
         },
     );
 
     let mut bench_group = BenchGroup { group };
 
+    const BENCH_TOKIO_SINGLE_WORKER_SINGLE_BLOCKING_STD_RANDOM_READ_SEGMENTED_LOG: &str =
+        "tokio_single_worker_single_blocking_std_random_read_segmented_log";
+
     bench_group.bench(
         &num_appends,
-        "tokio_std_seek_read_segmented_log",
+        BENCH_TOKIO_SINGLE_WORKER_SINGLE_BLOCKING_STD_RANDOM_READ_SEGMENTED_LOG,
+        || {
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
+                .max_blocking_threads(1)
+                .build()
+                .unwrap()
+        },
+        || {
+            |_| async {
+                time_tokio_std_random_read_segmented_log(
+                    content.clone(),
+                    num_appends,
+                    &format!(
+                        "/tmp/laminarmq_bench_{}_append",
+                        BENCH_TOKIO_SINGLE_WORKER_SINGLE_BLOCKING_STD_RANDOM_READ_SEGMENTED_LOG
+                    ),
+                )
+                .await
+            }
+        },
+    );
+
+    let mut bench_group = BenchGroup { group };
+
+    const BENCH_TOKIO_MULTITHREAD_STD_SEEK_READ_SEGMENTED_LOG: &str =
+        "tokio_multithread_std_seek_read_segmented_log";
+
+    bench_group.bench(
+        &num_appends,
+        BENCH_TOKIO_MULTITHREAD_STD_SEEK_READ_SEGMENTED_LOG,
         || tokio::runtime::Runtime::new().unwrap(),
-        || |_| async { time_tokio_std_seek_read_segmented_log(content.clone(), num_appends).await },
+        || {
+            |_| async {
+                time_tokio_std_seek_read_segmented_log(
+                    content.clone(),
+                    num_appends,
+                    &format!(
+                        "/tmp/laminarmq_bench_{}_append",
+                        BENCH_TOKIO_MULTITHREAD_STD_SEEK_READ_SEGMENTED_LOG
+                    ),
+                )
+                .await
+            }
+        },
+    );
+
+    let mut bench_group = BenchGroup { group };
+
+    const BENCH_TOKIO_SINGLE_WORKER_SINGLE_BLOCKING_STD_SEEK_READ_SEGMENTED_LOG: &str =
+        "tokio_single_worker_single_blocking_std_seek_read_segmented_log";
+
+    bench_group.bench(
+        &num_appends,
+        BENCH_TOKIO_SINGLE_WORKER_SINGLE_BLOCKING_STD_SEEK_READ_SEGMENTED_LOG,
+        || {
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
+                .max_blocking_threads(1)
+                .build()
+                .unwrap()
+        },
+        || {
+            |_| async {
+                time_tokio_std_seek_read_segmented_log(
+                    content.clone(),
+                    num_appends,
+                    &format!(
+                        "/tmp/laminarmq_bench_{}_append",
+                        BENCH_TOKIO_SINGLE_WORKER_SINGLE_BLOCKING_STD_SEEK_READ_SEGMENTED_LOG
+                    ),
+                )
+                .await
+            }
+        },
     );
 }
 
