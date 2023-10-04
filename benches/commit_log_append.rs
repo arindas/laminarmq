@@ -476,12 +476,12 @@ where
 
     let mut bench_group = BenchGroup { group };
 
-    const BENCH_TOKIO_SINGLE_WORKER_SINGLE_BLOCKING_STD_RANDOM_READ_SEGMENTED_LOG: &str =
-        "tokio_single_worker_single_blocking_std_random_read_segmented_log";
+    const BENCH_TOKIO_SWSB_STD_RANDOM_READ_SEGMENTED_LOG: &str =
+        "tokio_swsb_std_random_read_segmented_log";
 
     bench_group.bench(
         &num_appends,
-        BENCH_TOKIO_SINGLE_WORKER_SINGLE_BLOCKING_STD_RANDOM_READ_SEGMENTED_LOG,
+        BENCH_TOKIO_SWSB_STD_RANDOM_READ_SEGMENTED_LOG,
         || {
             tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(1)
@@ -496,7 +496,7 @@ where
                     num_appends,
                     &format!(
                         "/tmp/laminarmq_bench_{}_append",
-                        BENCH_TOKIO_SINGLE_WORKER_SINGLE_BLOCKING_STD_RANDOM_READ_SEGMENTED_LOG
+                        BENCH_TOKIO_SWSB_STD_RANDOM_READ_SEGMENTED_LOG
                     ),
                 )
                 .await
@@ -530,12 +530,12 @@ where
 
     let mut bench_group = BenchGroup { group };
 
-    const BENCH_TOKIO_SINGLE_WORKER_SINGLE_BLOCKING_STD_SEEK_READ_SEGMENTED_LOG: &str =
-        "tokio_single_worker_single_blocking_std_seek_read_segmented_log";
+    const BENCH_TOKIO_SWSB_STD_SEEK_READ_SEGMENTED_LOG: &str =
+        "tokio_swsb_std_seek_read_segmented_log";
 
     bench_group.bench(
         &num_appends,
-        BENCH_TOKIO_SINGLE_WORKER_SINGLE_BLOCKING_STD_SEEK_READ_SEGMENTED_LOG,
+        BENCH_TOKIO_SWSB_STD_SEEK_READ_SEGMENTED_LOG,
         || {
             tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(1)
@@ -550,7 +550,7 @@ where
                     num_appends,
                     &format!(
                         "/tmp/laminarmq_bench_{}_append",
-                        BENCH_TOKIO_SINGLE_WORKER_SINGLE_BLOCKING_STD_SEEK_READ_SEGMENTED_LOG
+                        BENCH_TOKIO_SWSB_STD_SEEK_READ_SEGMENTED_LOG
                     ),
                 )
                 .await
