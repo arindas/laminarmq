@@ -17,7 +17,7 @@ use tokio::{
 };
 
 #[allow(unused)]
-pub struct StdFileStorage {
+pub struct StdRandomReadFileStorage {
     writer: BufWriter<TokioFile>,
     reader: Arc<File>,
 
@@ -27,7 +27,7 @@ pub struct StdFileStorage {
 }
 
 #[derive(Debug)]
-pub enum StdFileStorageError {
+pub enum StdRandomReadFileStorageError {
     JoinError(task::JoinError),
     IoError(io::Error),
     StreamUnexpectedLength,
@@ -35,28 +35,28 @@ pub enum StdFileStorageError {
     StdFileInUse,
 }
 
-impl From<StreamUnexpectedLength> for StdFileStorageError {
+impl From<StreamUnexpectedLength> for StdRandomReadFileStorageError {
     fn from(_: StreamUnexpectedLength) -> Self {
         Self::StreamUnexpectedLength
     }
 }
 
-impl From<io::Error> for StdFileStorageError {
+impl From<io::Error> for StdRandomReadFileStorageError {
     fn from(value: io::Error) -> Self {
         Self::IoError(value)
     }
 }
 
-impl Display for StdFileStorageError {
+impl Display for StdRandomReadFileStorageError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self)
     }
 }
 
-impl std::error::Error for StdFileStorageError {}
+impl std::error::Error for StdRandomReadFileStorageError {}
 
-impl StdFileStorage {
-    pub async fn new<P: AsRef<Path>>(path: P) -> Result<Self, StdFileStorageError> {
+impl StdRandomReadFileStorage {
+    pub async fn new<P: AsRef<Path>>(path: P) -> Result<Self, StdRandomReadFileStorageError> {
         let backing_file_path = path.as_ref().to_path_buf();
 
         let writer = Self::obtain_backing_writer_file(path.as_ref()).await?;
@@ -66,7 +66,7 @@ impl StdFileStorage {
         let initial_size = writer
             .metadata()
             .await
-            .map_err(StdFileStorageError::IoError)?
+            .map_err(StdRandomReadFileStorageError::IoError)?
             .len();
 
         Ok(Self {
@@ -79,30 +79,30 @@ impl StdFileStorage {
 
     async fn obtain_backing_writer_file<P: AsRef<Path>>(
         path: P,
-    ) -> Result<TokioFile, StdFileStorageError> {
+    ) -> Result<TokioFile, StdRandomReadFileStorageError> {
         OpenOptions::new()
             .write(true)
             .append(true)
             .create(true)
             .open(path.as_ref())
             .await
-            .map_err(StdFileStorageError::IoError)
+            .map_err(StdRandomReadFileStorageError::IoError)
     }
 
     async fn obtain_backing_reader_file<P: AsRef<Path>>(
         path: P,
-    ) -> Result<File, StdFileStorageError> {
+    ) -> Result<File, StdRandomReadFileStorageError> {
         Ok(OpenOptions::new()
             .read(true)
             .open(path.as_ref())
             .await
-            .map_err(StdFileStorageError::IoError)?
+            .map_err(StdRandomReadFileStorageError::IoError)?
             .into_std()
             .await)
     }
 }
 
-impl Sizable for StdFileStorage {
+impl Sizable for StdRandomReadFileStorage {
     type Size = u64;
 
     fn size(&self) -> Self::Size {
@@ -111,23 +111,23 @@ impl Sizable for StdFileStorage {
 }
 
 #[async_trait(?Send)]
-impl AsyncTruncate for StdFileStorage {
+impl AsyncTruncate for StdRandomReadFileStorage {
     type Mark = u64;
 
-    type TruncError = StdFileStorageError;
+    type TruncError = StdRandomReadFileStorageError;
 
     async fn truncate(&mut self, position: &Self::Mark) -> Result<(), Self::TruncError> {
         self.writer
             .flush()
             .await
-            .map_err(StdFileStorageError::IoError)?;
+            .map_err(StdRandomReadFileStorageError::IoError)?;
 
         let writer = Self::obtain_backing_writer_file(&self.backing_file_path).await?;
 
         writer
             .set_len(*position)
             .await
-            .map_err(StdFileStorageError::IoError)?;
+            .map_err(StdRandomReadFileStorageError::IoError)?;
 
         self.writer = BufWriter::new(writer);
 
@@ -137,7 +137,7 @@ impl AsyncTruncate for StdFileStorage {
 
         tokio::task::spawn_blocking(|| drop(old_reader))
             .await
-            .map_err(StdFileStorageError::JoinError)?;
+            .map_err(StdRandomReadFileStorageError::JoinError)?;
 
         self.size = *position;
 
@@ -146,8 +146,8 @@ impl AsyncTruncate for StdFileStorage {
 }
 
 #[async_trait(?Send)]
-impl AsyncConsume for StdFileStorage {
-    type ConsumeError = StdFileStorageError;
+impl AsyncConsume for StdRandomReadFileStorage {
+    type ConsumeError = StdRandomReadFileStorageError;
 
     async fn remove(mut self) -> Result<(), Self::ConsumeError> {
         let backing_file_path = self.backing_file_path.clone();
@@ -156,27 +156,28 @@ impl AsyncConsume for StdFileStorage {
 
         tokio::fs::remove_file(&backing_file_path)
             .await
-            .map_err(StdFileStorageError::IoError)
+            .map_err(StdRandomReadFileStorageError::IoError)
     }
 
     async fn close(mut self) -> Result<(), Self::ConsumeError> {
         self.writer
             .flush()
             .await
-            .map_err(StdFileStorageError::IoError)?;
+            .map_err(StdRandomReadFileStorageError::IoError)?;
 
         drop(self.writer);
 
-        let reader = Arc::<_>::into_inner(self.reader).ok_or(StdFileStorageError::StdFileInUse)?;
+        let reader =
+            Arc::<_>::into_inner(self.reader).ok_or(StdRandomReadFileStorageError::StdFileInUse)?;
 
         tokio::task::spawn_blocking(|| drop(reader))
             .await
-            .map_err(StdFileStorageError::JoinError)
+            .map_err(StdRandomReadFileStorageError::JoinError)
     }
 }
 
 #[derive(Clone, Copy)]
-pub struct StdFileStorageProvider;
+pub struct StdRandomReadFileStorageProvider;
 
 #[cfg(target_family = "unix")]
 pub mod unix {
@@ -187,12 +188,12 @@ pub mod unix {
     use tokio::io::AsyncWriteExt;
 
     #[async_trait(?Send)]
-    impl Storage for StdFileStorage {
+    impl Storage for StdRandomReadFileStorage {
         type Content = Vec<u8>;
 
         type Position = u64;
 
-        type Error = StdFileStorageError;
+        type Error = StdRandomReadFileStorageError;
 
         async fn append_slice(
             &mut self,
@@ -203,7 +204,7 @@ pub mod unix {
             self.writer
                 .write_all(slice)
                 .await
-                .map_err(StdFileStorageError::IoError)?;
+                .map_err(StdRandomReadFileStorageError::IoError)?;
 
             let bytes_written = slice.len() as u64;
 
@@ -218,7 +219,7 @@ pub mod unix {
             size: &Self::Size,
         ) -> Result<Self::Content, Self::Error> {
             if *position + *size > self.size {
-                return Err(StdFileStorageError::ReadBeyondWrittenArea);
+                return Err(StdRandomReadFileStorageError::ReadBeyondWrittenArea);
             }
 
             let reader = self.reader.clone();
@@ -232,18 +233,18 @@ pub mod unix {
                     .map(|_| read_buf)
             })
             .await
-            .map_err(StdFileStorageError::JoinError)?
-            .map_err(StdFileStorageError::IoError)
+            .map_err(StdRandomReadFileStorageError::JoinError)?
+            .map_err(StdRandomReadFileStorageError::IoError)
         }
     }
 
     #[async_trait(?Send)]
-    impl PathAddressedStorageProvider<StdFileStorage> for StdFileStorageProvider {
+    impl PathAddressedStorageProvider<StdRandomReadFileStorage> for StdRandomReadFileStorageProvider {
         async fn obtain_storage<P: AsRef<Path>>(
             &self,
             path: P,
-        ) -> Result<StdFileStorage, StdFileStorageError> {
-            StdFileStorage::new(path).await
+        ) -> Result<StdRandomReadFileStorage, StdRandomReadFileStorageError> {
+            StdRandomReadFileStorage::new(path).await
         }
     }
 
@@ -261,19 +262,21 @@ pub mod unix {
         use std::marker::PhantomData;
 
         #[tokio::test]
-        async fn test_tokio_std_file_storage_read_append_truncate_consistency() {
-            const TEST_TOKIO_STD_FILE_STORAGE_PATH: &str = "/tmp/laminarmq_test_tokio_std_file_storage_read_append_truncate_consistency.storage";
+        async fn test_tokio_std_random_read_file_storage_read_append_truncate_consistency() {
+            const TEST_TOKIO_STD_RANDOM_READ_FILE_STORAGE_PATH: &str = "/tmp/laminarmq_test_tokio_std_random_read_file_storage_read_append_truncate_consistency.storage";
 
-            if Path::new(TEST_TOKIO_STD_FILE_STORAGE_PATH).exists() {
-                let path = TEST_TOKIO_STD_FILE_STORAGE_PATH;
+            if Path::new(TEST_TOKIO_STD_RANDOM_READ_FILE_STORAGE_PATH).exists() {
+                let path = TEST_TOKIO_STD_RANDOM_READ_FILE_STORAGE_PATH;
                 tokio::fs::remove_file(path).await.unwrap();
             }
 
             common::test::_test_storage_read_append_truncate_consistency(|| async {
                 _TestStorage {
-                    storage: StdFileStorage::new(TEST_TOKIO_STD_FILE_STORAGE_PATH)
-                        .await
-                        .unwrap(),
+                    storage: StdRandomReadFileStorage::new(
+                        TEST_TOKIO_STD_RANDOM_READ_FILE_STORAGE_PATH,
+                    )
+                    .await
+                    .unwrap(),
                     persistent: true,
                 }
             })
@@ -281,21 +284,23 @@ pub mod unix {
         }
 
         #[tokio::test]
-        async fn test_tokio_std_file_store_read_append_truncate_consistency() {
-            const TEST_TOKIO_STD_FILE_STORE_STORAGE_PATH: &str =
-                "/tmp/laminarmq_test_tokio_std_file_store_read_append_truncate_consistency.store";
+        async fn test_tokio_std_random_read_file_store_read_append_truncate_consistency() {
+            const TEST_TOKIO_STD_RANDOM_READ_FILE_STORE_STORAGE_PATH: &str =
+                "/tmp/laminarmq_test_tokio_std_random_read_file_store_read_append_truncate_consistency.store";
 
-            if Path::new(TEST_TOKIO_STD_FILE_STORE_STORAGE_PATH).exists() {
-                let path = TEST_TOKIO_STD_FILE_STORE_STORAGE_PATH;
+            if Path::new(TEST_TOKIO_STD_RANDOM_READ_FILE_STORE_STORAGE_PATH).exists() {
+                let path = TEST_TOKIO_STD_RANDOM_READ_FILE_STORE_STORAGE_PATH;
                 tokio::fs::remove_file(path).await.unwrap();
             }
 
             store::test::_test_store_read_append_truncate_consistency(|| async {
                 (
                     _TestStorage {
-                        storage: StdFileStorage::new(TEST_TOKIO_STD_FILE_STORE_STORAGE_PATH)
-                            .await
-                            .unwrap(),
+                        storage: StdRandomReadFileStorage::new(
+                            TEST_TOKIO_STD_RANDOM_READ_FILE_STORE_STORAGE_PATH,
+                        )
+                        .await
+                        .unwrap(),
                         persistent: true,
                     },
                     PhantomData::<crc32fast::Hasher>,
@@ -305,21 +310,23 @@ pub mod unix {
         }
 
         #[tokio::test]
-        async fn test_tokio_std_file_index_read_append_truncate_consistency() {
-            const TEST_TOKIO_STD_FILE_INDEX_STORAGE_PATH: &str =
-                "/tmp/laminarmq_test_tokio_std_file_index_read_append_truncate_consistency.index";
+        async fn test_tokio_std_random_read_file_index_read_append_truncate_consistency() {
+            const TEST_TOKIO_STD_RANDOM_READ_FILE_INDEX_STORAGE_PATH: &str =
+                "/tmp/laminarmq_test_tokio_std_random_read_file_index_read_append_truncate_consistency.index";
 
-            if Path::new(TEST_TOKIO_STD_FILE_INDEX_STORAGE_PATH).exists() {
-                let path = TEST_TOKIO_STD_FILE_INDEX_STORAGE_PATH;
+            if Path::new(TEST_TOKIO_STD_RANDOM_READ_FILE_INDEX_STORAGE_PATH).exists() {
+                let path = TEST_TOKIO_STD_RANDOM_READ_FILE_INDEX_STORAGE_PATH;
                 tokio::fs::remove_file(path).await.unwrap();
             }
 
             index::test::_test_index_read_append_truncate_consistency(|| async {
                 (
                     _TestStorage {
-                        storage: StdFileStorage::new(TEST_TOKIO_STD_FILE_INDEX_STORAGE_PATH)
-                            .await
-                            .unwrap(),
+                        storage: StdRandomReadFileStorage::new(
+                            TEST_TOKIO_STD_RANDOM_READ_FILE_INDEX_STORAGE_PATH,
+                        )
+                        .await
+                        .unwrap(),
                         persistent: true,
                     },
                     PhantomData::<(crc32fast::Hasher, u32)>,
@@ -329,9 +336,9 @@ pub mod unix {
         }
 
         #[tokio::test]
-        async fn test_tokio_std_file_segment_read_append_truncate_consistency() {
+        async fn test_tokio_std_random_read_file_segment_read_append_truncate_consistency() {
             const TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY: &str =
-                "/tmp/laminarmq_test_tokio_std_file_segment_read_append_truncate_consistency";
+                "/tmp/laminarmq_test_tokio_std_random_read_file_segment_read_append_truncate_consistency";
 
             if Path::new(TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY).exists() {
                 let directory_path = TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY;
@@ -341,7 +348,7 @@ pub mod unix {
             let disk_backed_storage_provider =
                 DiskBackedSegmentStorageProvider::<_, _, u32>::with_storage_directory_path_and_provider(
                     TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY,
-                    StdFileStorageProvider,
+                    StdRandomReadFileStorageProvider,
                 )
                 .unwrap();
 
@@ -358,9 +365,9 @@ pub mod unix {
         }
 
         #[tokio::test]
-        async fn test_tokio_std_file_segmented_log_read_append_truncate_consistency() {
+        async fn test_tokio_std_random_read_file_segmented_log_read_append_truncate_consistency() {
             const TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY: &str =
-                "/tmp/laminarmq_test_tokio_std_file_segmented_log_read_append_truncate_consistency";
+                "/tmp/laminarmq_test_tokio_std_random_read_file_segmented_log_read_append_truncate_consistency";
 
             if Path::new(TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY).exists() {
                 let directory_path = TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY;
@@ -370,7 +377,7 @@ pub mod unix {
             let disk_backed_storage_provider =
                 DiskBackedSegmentStorageProvider::<_, _, u32>::with_storage_directory_path_and_provider(
                     TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY,
-                    StdFileStorageProvider,
+                    StdRandomReadFileStorageProvider,
                 )
                 .unwrap();
 
@@ -387,9 +394,9 @@ pub mod unix {
         }
 
         #[tokio::test]
-        async fn test_tokio_std_file_segmented_log_remove_expired_segments() {
+        async fn test_tokio_std_random_read_file_segmented_log_remove_expired_segments() {
             const TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY: &str =
-                "/tmp/laminarmq_test_tokio_std_file_segmented_log_remove_expired_segments";
+                "/tmp/laminarmq_test_tokio_std_random_read_file_segmented_log_remove_expired_segments";
 
             if Path::new(TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY).exists() {
                 let directory_path = TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY;
@@ -399,7 +406,7 @@ pub mod unix {
             let disk_backed_storage_provider =
                 DiskBackedSegmentStorageProvider::<_, _, u32>::with_storage_directory_path_and_provider(
                     TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY,
-                    StdFileStorageProvider,
+                    StdRandomReadFileStorageProvider,
                 )
                 .unwrap();
 
@@ -417,9 +424,9 @@ pub mod unix {
         }
 
         #[tokio::test]
-        async fn test_tokio_std_file_segmented_log_segment_index_caching() {
+        async fn test_tokio_std_random_read_file_segmented_log_segment_index_caching() {
             const TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY: &str =
-                "/tmp/laminarmq_test_tokio_std_file_segmented_log_segment_index_caching";
+                "/tmp/laminarmq_test_tokio_std_random_read_file_segmented_log_segment_index_caching";
 
             if Path::new(TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY).exists() {
                 let directory_path = TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY;
@@ -429,7 +436,7 @@ pub mod unix {
             let disk_backed_storage_provider =
                 DiskBackedSegmentStorageProvider::<_, _, u32>::with_storage_directory_path_and_provider(
                     TEST_DISK_BACKED_STORAGE_PROVIDER_STORAGE_DIRECTORY,
-                    StdFileStorageProvider,
+                    StdRandomReadFileStorageProvider,
                 )
                 .unwrap();
 

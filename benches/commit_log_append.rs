@@ -4,7 +4,10 @@ use criterion::{
     measurement::{Measurement, WallTime},
     BenchmarkGroup, BenchmarkId, Criterion, Throughput,
 };
-use futures_lite::{stream, StreamExt};
+use futures_lite::{
+    stream::{self, Stream},
+    StreamExt,
+};
 use laminarmq::{
     common::{cache::NoOpCache, serde_compat::bincode},
     storage::{
@@ -19,7 +22,10 @@ use laminarmq::{
                 dma::{DmaStorage, DmaStorageProvider},
             },
             in_mem::{segment::InMemSegmentStorageProvider, storage::InMemStorage},
-            tokio::storage::{StdFileStorage, StdFileStorageProvider},
+            tokio::storage::{
+                std_random_read::{StdRandomReadFileStorage, StdRandomReadFileStorageProvider},
+                std_seek_read::{StdSeekReadFileStorage, StdSeekReadFileStorageProvider},
+            },
         },
         AsyncConsume,
     },
@@ -82,12 +88,12 @@ fn increase_rlimit_nofile_soft_limit_to_hard_limit() -> std::io::Result<()> {
     getrlimit(Resource::NOFILE).and_then(|(_, hard)| setrlimit(Resource::NOFILE, hard, hard))
 }
 
-async fn time_in_mem_seg_log<X, XBuf, XE>(
+async fn time_in_memory_segmented_log<X, XBuf, XE>(
     record_content: X,
     num_appends: usize,
 ) -> std::time::Duration
 where
-    X: stream::Stream<Item = Result<XBuf, XE>> + Clone + Unpin,
+    X: Stream<Item = Result<XBuf, XE>> + Clone + Unpin,
     XBuf: Deref<Target = [u8]>,
 {
     let mut segmented_log = SegmentedLog::<
@@ -124,12 +130,12 @@ where
     time_taken
 }
 
-async fn time_glommio_dma_file_seg_log<X, XBuf, XE>(
+async fn time_glommio_dma_file_segmented_log<X, XBuf, XE>(
     record_content: X,
     num_appends: usize,
 ) -> std::time::Duration
 where
-    X: stream::Stream<Item = Result<XBuf, XE>> + Clone + Unpin,
+    X: Stream<Item = Result<XBuf, XE>> + Clone + Unpin,
     XBuf: Deref<Target = [u8]>,
 {
     const BENCH_GLOMMIO_DMA_FILE_SEGMENTED_LOG_STORAGE_DIRECTORY: &str =
@@ -183,12 +189,12 @@ where
     time_taken
 }
 
-async fn time_glommio_buf_file_seg_log<X, XBuf, XE>(
+async fn time_glommio_buffered_file_segmented_log<X, XBuf, XE>(
     record_content: X,
     num_appends: usize,
 ) -> std::time::Duration
 where
-    X: stream::Stream<Item = Result<XBuf, XE>> + Clone + Unpin,
+    X: Stream<Item = Result<XBuf, XE>> + Clone + Unpin,
     XBuf: Deref<Target = [u8]>,
 {
     const BENCH_GLOMMIO_BUFFERED_FILE_SEGMENTED_LOG_STORAGE_DIRECTORY: &str =
@@ -242,26 +248,82 @@ where
     time_taken
 }
 
-async fn time_tokio_seg_log<X, XBuf, XE>(
+async fn time_tokio_std_random_read_segmented_log<X, XBuf, XE>(
     record_content: X,
     num_appends: usize,
 ) -> tokio::time::Duration
 where
-    X: stream::Stream<Item = Result<XBuf, XE>> + Clone + Unpin,
+    X: Stream<Item = Result<XBuf, XE>> + Clone + Unpin,
     XBuf: Deref<Target = [u8]>,
 {
     const BENCH_TOKIO_SEGMENTED_LOG_STORAGE_DIRECTORY: &str =
-        "/tmp/laminarmq_bench_tokio_std_file_segmented_log_append";
+        "/tmp/laminarmq_bench_tokio_std_random_read_segmented_log_append";
 
     let disk_backed_storage_provider =
         DiskBackedSegmentStorageProvider::<_, _, u32>::with_storage_directory_path_and_provider(
             BENCH_TOKIO_SEGMENTED_LOG_STORAGE_DIRECTORY,
-            StdFileStorageProvider,
+            StdRandomReadFileStorageProvider,
         )
         .unwrap();
 
     let mut segmented_log = SegmentedLog::<
-        StdFileStorage,
+        StdRandomReadFileStorage,
+        (),
+        crc32fast::Hasher,
+        u32,
+        u64,
+        bincode::BinCode,
+        _,
+        NoOpCache<usize, ()>,
+    >::new(
+        PERSISTENT_SEGMENTED_LOG_CONFIG,
+        disk_backed_storage_provider,
+    )
+    .await
+    .unwrap();
+
+    let start = tokio::time::Instant::now();
+
+    for _ in 0..num_appends {
+        black_box(
+            segmented_log
+                .append(record(record_content.clone()))
+                .await
+                .unwrap(),
+        );
+    }
+
+    let time_taken = start.elapsed();
+
+    segmented_log.close().await.unwrap();
+
+    tokio::fs::remove_dir_all(BENCH_TOKIO_SEGMENTED_LOG_STORAGE_DIRECTORY)
+        .await
+        .unwrap();
+
+    time_taken
+}
+
+async fn time_tokio_std_seek_read_segmented_log<X, XBuf, XE>(
+    record_content: X,
+    num_appends: usize,
+) -> tokio::time::Duration
+where
+    X: Stream<Item = Result<XBuf, XE>> + Clone + Unpin,
+    XBuf: Deref<Target = [u8]>,
+{
+    const BENCH_TOKIO_SEGMENTED_LOG_STORAGE_DIRECTORY: &str =
+        "/tmp/laminarmq_bench_tokio_std_seek_read_segmented_log_append";
+
+    let disk_backed_storage_provider =
+        DiskBackedSegmentStorageProvider::<_, _, u32>::with_storage_directory_path_and_provider(
+            BENCH_TOKIO_SEGMENTED_LOG_STORAGE_DIRECTORY,
+            StdSeekReadFileStorageProvider,
+        )
+        .unwrap();
+
+    let mut segmented_log = SegmentedLog::<
+        StdSeekReadFileStorage,
         (),
         crc32fast::Hasher,
         u32,
@@ -332,7 +394,7 @@ where
 fn lorem_140_repeated_message(
     repetitions: usize,
 ) -> (
-    impl stream::Stream<Item = impl Deref<Target = [u8]>> + Clone + Unpin,
+    impl Stream<Item = impl Deref<Target = [u8]>> + Clone + Unpin,
     u64,
 ) {
     let source_packets = LOREM_140.iter().map(|x| x as &[u8]);
@@ -360,7 +422,7 @@ fn input_message_lorem_ipsum_repetitions_with_names() -> impl Iterator<Item = (&
 
 fn bench_helper<X, XBuf>(group: &mut BenchmarkGroup<WallTime>, message: X, num_appends: usize)
 where
-    X: stream::Stream<Item = XBuf> + Clone + Unpin,
+    X: Stream<Item = XBuf> + Clone + Unpin,
     XBuf: Deref<Target = [u8]>,
 {
     let content = message.map(infallible);
@@ -371,7 +433,7 @@ where
         &num_appends,
         "in_memory_segmented_log",
         || FuturesExecutor,
-        || |_| async { time_in_mem_seg_log(content.clone(), num_appends).await },
+        || |_| async { time_in_memory_segmented_log(content.clone(), num_appends).await },
     );
 
     let mut bench_group = BenchGroup { group };
@@ -380,7 +442,7 @@ where
         &num_appends,
         "glommio_dma_file_segmented_log",
         || GlommioAsyncExecutor(glommio::LocalExecutor::default()),
-        || |_| async { time_glommio_dma_file_seg_log(content.clone(), num_appends).await },
+        || |_| async { time_glommio_dma_file_segmented_log(content.clone(), num_appends).await },
     );
 
     let mut bench_group = BenchGroup { group };
@@ -389,16 +451,33 @@ where
         &num_appends,
         "glommio_buffered_file_segmented_log",
         || GlommioAsyncExecutor(glommio::LocalExecutor::default()),
-        || |_| async { time_glommio_buf_file_seg_log(content.clone(), num_appends).await },
+        || {
+            |_| async {
+                time_glommio_buffered_file_segmented_log(content.clone(), num_appends).await
+            }
+        },
     );
 
     let mut bench_group = BenchGroup { group };
 
     bench_group.bench(
         &num_appends,
-        "tokio_segmented_log",
+        "tokio_std_random_read_segmented_log",
         || tokio::runtime::Runtime::new().unwrap(),
-        || |_| async { time_tokio_seg_log(content.clone(), num_appends).await },
+        || {
+            |_| async {
+                time_tokio_std_random_read_segmented_log(content.clone(), num_appends).await
+            }
+        },
+    );
+
+    let mut bench_group = BenchGroup { group };
+
+    bench_group.bench(
+        &num_appends,
+        "tokio_std_seek_read_segmented_log",
+        || tokio::runtime::Runtime::new().unwrap(),
+        || |_| async { time_tokio_std_seek_read_segmented_log(content.clone(), num_appends).await },
     );
 }
 
@@ -410,7 +489,7 @@ fn bench_message_kind<I, X, XBuf>(
     group_name: &str,
 ) where
     I: Iterator<Item = usize>,
-    X: stream::Stream<Item = XBuf> + Clone + Unpin,
+    X: Stream<Item = XBuf> + Clone + Unpin,
     XBuf: Deref<Target = [u8]>,
 {
     let mut group = criterion.benchmark_group(group_name);
