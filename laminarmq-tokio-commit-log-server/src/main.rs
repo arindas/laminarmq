@@ -14,11 +14,18 @@ use laminarmq::{
             segmented_log::{segment::Config as SegmentConfig, Config, MetaWithIdx, SegmentedLog},
             CommitLog, Record,
         },
-        impls::in_mem::{segment::InMemSegmentStorageProvider, storage::InMemStorage},
+        impls::{
+            common::DiskBackedSegmentStorageProvider,
+            in_mem::{segment::InMemSegmentStorageProvider, storage::InMemStorage},
+            tokio::storage::std_seek_read::{
+                StdSeekReadFileStorage, StdSeekReadFileStorageProvider,
+            },
+        },
     },
 };
 use serde::{Deserialize, Serialize};
 use std::{
+    env,
     fmt::Debug,
     future::Future,
     io,
@@ -34,7 +41,7 @@ use tokio::{
 };
 use tower::{BoxError, ServiceBuilder};
 use tower_http::trace::TraceLayer;
-use tracing::{error_span, info, info_span, Instrument};
+use tracing::{error, error_span, info, info_span, Instrument};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 pub type InMemSegLog = SegmentedLog<
@@ -83,6 +90,7 @@ pub struct CommitLogServerConfig {
     max_connections: usize,
 }
 
+#[allow(unused)]
 const IN_MEMORY_SEGMENTED_LOG_CONFIG: Config<u32, usize> = Config {
     segment_config: SegmentConfig {
         max_store_size: 1048576, // = 1MiB
@@ -92,6 +100,18 @@ const IN_MEMORY_SEGMENTED_LOG_CONFIG: Config<u32, usize> = Config {
     initial_index: 0,
     num_index_cached_read_segments: None,
 };
+
+const PERSISTENT_SEGMENTED_LOG_CONFIG: Config<u32, u64> = Config {
+    segment_config: SegmentConfig {
+        max_store_size: 10000000, // ~ 10MB
+        max_store_overflow: 10000000 / 2,
+        max_index_size: 10000000,
+    },
+    initial_index: 0,
+    num_index_cached_read_segments: None,
+};
+
+const DEFAULT_STORAGE_DIRECTORY: &str = "./.storage/laminarmq_tokio_commit_log_server/commit_log";
 
 #[tokio::main]
 async fn main() {
@@ -104,15 +124,34 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
+    let storage_directory =
+        env::var("STORAGE_DIRECTORY").unwrap_or(DEFAULT_STORAGE_DIRECTORY.into());
+
     let (join_handle, message_tx) = CommitLogServer::orchestrate(
         CommitLogServerConfig {
             message_buffer_size: 1024,
             max_connections: 512,
         },
         || async {
-            InMemSegLog::new(
-                IN_MEMORY_SEGMENTED_LOG_CONFIG,
-                InMemSegmentStorageProvider::<u32>::default(),
+            let disk_backed_storage_provider =
+                DiskBackedSegmentStorageProvider::<_, _, u32>::with_storage_directory_path_and_provider(
+                    storage_directory,
+                    StdSeekReadFileStorageProvider,
+                )
+                .unwrap();
+
+            SegmentedLog::<
+                StdSeekReadFileStorage,
+                (),
+                crc32fast::Hasher,
+                u32,
+                u64,
+                bincode::BinCode,
+                _,
+                NoOpCache<usize, ()>,
+            >::new(
+                PERSISTENT_SEGMENTED_LOG_CONFIG,
+                disk_backed_storage_provider,
             )
             .await
             .unwrap()
@@ -417,16 +456,17 @@ where
             (self.message_rx, self.commit_log, self.max_connections);
 
         let conn_semaphore = Rc::new(Semaphore::new(max_connections));
+        let commit_log = Rc::new(RwLock::new(commit_log));
+
+        let commit_log_copy = commit_log.clone();
 
         let local = task::LocalSet::new();
 
         local
             .run_until(async move {
-                let commit_log = Rc::new(RwLock::new(commit_log));
-
                 while let Some(Message::Connection { resp_tx, request }) = message_rx.recv().await {
                     let (conn_semaphore, commit_log_copy) =
-                        (conn_semaphore.clone(), commit_log.clone());
+                        (conn_semaphore.clone(), commit_log_copy.clone());
 
                     task::spawn_local(
                         async move {
@@ -446,7 +486,7 @@ where
                             .map_err(|err| format!("{:?}", err));
 
                             if let Err(err) = resp_tx.send(response) {
-                                tracing::error!("error sending response: {:?}", err)
+                                error!("error sending response: {:?}", err)
                             }
                         }
                         .instrument(error_span!("commit_log_server_handler_task")),
@@ -454,14 +494,24 @@ where
                 }
             })
             .await;
+
+        match Rc::into_inner(commit_log) {
+            Some(commit_log) => match commit_log.into_inner().close().await {
+                Ok(_) => {}
+                Err(err) => error!("error closing commit_log: {:?}", err),
+            },
+            None => error!("unable to unrwap commit_log Rc"),
+        };
+
+        info!("Closed commit_log.");
     }
 
     pub fn orchestrate<CLP, CLF>(
         server_config: CommitLogServerConfig,
-        mut commit_log_provider: CLP,
+        commit_log_provider: CLP,
     ) -> (JoinHandle<Result<(), io::Error>>, mpsc::Sender<Message>)
     where
-        CLP: FnMut() -> CLF + Send + 'static,
+        CLP: FnOnce() -> CLF + Send + 'static,
         CLF: Future<Output = CL>,
         CL::Error: Send + 'static,
     {

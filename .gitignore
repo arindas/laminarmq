@@ -1,3 +1,4 @@
 /target
 book/
 *.bak
+.storage/

@@ -1,6 +1,6 @@
 # laminarmq-tokio-commit-log-server
 
-A simple in memory commit log server using the tokio runtime.
+A simple persistent commit log server using the tokio runtime.
 
 ## Endpoints
 
@@ -12,7 +12,7 @@ This server exposes the following endpoints:
 .route("/records", post(append))            // append a new record at the end of the commit log
 
 .route("/rpc/truncate", post(truncate))     // truncate the commit log 
-                                            // expects JSON: { truncate_index: <idx> }
+                                            // expects JSON: { "truncate_index": <idx: number> }
 ```
 
 ## Usage

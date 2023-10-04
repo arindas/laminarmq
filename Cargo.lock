@@ -723,8 +723,9 @@ dependencies = [
 
 [[package]]
 name = "laminarmq"
-version = "0.0.5-rc1"
-source = "git+https://github.com/arindas/laminarmq.git?branch=dev/1#df1706b523b4fcd3935673e283c35eb59d74778d"
+version = "0.0.5-rc2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f199e5054405e99ce1bd992da1eabfda1c334b3f72086910dc02daa7b0529ff7"
 dependencies = [
  "async-io",
  "async-stream",
@@ -753,7 +754,7 @@ dependencies = [
 
 [[package]]
 name = "laminarmq-tokio-commit-log-server"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "axum",
  "crc32fast",
