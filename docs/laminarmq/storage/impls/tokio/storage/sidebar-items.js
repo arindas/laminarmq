@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["StdFileStorageError"],"mod":["unix"],"struct":["StdFileStorage","StdFileStorageProvider"]};
+window.SIDEBAR_ITEMS = {"mod":["std_random_read","std_seek_read"]};

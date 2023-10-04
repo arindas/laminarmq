@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/storage/commit_log/segmented_log/index.rs`."><title>index.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/SourceSerif4-Bold-a2c9cd1067f8b328.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../../../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-f3501f0f5ae15dfb.css" id="mainThemeStyle"><div id="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="laminarmq" data-themes="" data-resource-suffix="" data-rustdoc-version="1.71.1 (eb26296b5 2023-08-03)" data-search-js="search-4926e5fc22a5646a.js" data-settings-js="settings-de11bff964e9d4e5.js" data-settings-css="settings-8c76f75bfb6bd192.css" data-theme-light-css="light-0f8c037637f9eb3e.css" data-theme-dark-css="dark-1097f8e92a01e3cf.css" data-theme-ayu-css="ayu-614652228113ac93.css" ></div><script src="../../../../../static.files/storage-62ce34ea385b278a.js"></script><script defer src="../../../../../static.files/source-script-11255107d0a65077.js"></script><script defer src="../../../../../source-files.js"></script><script defer src="../../../../../static.files/main-f0540c1d82cde29b.js"></script><noscript><link rel="stylesheet" media="(prefers-color-scheme:light)" href="../../../../../static.files/light-0f8c037637f9eb3e.css"><link rel="stylesheet" media="(prefers-color-scheme:dark)" href="../../../../../static.files/dark-1097f8e92a01e3cf.css"><link rel="stylesheet" href="../../../../../static.files/noscript-13285aec31fa243e.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-16x16-8b506e7a72182f1c.png"><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-422f7d1d52889060.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-2c020d218678b618.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"></nav><main><nav class="sub"><a class="sub-logo-container" href="../../../../../laminarmq/index.html"><img class="rust-logo" src="../../../../../static.files/rust-logo-151179464ae7ed46.svg" alt="logo"></a><form class="search-form"><span></span><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><a href="../../../../../help.html">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../../static.files/wheel-7b819b6101059cd0.svg"></a></div></form></nav><section id="main-content" class="content"><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers"><a href="#1" id="1">1</a>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/storage/commit_log/segmented_log/index.rs`."><title>index.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/SourceSerif4-Bold-a2c9cd1067f8b328.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../../../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-9bb858ba049f1f21.css" id="mainThemeStyle"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="laminarmq" data-themes="" data-resource-suffix="" data-rustdoc-version="1.72.1 (d5c2e9c34 2023-09-13)" data-channel="1.72.1" data-search-js="search-f6292fe389d70017.js" data-settings-js="settings-de11bff964e9d4e5.js" data-settings-css="settings-8c76f75bfb6bd192.css" data-theme-light-css="light-0f8c037637f9eb3e.css" data-theme-dark-css="dark-1097f8e92a01e3cf.css" data-theme-ayu-css="ayu-614652228113ac93.css" ><script src="../../../../../static.files/storage-59fd9b8ccb335783.js"></script><script defer src="../../../../../static.files/source-script-106908c7a7964ba4.js"></script><script defer src="../../../../../source-files.js"></script><script defer src="../../../../../static.files/main-0795b7d26be81095.js"></script><noscript><link rel="stylesheet" media="(prefers-color-scheme:light)" href="../../../../../static.files/light-0f8c037637f9eb3e.css"><link rel="stylesheet" media="(prefers-color-scheme:dark)" href="../../../../../static.files/dark-1097f8e92a01e3cf.css"><link rel="stylesheet" href="../../../../../static.files/noscript-13285aec31fa243e.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-16x16-8b506e7a72182f1c.png"><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-422f7d1d52889060.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-2c020d218678b618.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"></nav><main><nav class="sub"><a class="sub-logo-container" href="../../../../../laminarmq/index.html"><img class="rust-logo" src="../../../../../static.files/rust-logo-151179464ae7ed46.svg" alt="logo"></a><form class="search-form"><span></span><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><a href="../../../../../help.html">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../../static.files/wheel-7b819b6101059cd0.svg"></a></div></form></nav><section id="main-content" class="content"><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers"><a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
 <a href="#4" id="4">4</a>
@@ -550,6 +550,150 @@
 <a href="#550" id="550">550</a>
 <a href="#551" id="551">551</a>
 <a href="#552" id="552">552</a>
+<a href="#553" id="553">553</a>
+<a href="#554" id="554">554</a>
+<a href="#555" id="555">555</a>
+<a href="#556" id="556">556</a>
+<a href="#557" id="557">557</a>
+<a href="#558" id="558">558</a>
+<a href="#559" id="559">559</a>
+<a href="#560" id="560">560</a>
+<a href="#561" id="561">561</a>
+<a href="#562" id="562">562</a>
+<a href="#563" id="563">563</a>
+<a href="#564" id="564">564</a>
+<a href="#565" id="565">565</a>
+<a href="#566" id="566">566</a>
+<a href="#567" id="567">567</a>
+<a href="#568" id="568">568</a>
+<a href="#569" id="569">569</a>
+<a href="#570" id="570">570</a>
+<a href="#571" id="571">571</a>
+<a href="#572" id="572">572</a>
+<a href="#573" id="573">573</a>
+<a href="#574" id="574">574</a>
+<a href="#575" id="575">575</a>
+<a href="#576" id="576">576</a>
+<a href="#577" id="577">577</a>
+<a href="#578" id="578">578</a>
+<a href="#579" id="579">579</a>
+<a href="#580" id="580">580</a>
+<a href="#581" id="581">581</a>
+<a href="#582" id="582">582</a>
+<a href="#583" id="583">583</a>
+<a href="#584" id="584">584</a>
+<a href="#585" id="585">585</a>
+<a href="#586" id="586">586</a>
+<a href="#587" id="587">587</a>
+<a href="#588" id="588">588</a>
+<a href="#589" id="589">589</a>
+<a href="#590" id="590">590</a>
+<a href="#591" id="591">591</a>
+<a href="#592" id="592">592</a>
+<a href="#593" id="593">593</a>
+<a href="#594" id="594">594</a>
+<a href="#595" id="595">595</a>
+<a href="#596" id="596">596</a>
+<a href="#597" id="597">597</a>
+<a href="#598" id="598">598</a>
+<a href="#599" id="599">599</a>
+<a href="#600" id="600">600</a>
+<a href="#601" id="601">601</a>
+<a href="#602" id="602">602</a>
+<a href="#603" id="603">603</a>
+<a href="#604" id="604">604</a>
+<a href="#605" id="605">605</a>
+<a href="#606" id="606">606</a>
+<a href="#607" id="607">607</a>
+<a href="#608" id="608">608</a>
+<a href="#609" id="609">609</a>
+<a href="#610" id="610">610</a>
+<a href="#611" id="611">611</a>
+<a href="#612" id="612">612</a>
+<a href="#613" id="613">613</a>
+<a href="#614" id="614">614</a>
+<a href="#615" id="615">615</a>
+<a href="#616" id="616">616</a>
+<a href="#617" id="617">617</a>
+<a href="#618" id="618">618</a>
+<a href="#619" id="619">619</a>
+<a href="#620" id="620">620</a>
+<a href="#621" id="621">621</a>
+<a href="#622" id="622">622</a>
+<a href="#623" id="623">623</a>
+<a href="#624" id="624">624</a>
+<a href="#625" id="625">625</a>
+<a href="#626" id="626">626</a>
+<a href="#627" id="627">627</a>
+<a href="#628" id="628">628</a>
+<a href="#629" id="629">629</a>
+<a href="#630" id="630">630</a>
+<a href="#631" id="631">631</a>
+<a href="#632" id="632">632</a>
+<a href="#633" id="633">633</a>
+<a href="#634" id="634">634</a>
+<a href="#635" id="635">635</a>
+<a href="#636" id="636">636</a>
+<a href="#637" id="637">637</a>
+<a href="#638" id="638">638</a>
+<a href="#639" id="639">639</a>
+<a href="#640" id="640">640</a>
+<a href="#641" id="641">641</a>
+<a href="#642" id="642">642</a>
+<a href="#643" id="643">643</a>
+<a href="#644" id="644">644</a>
+<a href="#645" id="645">645</a>
+<a href="#646" id="646">646</a>
+<a href="#647" id="647">647</a>
+<a href="#648" id="648">648</a>
+<a href="#649" id="649">649</a>
+<a href="#650" id="650">650</a>
+<a href="#651" id="651">651</a>
+<a href="#652" id="652">652</a>
+<a href="#653" id="653">653</a>
+<a href="#654" id="654">654</a>
+<a href="#655" id="655">655</a>
+<a href="#656" id="656">656</a>
+<a href="#657" id="657">657</a>
+<a href="#658" id="658">658</a>
+<a href="#659" id="659">659</a>
+<a href="#660" id="660">660</a>
+<a href="#661" id="661">661</a>
+<a href="#662" id="662">662</a>
+<a href="#663" id="663">663</a>
+<a href="#664" id="664">664</a>
+<a href="#665" id="665">665</a>
+<a href="#666" id="666">666</a>
+<a href="#667" id="667">667</a>
+<a href="#668" id="668">668</a>
+<a href="#669" id="669">669</a>
+<a href="#670" id="670">670</a>
+<a href="#671" id="671">671</a>
+<a href="#672" id="672">672</a>
+<a href="#673" id="673">673</a>
+<a href="#674" id="674">674</a>
+<a href="#675" id="675">675</a>
+<a href="#676" id="676">676</a>
+<a href="#677" id="677">677</a>
+<a href="#678" id="678">678</a>
+<a href="#679" id="679">679</a>
+<a href="#680" id="680">680</a>
+<a href="#681" id="681">681</a>
+<a href="#682" id="682">682</a>
+<a href="#683" id="683">683</a>
+<a href="#684" id="684">684</a>
+<a href="#685" id="685">685</a>
+<a href="#686" id="686">686</a>
+<a href="#687" id="687">687</a>
+<a href="#688" id="688">688</a>
+<a href="#689" id="689">689</a>
+<a href="#690" id="690">690</a>
+<a href="#691" id="691">691</a>
+<a href="#692" id="692">692</a>
+<a href="#693" id="693">693</a>
+<a href="#694" id="694">694</a>
+<a href="#695" id="695">695</a>
+<a href="#696" id="696">696</a>
 </pre></div><pre class="rust"><code><span class="kw">use super</span>::{
     <span class="kw">super</span>::<span class="kw">super</span>::{AsyncConsume, AsyncIndexedRead, AsyncTruncate, Sizable, Storage},
     store::common::RecordHeader,
@@ -564,37 +708,132 @@
 <span class="doccomment">/// Extension used by backing files for [`Index`](Index) instances.
 </span><span class="kw">pub const </span>INDEX_FILE_EXTENSION: <span class="kw-2">&amp;</span>str = <span class="string">&quot;index&quot;</span>;
 
+<span class="doccomment">/// Number of bytes required for storing the base marker.
+</span><span class="kw">pub const </span>INDEX_BASE_MARKER_LENGTH: usize = <span class="number">16</span>;
+
 <span class="doccomment">/// Number of bytes required for storing the record header.
-</span><span class="kw">pub const </span>INDEX_RECORD_LENGTH: usize = <span class="number">32</span>;
+</span><span class="kw">pub const </span>INDEX_RECORD_LENGTH: usize = <span class="number">16</span>;
+
+<span class="doccomment">/// Lowest underlying storage position
+</span><span class="kw">pub const </span>INDEX_BASE_POSITION: u64 = <span class="number">0</span>;
 
 <span class="attr">#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 </span><span class="kw">pub struct </span>IndexRecord {
-    <span class="kw">pub </span>record_header: RecordHeader,
-    <span class="kw">pub </span>index: u64,
-    <span class="kw">pub </span>position: u64,
+    <span class="kw">pub </span>checksum: u64,
+    <span class="kw">pub </span>length: u32,
+    <span class="kw">pub </span>position: u32,
 }
 
-<span class="kw">impl </span>IndexRecord {
-    <span class="kw">pub fn </span>read&lt;R: Read&gt;(source: <span class="kw-2">&amp;mut </span>R) -&gt; std::io::Result&lt;IndexRecord&gt; {
-        <span class="kw">let </span>record_header = RecordHeader::read(source)<span class="question-mark">?</span>;
+<span class="kw">impl </span>From&lt;IndexRecord&gt; <span class="kw">for </span>RecordHeader {
+    <span class="kw">fn </span>from(value: IndexRecord) -&gt; <span class="self">Self </span>{
+        RecordHeader {
+            checksum: value.checksum,
+            length: value.length <span class="kw">as </span>u64,
+        }
+    }
+}
 
-        <span class="kw">let </span>index = source.read_u64::&lt;LittleEndian&gt;()<span class="question-mark">?</span>;
-        <span class="kw">let </span>position = source.read_u64::&lt;LittleEndian&gt;()<span class="question-mark">?</span>;
+<span class="kw">pub struct </span>IndexBaseMarker {
+    <span class="kw">pub </span>base_index: u64,
+    _padding: u64,
+}
+
+<span class="kw">impl </span>IndexBaseMarker {
+    <span class="kw">pub fn </span>new(base_index: u64) -&gt; <span class="self">Self </span>{
+        <span class="self">Self </span>{
+            base_index,
+            _padding: <span class="number">0</span>,
+        }
+    }
+}
+
+<span class="kw">trait </span>SizedRecord: Sized {
+    <span class="kw">fn </span>write&lt;W: Write&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, dest: <span class="kw-2">&amp;mut </span>W) -&gt; std::io::Result&lt;()&gt;;
+
+    <span class="kw">fn </span>read&lt;R: Read&gt;(source: <span class="kw-2">&amp;mut </span>R) -&gt; std::io::Result&lt;<span class="self">Self</span>&gt;;
+}
+
+<span class="kw">struct </span>PersistentSizedRecord&lt;SR, <span class="kw">const </span>REPR_SIZE: usize&gt;(SR);
+
+<span class="kw">impl</span>&lt;SR, <span class="kw">const </span>REPR_SIZE: usize&gt; PersistentSizedRecord&lt;SR, REPR_SIZE&gt; {
+    <span class="kw">fn </span>into_inner(<span class="self">self</span>) -&gt; SR {
+        <span class="self">self</span>.<span class="number">0
+    </span>}
+}
+
+<span class="kw">impl</span>&lt;SR: SizedRecord, <span class="kw">const </span>REPR_SIZE: usize&gt; PersistentSizedRecord&lt;SR, REPR_SIZE&gt; {
+    <span class="kw">async fn </span>read_at&lt;S&gt;(source: <span class="kw-2">&amp;</span>S, position: <span class="kw-2">&amp;</span>S::Position) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, IndexError&lt;S::Error&gt;&gt;
+    <span class="kw">where
+        </span>S: Storage,
+    {
+        <span class="kw">let </span>index_record_bytes = source
+            .read(
+                position,
+                <span class="kw-2">&amp;</span>&lt;S::Size <span class="kw">as </span>FromPrimitive&gt;::from_usize(REPR_SIZE)
+                    .ok_or(IndexError::IncompatibleSizeType)<span class="question-mark">?</span>,
+            )
+            .<span class="kw">await
+            </span>.map_err(IndexError::StorageError)<span class="question-mark">?</span>;
+
+        <span class="kw">let </span><span class="kw-2">mut </span>cursor = Cursor::new(index_record_bytes.deref());
+
+        SR::read(<span class="kw-2">&amp;mut </span>cursor).map(<span class="self">Self</span>).map_err(IndexError::IoError)
+    }
+
+    <span class="kw">async fn </span>append_to&lt;S&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, dest: <span class="kw-2">&amp;mut </span>S) -&gt; <span class="prelude-ty">Result</span>&lt;S::Position, IndexError&lt;S::Error&gt;&gt;
+    <span class="kw">where
+        </span>S: Storage,
+    {
+        <span class="kw">let </span><span class="kw-2">mut </span>buffer = [<span class="number">0_u8</span>; REPR_SIZE];
+        <span class="kw">let </span><span class="kw-2">mut </span>cursor = Cursor::new(<span class="kw-2">&amp;mut </span>buffer <span class="kw">as </span><span class="kw-2">&amp;mut </span>[u8]);
+
+        <span class="self">self</span>.<span class="number">0</span>.write(<span class="kw-2">&amp;mut </span>cursor).map_err(IndexError::IoError)<span class="question-mark">?</span>;
+
+        <span class="kw">let </span>(position, <span class="kw">_</span>) = dest
+            .append_slice(<span class="kw-2">&amp;</span>buffer)
+            .<span class="kw">await
+            </span>.map_err(IndexError::StorageError)<span class="question-mark">?</span>;
+
+        <span class="prelude-val">Ok</span>(position)
+    }
+}
+
+<span class="kw">impl </span>SizedRecord <span class="kw">for </span>IndexRecord {
+    <span class="kw">fn </span>write&lt;W: Write&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, dest: <span class="kw-2">&amp;mut </span>W) -&gt; std::io::Result&lt;()&gt; {
+        dest.write_u64::&lt;LittleEndian&gt;(<span class="self">self</span>.checksum)<span class="question-mark">?</span>;
+        dest.write_u32::&lt;LittleEndian&gt;(<span class="self">self</span>.length)<span class="question-mark">?</span>;
+        dest.write_u32::&lt;LittleEndian&gt;(<span class="self">self</span>.position)<span class="question-mark">?</span>;
+
+        <span class="prelude-val">Ok</span>(())
+    }
+
+    <span class="kw">fn </span>read&lt;R: Read&gt;(source: <span class="kw-2">&amp;mut </span>R) -&gt; std::io::Result&lt;<span class="self">Self</span>&gt; {
+        <span class="kw">let </span>checksum = source.read_u64::&lt;LittleEndian&gt;()<span class="question-mark">?</span>;
+        <span class="kw">let </span>length = source.read_u32::&lt;LittleEndian&gt;()<span class="question-mark">?</span>;
+        <span class="kw">let </span>position = source.read_u32::&lt;LittleEndian&gt;()<span class="question-mark">?</span>;
 
         <span class="prelude-val">Ok</span>(IndexRecord {
-            record_header,
-            index,
+            checksum,
+            length,
             position,
         })
     }
+}
 
-    <span class="kw">pub fn </span>write&lt;W: Write&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, dest: <span class="kw-2">&amp;mut </span>W) -&gt; std::io::Result&lt;()&gt; {
-        <span class="self">self</span>.record_header.write(dest)<span class="question-mark">?</span>;
-
-        dest.write_u64::&lt;LittleEndian&gt;(<span class="self">self</span>.index)<span class="question-mark">?</span>;
-        dest.write_u64::&lt;LittleEndian&gt;(<span class="self">self</span>.position)<span class="question-mark">?</span>;
+<span class="kw">impl </span>SizedRecord <span class="kw">for </span>IndexBaseMarker {
+    <span class="kw">fn </span>write&lt;W: Write&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, dest: <span class="kw-2">&amp;mut </span>W) -&gt; std::io::Result&lt;()&gt; {
+        dest.write_u64::&lt;LittleEndian&gt;(<span class="self">self</span>.base_index)<span class="question-mark">?</span>;
 
         <span class="prelude-val">Ok</span>(())
+    }
+
+    <span class="kw">fn </span>read&lt;R: Read&gt;(source: <span class="kw-2">&amp;mut </span>R) -&gt; std::io::Result&lt;<span class="self">Self</span>&gt; {
+        <span class="kw">let </span>base_index = source.read_u64::&lt;LittleEndian&gt;()<span class="question-mark">?</span>;
+
+        <span class="prelude-val">Ok</span>(<span class="self">Self </span>{
+            base_index,
+            _padding: <span class="number">0_u64</span>,
+        })
     }
 }
 
@@ -607,9 +846,9 @@
     IncompatibleIdxType,
     IndexOutOfBounds,
     IndexGapEncountered,
-    InvalidAppendIdx,
     NoBaseIndexFound,
     BaseIndexMismatch,
+    InconsistentIndexSize,
 }
 
 <span class="kw">impl</span>&lt;StorageError&gt; std::fmt::Display <span class="kw">for </span>IndexError&lt;StorageError&gt;
@@ -624,46 +863,6 @@
 <span class="kw">impl</span>&lt;StorageError&gt; std::error::Error <span class="kw">for </span>IndexError&lt;StorageError&gt; <span class="kw">where
     </span>StorageError: std::error::Error
 {
-}
-
-<span class="kw">impl </span>IndexRecord {
-    <span class="kw">async fn </span>read_from_storage_at&lt;S&gt;(
-        source: <span class="kw-2">&amp;</span>S,
-        position: <span class="kw-2">&amp;</span>S::Position,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;IndexRecord, IndexError&lt;S::Error&gt;&gt;
-    <span class="kw">where
-        </span>S: Storage,
-    {
-        <span class="kw">let </span>index_record_bytes = source
-            .read(
-                position,
-                <span class="kw-2">&amp;</span>&lt;S::Size <span class="kw">as </span>FromPrimitive&gt;::from_usize(INDEX_RECORD_LENGTH)
-                    .ok_or(IndexError::IncompatibleSizeType)<span class="question-mark">?</span>,
-            )
-            .<span class="kw">await
-            </span>.map_err(IndexError::StorageError)<span class="question-mark">?</span>;
-
-        <span class="kw">let </span><span class="kw-2">mut </span>cursor = Cursor::new(index_record_bytes.deref());
-
-        IndexRecord::read(<span class="kw-2">&amp;mut </span>cursor).map_err(IndexError::IoError)
-    }
-
-    <span class="kw">async fn </span>append_to_storage&lt;S&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, dest: <span class="kw-2">&amp;mut </span>S) -&gt; <span class="prelude-ty">Result</span>&lt;S::Position, IndexError&lt;S::Error&gt;&gt;
-    <span class="kw">where
-        </span>S: Storage,
-    {
-        <span class="kw">let </span><span class="kw-2">mut </span>buffer = [<span class="number">0_u8</span>; INDEX_RECORD_LENGTH];
-        <span class="kw">let </span><span class="kw-2">mut </span>cursor = Cursor::new(<span class="kw-2">&amp;mut </span>buffer <span class="kw">as </span><span class="kw-2">&amp;mut </span>[u8]);
-
-        <span class="self">self</span>.write(<span class="kw-2">&amp;mut </span>cursor).map_err(IndexError::IoError)<span class="question-mark">?</span>;
-
-        <span class="kw">let </span>(position, <span class="kw">_</span>) = dest
-            .append_slice(<span class="kw-2">&amp;</span>buffer)
-            .<span class="kw">await
-            </span>.map_err(IndexError::StorageError)<span class="question-mark">?</span>;
-
-        <span class="prelude-val">Ok</span>(position)
-    }
 }
 
 <span class="attr">#[doc(hidden)]
@@ -688,44 +887,20 @@
 }
 
 <span class="kw">impl </span>IndexRecord {
-    <span class="kw">pub fn </span>with_position_index_and_record_header&lt;Position, Idx&gt;(
-        position: Position,
-        index: Idx,
+    <span class="kw">pub fn </span>with_position_and_record_header&lt;P: ToPrimitive&gt;(
+        position: P,
         record_header: RecordHeader,
-    ) -&gt; <span class="prelude-ty">Option</span>&lt;IndexRecord&gt;
-    <span class="kw">where
-        </span>Position: ToPrimitive,
-        Idx: ToPrimitive,
-    {
+    ) -&gt; <span class="prelude-ty">Option</span>&lt;IndexRecord&gt; {
         <span class="prelude-val">Some</span>(IndexRecord {
-            record_header,
-            index: Idx::to_u64(<span class="kw-2">&amp;</span>index)<span class="question-mark">?</span>,
-            position: Position::to_u64(<span class="kw-2">&amp;</span>position)<span class="question-mark">?</span>,
+            checksum: record_header.checksum,
+            length: u32::try_from(record_header.length).ok()<span class="question-mark">?</span>,
+            position: P::to_u32(<span class="kw-2">&amp;</span>position)<span class="question-mark">?</span>,
         })
     }
 }
 
-<span class="kw">pub async fn </span>index_records_in_storage&lt;S&gt;(
-    source: <span class="kw-2">&amp;</span>S,
-) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;IndexRecord&gt;, IndexError&lt;S::Error&gt;&gt;
-<span class="kw">where
-    </span>S: Storage,
-{
-    <span class="kw">let </span><span class="kw-2">mut </span>position = <span class="number">0_u64</span>;
-    <span class="kw">let </span><span class="kw-2">mut </span>index_records = Vec::&lt;IndexRecord&gt;::new();
-
-    <span class="kw">while let </span><span class="prelude-val">Ok</span>(index_record) =
-        IndexRecord::read_from_storage_at(source, <span class="kw-2">&amp;</span><span class="macro">u64_as_position!</span>(position, S::Position)<span class="question-mark">?</span>).<span class="kw">await
-    </span>{
-        index_records.push(index_record);
-        position += INDEX_RECORD_LENGTH <span class="kw">as </span>u64;
-    }
-
-    <span class="prelude-val">Ok</span>(index_records)
-}
-
 <span class="kw">pub struct </span>Index&lt;S, Idx&gt; {
-    index_records: Vec&lt;IndexRecord&gt;,
+    index_records: <span class="prelude-ty">Option</span>&lt;Vec&lt;IndexRecord&gt;&gt;,
     base_index: Idx,
     next_index: Idx,
     storage: S,
@@ -735,40 +910,105 @@
     <span class="kw">pub fn </span>into_storage(<span class="self">self</span>) -&gt; S {
         <span class="self">self</span>.storage
     }
+
+    <span class="kw">pub fn </span>base_index(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>Idx {
+        <span class="kw-2">&amp;</span><span class="self">self</span>.base_index
+    }
 }
 
 <span class="kw">impl</span>&lt;S, Idx&gt; Index&lt;S, Idx&gt;
 <span class="kw">where
     </span>S: Storage,
-    Idx: FromPrimitive + Copy + Eq,
+    Idx: Unsigned + FromPrimitive + Copy + Eq,
 {
-    <span class="kw">async fn </span>with_storage_and_base_index_option(
+    <span class="kw">pub fn </span>estimated_index_records_len_in_storage(
+        storage: <span class="kw-2">&amp;</span>S,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;usize, IndexError&lt;S::Error&gt;&gt; {
+        <span class="kw">let </span>index_record_storage_size = storage
+            .size()
+            .to_usize()
+            .ok_or(IndexError::IncompatibleSizeType)<span class="question-mark">?</span>;
+        <span class="kw">let </span>estimated_index_records_len = index_record_storage_size
+            .saturating_sub(INDEX_BASE_MARKER_LENGTH)
+            / INDEX_RECORD_LENGTH;
+
+        <span class="prelude-val">Ok</span>(estimated_index_records_len)
+    }
+
+    <span class="kw">pub async fn </span>base_index_from_storage(storage: <span class="kw-2">&amp;</span>S) -&gt; <span class="prelude-ty">Result</span>&lt;Idx, IndexError&lt;S::Error&gt;&gt; {
+        <span class="kw">let </span>index_base_marker =
+            PersistentSizedRecord::&lt;IndexBaseMarker, INDEX_BASE_MARKER_LENGTH&gt;::read_at(
+                storage,
+                <span class="kw-2">&amp;</span><span class="macro">u64_as_position!</span>(INDEX_BASE_POSITION, S::Position)<span class="question-mark">?</span>,
+            )
+            .<span class="kw">await
+            </span>.map(|x| x.into_inner());
+
+        index_base_marker
+            .map(|x| x.base_index)
+            .and_then(|x| <span class="macro">u64_as_idx!</span>(x, Idx))
+    }
+
+    <span class="kw">pub async fn </span>index_records_from_storage(
+        storage: <span class="kw-2">&amp;</span>S,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;IndexRecord&gt;, IndexError&lt;S::Error&gt;&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>position = INDEX_BASE_MARKER_LENGTH <span class="kw">as </span>u64;
+
+        <span class="kw">let </span><span class="kw-2">mut </span>index_records = Vec::&lt;IndexRecord&gt;::with_capacity(
+            <span class="self">Self</span>::estimated_index_records_len_in_storage(storage)<span class="question-mark">?</span>,
+        );
+
+        <span class="kw">while let </span><span class="prelude-val">Ok</span>(index_record) =
+            PersistentSizedRecord::&lt;IndexRecord, INDEX_RECORD_LENGTH&gt;::read_at(
+                storage,
+                <span class="kw-2">&amp;</span><span class="macro">u64_as_position!</span>(position, S::Position)<span class="question-mark">?</span>,
+            )
+            .<span class="kw">await
+        </span>{
+            index_records.push(index_record.into_inner());
+            position += INDEX_RECORD_LENGTH <span class="kw">as </span>u64;
+        }
+
+        index_records.shrink_to_fit();
+
+        <span class="kw">let </span>estimated_index_records_len = <span class="self">Self</span>::estimated_index_records_len_in_storage(storage)<span class="question-mark">?</span>;
+
+        <span class="kw">if </span>index_records.len() != estimated_index_records_len {
+            <span class="prelude-val">Err</span>(IndexError::InconsistentIndexSize)
+        } <span class="kw">else </span>{
+            <span class="prelude-val">Ok</span>(index_records)
+        }
+    }
+
+    <span class="kw">pub async fn </span>validated_base_index(
+        storage: <span class="kw-2">&amp;</span>S,
+        base_index: <span class="prelude-ty">Option</span>&lt;Idx&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;Idx, IndexError&lt;S::Error&gt;&gt; {
+        <span class="kw">let </span>read_base_index = <span class="self">Self</span>::base_index_from_storage(storage).<span class="kw">await</span>.ok();
+
+        <span class="kw">match </span>(read_base_index, base_index) {
+            (<span class="prelude-val">None</span>, <span class="prelude-val">None</span>) =&gt; <span class="prelude-val">Err</span>(IndexError::NoBaseIndexFound),
+            (<span class="prelude-val">None</span>, <span class="prelude-val">Some</span>(base_index)) =&gt; <span class="prelude-val">Ok</span>(base_index),
+            (<span class="prelude-val">Some</span>(base_index), <span class="prelude-val">None</span>) =&gt; <span class="prelude-val">Ok</span>(base_index),
+            (<span class="prelude-val">Some</span>(read), <span class="prelude-val">Some</span>(provided)) <span class="kw">if </span>read != provided =&gt; <span class="prelude-val">Err</span>(IndexError::BaseIndexMismatch),
+            (<span class="prelude-val">Some</span>(<span class="kw">_</span>), <span class="prelude-val">Some</span>(provided)) =&gt; <span class="prelude-val">Ok</span>(provided),
+        }
+    }
+
+    <span class="kw">pub async fn </span>with_storage_and_base_index_option(
         storage: S,
         base_index: <span class="prelude-ty">Option</span>&lt;Idx&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, IndexError&lt;S::Error&gt;&gt; {
-        <span class="kw">let </span>index_records = index_records_in_storage(<span class="kw-2">&amp;</span>storage).<span class="kw">await</span><span class="question-mark">?</span>;
-        <span class="kw">let </span>read_base_index = index_records.first().map(|x| x.index);
+        <span class="kw">let </span>base_index = <span class="self">Self</span>::validated_base_index(<span class="kw-2">&amp;</span>storage, base_index).<span class="kw">await</span><span class="question-mark">?</span>;
 
-        <span class="kw">let </span>base_index = <span class="kw">match </span>(read_base_index, base_index) {
-            (<span class="prelude-val">None</span>, <span class="prelude-val">None</span>) =&gt; <span class="prelude-val">Err</span>(IndexError::NoBaseIndexFound),
-            (<span class="prelude-val">None</span>, <span class="prelude-val">Some</span>(base_index)) =&gt; <span class="prelude-val">Ok</span>(base_index),
-            (<span class="prelude-val">Some</span>(base_index), <span class="prelude-val">None</span>) =&gt; <span class="macro">u64_as_idx!</span>(base_index, Idx),
-            (<span class="prelude-val">Some</span>(read), <span class="prelude-val">Some</span>(provided)) <span class="kw">if </span><span class="macro">u64_as_idx!</span>(read, Idx)<span class="question-mark">? </span>!= provided =&gt; {
-                <span class="prelude-val">Err</span>(IndexError::BaseIndexMismatch)
-            }
-            (<span class="prelude-val">Some</span>(<span class="kw">_</span>), <span class="prelude-val">Some</span>(provided)) =&gt; <span class="prelude-val">Ok</span>(provided),
-        }<span class="question-mark">?</span>;
+        <span class="kw">let </span>index_records = <span class="self">Self</span>::index_records_from_storage(<span class="kw-2">&amp;</span>storage).<span class="kw">await</span><span class="question-mark">?</span>;
 
-        <span class="kw">let </span>next_index = <span class="kw">match </span>index_records.last() {
-            <span class="prelude-val">Some</span>(index_record) =&gt; {
-                <span class="kw">let </span>idx = index_record.index + <span class="number">1</span>;
-                <span class="macro">u64_as_idx!</span>(idx, Idx)
-            }
-            <span class="prelude-val">None </span>=&gt; <span class="prelude-val">Ok</span>(base_index),
-        }<span class="question-mark">?</span>;
+        <span class="kw">let </span>len = index_records.len() <span class="kw">as </span>u64;
+
+        <span class="kw">let </span>next_index = base_index + <span class="macro">u64_as_idx!</span>(len, Idx)<span class="question-mark">?</span>;
 
         <span class="prelude-val">Ok</span>(<span class="self">Self </span>{
-            index_records,
+            index_records: <span class="prelude-val">Some</span>(index_records),
             base_index,
             next_index,
             storage,
@@ -786,29 +1026,38 @@
         <span class="self">Self</span>::with_storage_and_base_index_option(storage, <span class="prelude-val">None</span>).<span class="kw">await
     </span>}
 
-    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>with_storage_and_index_records(
+    <span class="kw">pub fn </span>with_storage_index_records_option_and_validated_base_index(
         storage: S,
-        index_records: Vec&lt;IndexRecord&gt;,
+        index_records: <span class="prelude-ty">Option</span>&lt;Vec&lt;IndexRecord&gt;&gt;,
+        validated_base_index: Idx,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, IndexError&lt;S::Error&gt;&gt; {
-        <span class="kw">let </span>base_index = index_records
-            .first()
-            .map(|x| x.index)
-            .ok_or(IndexError::NoBaseIndexFound)<span class="question-mark">?</span>;
-        <span class="kw">let </span>next_index = index_records
-            .last()
-            .map(|x| x.index + <span class="number">1</span>)
-            .unwrap_or(base_index);
+        <span class="kw">let </span>len = <span class="self">Self</span>::estimated_index_records_len_in_storage(<span class="kw-2">&amp;</span>storage)<span class="question-mark">? </span><span class="kw">as </span>u64;
+        <span class="kw">let </span>next_index = validated_base_index + <span class="macro">u64_as_idx!</span>(len, Idx)<span class="question-mark">?</span>;
 
         <span class="prelude-val">Ok</span>(<span class="self">Self </span>{
             index_records,
-            base_index: <span class="macro">u64_as_idx!</span>(base_index, Idx)<span class="question-mark">?</span>,
-            next_index: <span class="macro">u64_as_idx!</span>(next_index, Idx)<span class="question-mark">?</span>,
+            base_index: validated_base_index,
+            next_index,
             storage,
         })
     }
 
-    <span class="kw">pub fn </span>into_storage_index_records_and_base_index(<span class="self">self</span>) -&gt; (S, Vec&lt;IndexRecord&gt;, Idx) {
-        (<span class="self">self</span>.storage, <span class="self">self</span>.index_records, <span class="self">self</span>.base_index)
+    <span class="kw">pub fn </span>take_cached_index_records(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Vec&lt;IndexRecord&gt;&gt; {
+        <span class="self">self</span>.index_records.take()
+    }
+
+    <span class="kw">pub fn </span>cached_index_records(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Vec&lt;IndexRecord&gt;&gt; {
+        <span class="self">self</span>.index_records.as_ref()
+    }
+
+    <span class="kw">pub async fn </span>cache(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;(), IndexError&lt;S::Error&gt;&gt; {
+        <span class="kw">if </span><span class="self">self</span>.index_records.as_ref().is_some() {
+            <span class="kw">return </span><span class="prelude-val">Ok</span>(());
+        }
+
+        <span class="self">self</span>.index_records = <span class="prelude-val">Some</span>(<span class="self">Self</span>::index_records_from_storage(<span class="kw-2">&amp;</span><span class="self">self</span>.storage).<span class="kw">await</span><span class="question-mark">?</span>);
+
+        <span class="prelude-val">Ok</span>(())
     }
 }
 
@@ -819,7 +1068,7 @@
 {
     <span class="kw">pub fn </span>with_base_index(base_index: Idx) -&gt; <span class="self">Self </span>{
         <span class="self">Self </span>{
-            index_records: Vec::new(),
+            index_records: <span class="prelude-val">Some</span>(Vec::new()),
             base_index,
             next_index: base_index,
             storage: S::default(),
@@ -832,6 +1081,31 @@
 
     <span class="kw">fn </span>size(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span>::Size {
         <span class="self">self</span>.storage.size()
+    }
+}
+
+<span class="kw">impl</span>&lt;S: Storage, Idx&gt; Index&lt;S, Idx&gt; {
+    <span class="attr">#[inline]
+    </span><span class="kw">fn </span>underlying_storage_position(
+        normalized_index: usize,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;S::Position, IndexError&lt;S::Error&gt;&gt; {
+        <span class="kw">let </span>storage_position =
+            (INDEX_BASE_MARKER_LENGTH + INDEX_RECORD_LENGTH * normalized_index) <span class="kw">as </span>u64;
+        <span class="macro">u64_as_position!</span>(storage_position, S::Position)
+    }
+}
+
+<span class="kw">impl</span>&lt;S, Idx&gt; Index&lt;S, Idx&gt;
+<span class="kw">where
+    </span>S: Storage,
+    Idx: Unsigned + CheckedSub + ToPrimitive + Ord + Copy,
+{
+    <span class="attr">#[inline]
+    </span><span class="kw">fn </span>internal_normalized_index(<span class="kw-2">&amp;</span><span class="self">self</span>, idx: <span class="kw-2">&amp;</span>Idx) -&gt; <span class="prelude-ty">Result</span>&lt;usize, IndexError&lt;S::Error&gt;&gt; {
+        <span class="self">self</span>.normalize_index(idx)
+            .ok_or(IndexError::IndexOutOfBounds)<span class="question-mark">?
+            </span>.to_usize()
+            .ok_or(IndexError::IncompatibleIdxType)
     }
 }
 
@@ -856,16 +1130,22 @@
     }
 
     <span class="kw">async fn </span>read(<span class="kw-2">&amp;</span><span class="self">self</span>, idx: <span class="kw-2">&amp;</span><span class="self">Self</span>::Idx) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>::Value, <span class="self">Self</span>::ReadError&gt; {
-        <span class="kw">let </span>vec_index = <span class="self">self
-            </span>.normalize_index(idx)
-            .ok_or(IndexError::IndexOutOfBounds)<span class="question-mark">?
-            </span>.to_usize()
-            .ok_or(IndexError::IncompatibleIdxType)<span class="question-mark">?</span>;
+        <span class="kw">let </span>normalized_index = <span class="self">self</span>.internal_normalized_index(idx)<span class="question-mark">?</span>;
 
-        <span class="self">self</span>.index_records
-            .get(vec_index)
-            .ok_or(IndexError::IndexGapEncountered)
-            .map(|<span class="kw-2">&amp;</span>x| x)
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(index_records) = <span class="self">self</span>.index_records.as_ref() {
+            index_records
+                .get(normalized_index)
+                .ok_or(IndexError::IndexGapEncountered)
+                .map(|<span class="kw-2">&amp;</span>x| x)
+        } <span class="kw">else </span>{
+            <span class="kw">let </span>position = <span class="self">Self</span>::underlying_storage_position(normalized_index)<span class="question-mark">?</span>;
+            PersistentSizedRecord::&lt;IndexRecord, INDEX_RECORD_LENGTH&gt;::read_at(
+                <span class="kw-2">&amp;</span><span class="self">self</span>.storage,
+                <span class="kw-2">&amp;</span>position,
+            )
+            .<span class="kw">await
+            </span>.map(|x| x.into_inner())
+        }
     }
 }
 
@@ -877,12 +1157,21 @@
     <span class="kw">pub async fn </span>append(<span class="kw-2">&amp;mut </span><span class="self">self</span>, index_record: IndexRecord) -&gt; <span class="prelude-ty">Result</span>&lt;Idx, IndexError&lt;S::Error&gt;&gt; {
         <span class="kw">let </span>write_index = <span class="self">self</span>.next_index;
 
-        <span class="kw">if </span>index_record.index != <span class="macro">idx_as_u64!</span>(write_index, Idx)<span class="question-mark">? </span>{
-            <span class="kw">return </span><span class="prelude-val">Err</span>(IndexError::&lt;S::Error&gt;::InvalidAppendIdx);
+        <span class="kw">if </span>write_index == <span class="self">self</span>.base_index {
+            PersistentSizedRecord::&lt;IndexBaseMarker, INDEX_BASE_MARKER_LENGTH&gt;(
+                IndexBaseMarker::new(<span class="macro">idx_as_u64!</span>(write_index, Idx)<span class="question-mark">?</span>),
+            )
+            .append_to(<span class="kw-2">&amp;mut </span><span class="self">self</span>.storage)
+            .<span class="kw">await</span><span class="question-mark">?</span>;
         }
 
-        index_record.append_to_storage(<span class="kw-2">&amp;mut </span><span class="self">self</span>.storage).<span class="kw">await</span><span class="question-mark">?</span>;
-        <span class="self">self</span>.index_records.push(index_record);
+        PersistentSizedRecord::&lt;IndexRecord, INDEX_RECORD_LENGTH&gt;(index_record)
+            .append_to(<span class="kw-2">&amp;mut </span><span class="self">self</span>.storage)
+            .<span class="kw">await</span><span class="question-mark">?</span>;
+
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(index_records) = <span class="self">self</span>.index_records.as_mut() {
+            index_records.push(index_record);
+        }
 
         <span class="self">self</span>.next_index = write_index + Idx::one();
         <span class="prelude-val">Ok</span>(write_index)
@@ -900,21 +1189,16 @@
     <span class="kw">type </span>Mark = Idx;
 
     <span class="kw">async fn </span>truncate(<span class="kw-2">&amp;mut </span><span class="self">self</span>, idx: <span class="kw-2">&amp;</span><span class="self">Self</span>::Mark) -&gt; <span class="prelude-ty">Result</span>&lt;(), <span class="self">Self</span>::TruncError&gt; {
-        <span class="kw">let </span>vec_index = <span class="self">self
-            </span>.normalize_index(idx)
-            .ok_or(IndexError::IndexOutOfBounds)<span class="question-mark">?
-            </span>.to_usize()
-            .ok_or(IndexError::IncompatibleIdxType)<span class="question-mark">?</span>;
-
-        <span class="kw">let </span>truncate_position = (INDEX_RECORD_LENGTH * vec_index) <span class="kw">as </span>u64;
-        <span class="kw">let </span>truncate_position = <span class="macro">u64_as_position!</span>(truncate_position, S::Position)<span class="question-mark">?</span>;
+        <span class="kw">let </span>normalized_index = <span class="self">self</span>.internal_normalized_index(idx)<span class="question-mark">?</span>;
 
         <span class="self">self</span>.storage
-            .truncate(<span class="kw-2">&amp;</span>truncate_position)
+            .truncate(<span class="kw-2">&amp;</span><span class="self">Self</span>::underlying_storage_position(normalized_index)<span class="question-mark">?</span>)
             .<span class="kw">await
             </span>.map_err(IndexError::StorageError)<span class="question-mark">?</span>;
 
-        <span class="self">self</span>.index_records.truncate(vec_index);
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(index_records) = <span class="self">self</span>.index_records.as_mut() {
+            index_records.truncate(normalized_index);
+        }
 
         <span class="self">self</span>.next_index = <span class="kw-2">*</span>idx;
 
@@ -971,12 +1255,9 @@
         record_source
             .map(|x| RecordHeader::compute::&lt;H&gt;(x.deref()))
             .scan((<span class="number">0</span>, <span class="number">0</span>), |(index, position), record_header| {
-                <span class="kw">let </span>index_record = IndexRecord::with_position_index_and_record_header::&lt;u32, u32&gt;(
-                    <span class="kw-2">*</span>position,
-                    <span class="kw-2">*</span>index,
-                    record_header,
-                )
-                .unwrap();
+                <span class="kw">let </span>index_record =
+                    IndexRecord::with_position_and_record_header::&lt;u32&gt;(<span class="kw-2">*</span>position, record_header)
+                        .unwrap();
 
                 <span class="kw-2">*</span>index += <span class="number">1</span>;
                 <span class="kw-2">*</span>position += record_header.length <span class="kw">as </span>u32;
@@ -1029,12 +1310,12 @@
             <span class="kw">_ </span>=&gt; <span class="macro">unreachable!</span>(<span class="string">&quot;Wrong result returned when creating from empty storage without providing base index&quot;</span>),
         }
 
-        <span class="kw">let </span><span class="kw-2">mut </span>index = Index::with_storage_and_base_index(
-            test_storage_provider().<span class="kw">await</span>.<span class="number">0</span>.storage,
-            Idx::zero(),
-        )
-        .<span class="kw">await
-        </span>.unwrap();
+        <span class="kw">let </span>base_index = Idx::zero();
+
+        <span class="kw">let </span><span class="kw-2">mut </span>index =
+            Index::with_storage_and_base_index(test_storage_provider().<span class="kw">await</span>.<span class="number">0</span>.storage, base_index)
+                .<span class="kw">await
+                </span>.unwrap();
 
         <span class="kw">match </span>index.read(<span class="kw-2">&amp;</span>Idx::zero()).<span class="kw">await </span>{
             <span class="prelude-val">Err</span>(IndexError::IndexOutOfBounds) =&gt; {}
@@ -1043,13 +1324,6 @@
 
         <span class="kw">for </span>index_record <span class="kw">in </span>_test_index_records_provider::&lt;H&gt;(_test_records_provider(<span class="kw-2">&amp;</span>_RECORDS)) {
             index.append(index_record).<span class="kw">await</span>.unwrap();
-        }
-
-        <span class="kw">match </span>index.append(IndexRecord::default()).<span class="kw">await </span>{
-            <span class="prelude-val">Err</span>(IndexError::InvalidAppendIdx) =&gt; {}
-            <span class="kw">_ </span>=&gt; <span class="macro">unreachable!</span>(
-                <span class="string">&quot;Wrong result returned when appending IndexRecord with invalid append index&quot;
-            </span>),
         }
 
         _test_index_contains_records(
@@ -1069,6 +1343,20 @@
                 .<span class="kw">await
                 </span>.unwrap()
         };
+
+        <span class="kw">let </span>index = Index::&lt;S, Idx&gt;::with_storage_index_records_option_and_validated_base_index(
+            index.into_storage(),
+            <span class="prelude-val">None</span>,
+            base_index,
+        )
+        .unwrap();
+
+        _test_index_contains_records(
+            <span class="kw-2">&amp;</span>index,
+            _test_index_records_provider::&lt;H&gt;(_test_records_provider(<span class="kw-2">&amp;</span>_RECORDS)),
+            _RECORDS.len(),
+        )
+        .<span class="kw">await</span>;
 
         <span class="kw">let </span><span class="kw-2">mut </span>index =
             Index::&lt;S, Idx&gt;::with_storage_and_base_index(index.into_storage(), Idx::zero())

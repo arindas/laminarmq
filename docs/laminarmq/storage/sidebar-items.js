@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["commit_log","common","impls"],"trait":["AsyncConsume","AsyncIndexedRead","AsyncTruncate","Sizable","Storage"]};
+window.SIDEBAR_ITEMS = {"mod":["commit_log","common","impls"],"trait":["AsyncConsume","AsyncIndexedExclusiveRead","AsyncIndexedRead","AsyncTruncate","Sizable","Storage"]};

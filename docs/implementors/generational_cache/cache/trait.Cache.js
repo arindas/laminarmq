@@ -1,0 +1,3 @@
+(function() {var implementors = {
+"laminarmq":[["impl&lt;K, V&gt; <a class=\"trait\" href=\"laminarmq/common/cache/trait.Cache.html\" title=\"trait laminarmq::common::cache::Cache\">Cache</a>&lt;K, V&gt; for <a class=\"struct\" href=\"laminarmq/common/cache/struct.NoOpCache.html\" title=\"struct laminarmq::common::cache::NoOpCache\">NoOpCache</a>&lt;K, V&gt;"]]
+};if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()
