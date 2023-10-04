@@ -1,0 +1,491 @@
+<?xml version="1.0" standalone="no"?><!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd"><svg version="1.1" width="1200" height="662" onload="init(evt)" viewBox="0 0 1200 662" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:fg="http://github.com/jonhoo/inferno"><!--Flame graph stack visualization. See https://github.com/brendangregg/FlameGraph for latest version, and http://www.brendangregg.com/flamegraphs.html for examples.--><!--NOTES: --><defs><linearGradient id="background" y1="0" y2="1" x1="0" x2="0"><stop stop-color="#eeeeee" offset="5%"/><stop stop-color="#eeeeb0" offset="95%"/></linearGradient></defs><style type="text/css">
+text { font-family:monospace; font-size:12px }
+#title { text-anchor:middle; font-size:17px; }
+#matched { text-anchor:end; }
+#search { text-anchor:end; opacity:0.1; cursor:pointer; }
+#search:hover, #search.show { opacity:1; }
+#subtitle { text-anchor:middle; font-color:rgb(160,160,160); }
+#unzoom { cursor:pointer; }
+#frames > *:hover { stroke:black; stroke-width:0.5; cursor:pointer; }
+.hide { display:none; }
+.parent { opacity:0.5; }
+</style><script type="text/ecmascript"><![CDATA[
+        var nametype = 'Function:';
+        var fontsize = 12;
+        var fontwidth = 0.59;
+        var xpad = 10;
+        var inverted = false;
+        var searchcolor = 'rgb(230,0,230)';
+        var fluiddrawing = true;
+        var truncate_text_right = false;
+    ]]><![CDATA["use strict";
+var details, searchbtn, unzoombtn, matchedtxt, svg, searching, frames, known_font_width;
+function init(evt) {
+    details = document.getElementById("details").firstChild;
+    searchbtn = document.getElementById("search");
+    unzoombtn = document.getElementById("unzoom");
+    matchedtxt = document.getElementById("matched");
+    svg = document.getElementsByTagName("svg")[0];
+    frames = document.getElementById("frames");
+    known_font_width = get_monospace_width(frames);
+    total_samples = parseInt(frames.attributes.total_samples.value);
+    searching = 0;
+
+    // Use GET parameters to restore a flamegraph's state.
+    var restore_state = function() {
+        var params = get_params();
+        if (params.x && params.y)
+            zoom(find_group(document.querySelector('[*|x="' + params.x + '"][y="' + params.y + '"]')));
+        if (params.s)
+            search(params.s);
+    };
+
+    if (fluiddrawing) {
+        // Make width dynamic so the SVG fits its parent's width.
+        svg.removeAttribute("width");
+        // Edge requires us to have a viewBox that gets updated with size changes.
+        var isEdge = /Edge\/\d./i.test(navigator.userAgent);
+        if (!isEdge) {
+            svg.removeAttribute("viewBox");
+        }
+        var update_for_width_change = function() {
+            if (isEdge) {
+                svg.attributes.viewBox.value = "0 0 " + svg.width.baseVal.value + " " + svg.height.baseVal.value;
+            }
+
+            // Keep consistent padding on left and right of frames container.
+            frames.attributes.width.value = svg.width.baseVal.value - xpad * 2;
+
+            // Text truncation needs to be adjusted for the current width.
+            update_text_for_elements(frames.children);
+
+            // Keep search elements at a fixed distance from right edge.
+            var svgWidth = svg.width.baseVal.value;
+            searchbtn.attributes.x.value = svgWidth - xpad;
+            matchedtxt.attributes.x.value = svgWidth - xpad;
+        };
+        window.addEventListener('resize', function() {
+            update_for_width_change();
+        });
+        // This needs to be done asynchronously for Safari to work.
+        setTimeout(function() {
+            unzoom();
+            update_for_width_change();
+            restore_state();
+        }, 0);
+    } else {
+        restore_state();
+    }
+}
+// event listeners
+window.addEventListener("click", function(e) {
+    var target = find_group(e.target);
+    if (target) {
+        if (target.nodeName == "a") {
+            if (e.ctrlKey === false) return;
+            e.preventDefault();
+        }
+        if (target.classList.contains("parent")) unzoom();
+        zoom(target);
+
+        // set parameters for zoom state
+        var el = target.querySelector("rect");
+        if (el && el.attributes && el.attributes.y && el.attributes["fg:x"]) {
+            var params = get_params()
+            params.x = el.attributes["fg:x"].value;
+            params.y = el.attributes.y.value;
+            history.replaceState(null, null, parse_params(params));
+        }
+    }
+    else if (e.target.id == "unzoom") {
+        unzoom();
+
+        // remove zoom state
+        var params = get_params();
+        if (params.x) delete params.x;
+        if (params.y) delete params.y;
+        history.replaceState(null, null, parse_params(params));
+    }
+    else if (e.target.id == "search") search_prompt();
+}, false)
+// mouse-over for info
+// show
+window.addEventListener("mouseover", function(e) {
+    var target = find_group(e.target);
+    if (target) details.nodeValue = nametype + " " + g_to_text(target);
+}, false)
+// clear
+window.addEventListener("mouseout", function(e) {
+    var target = find_group(e.target);
+    if (target) details.nodeValue = ' ';
+}, false)
+// ctrl-F for search
+window.addEventListener("keydown",function (e) {
+    if (e.keyCode === 114 || (e.ctrlKey && e.keyCode === 70)) {
+        e.preventDefault();
+        search_prompt();
+    }
+}, false)
+// functions
+function get_params() {
+    var params = {};
+    var paramsarr = window.location.search.substr(1).split('&');
+    for (var i = 0; i < paramsarr.length; ++i) {
+        var tmp = paramsarr[i].split("=");
+        if (!tmp[0] || !tmp[1]) continue;
+        params[tmp[0]]  = decodeURIComponent(tmp[1]);
+    }
+    return params;
+}
+function parse_params(params) {
+    var uri = "?";
+    for (var key in params) {
+        uri += key + '=' + encodeURIComponent(params[key]) + '&';
+    }
+    if (uri.slice(-1) == "&")
+        uri = uri.substring(0, uri.length - 1);
+    if (uri == '?')
+        uri = window.location.href.split('?')[0];
+    return uri;
+}
+function find_child(node, selector) {
+    var children = node.querySelectorAll(selector);
+    if (children.length) return children[0];
+    return;
+}
+function find_group(node) {
+    var parent = node.parentElement;
+    if (!parent) return;
+    if (parent.id == "frames") return node;
+    return find_group(parent);
+}
+function orig_save(e, attr, val) {
+    if (e.attributes["fg:orig_" + attr] != undefined) return;
+    if (e.attributes[attr] == undefined) return;
+    if (val == undefined) val = e.attributes[attr].value;
+    e.setAttribute("fg:orig_" + attr, val);
+}
+function orig_load(e, attr) {
+    if (e.attributes["fg:orig_"+attr] == undefined) return;
+    e.attributes[attr].value = e.attributes["fg:orig_" + attr].value;
+    e.removeAttribute("fg:orig_" + attr);
+}
+function g_to_text(e) {
+    var text = find_child(e, "title").firstChild.nodeValue;
+    return (text)
+}
+function g_to_func(e) {
+    var func = g_to_text(e);
+    // if there's any manipulation we want to do to the function
+    // name before it's searched, do it here before returning.
+    return (func);
+}
+function get_monospace_width(frames) {
+    // Given the id="frames" element, return the width of text characters if
+    // this is a monospace font, otherwise return 0.
+    text = find_child(frames.children[0], "text");
+    originalContent = text.textContent;
+    text.textContent = "!";
+    bangWidth = text.getComputedTextLength();
+    text.textContent = "W";
+    wWidth = text.getComputedTextLength();
+    text.textContent = originalContent;
+    if (bangWidth === wWidth) {
+        return bangWidth;
+    } else {
+        return 0;
+    }
+}
+function update_text_for_elements(elements) {
+    // In order to render quickly in the browser, you want to do one pass of
+    // reading attributes, and one pass of mutating attributes. See
+    // https://web.dev/avoid-large-complex-layouts-and-layout-thrashing/ for details.
+
+    // Fall back to inefficient calculation, if we're variable-width font.
+    // TODO This should be optimized somehow too.
+    if (known_font_width === 0) {
+        for (var i = 0; i < elements.length; i++) {
+            update_text(elements[i]);
+        }
+        return;
+    }
+
+    var textElemNewAttributes = [];
+    for (var i = 0; i < elements.length; i++) {
+        var e = elements[i];
+        var r = find_child(e, "rect");
+        var t = find_child(e, "text");
+        var w = parseFloat(r.attributes.width.value) * frames.attributes.width.value / 100 - 3;
+        var txt = find_child(e, "title").textContent.replace(/\([^(]*\)$/,"");
+        var newX = format_percent((parseFloat(r.attributes.x.value) + (100 * 3 / frames.attributes.width.value)));
+
+        // Smaller than this size won't fit anything
+        if (w < 2 * known_font_width) {
+            textElemNewAttributes.push([newX, ""]);
+            continue;
+        }
+
+        // Fit in full text width
+        if (txt.length * known_font_width < w) {
+            textElemNewAttributes.push([newX, txt]);
+            continue;
+        }
+
+        var substringLength = Math.floor(w / known_font_width) - 2;
+        if (truncate_text_right) {
+            // Truncate the right side of the text.
+            textElemNewAttributes.push([newX, txt.substring(0, substringLength) + ".."]);
+            continue;
+        } else {
+            // Truncate the left side of the text.
+            textElemNewAttributes.push([newX, ".." + txt.substring(txt.length - substringLength, txt.length)]);
+            continue;
+        }
+    }
+
+    console.assert(textElemNewAttributes.length === elements.length, "Resize failed, please file a bug at https://github.com/jonhoo/inferno/");
+
+    // Now that we know new textContent, set it all in one go so we don't refresh a bazillion times.
+    for (var i = 0; i < elements.length; i++) {
+        var e = elements[i];
+        var values = textElemNewAttributes[i];
+        var t = find_child(e, "text");
+        t.attributes.x.value = values[0];
+        t.textContent = values[1];
+    }
+}
+
+function update_text(e) {
+    var r = find_child(e, "rect");
+    var t = find_child(e, "text");
+    var w = parseFloat(r.attributes.width.value) * frames.attributes.width.value / 100 - 3;
+    var txt = find_child(e, "title").textContent.replace(/\([^(]*\)$/,"");
+    t.attributes.x.value = format_percent((parseFloat(r.attributes.x.value) + (100 * 3 / frames.attributes.width.value)));
+
+    // Smaller than this size won't fit anything
+    if (w < 2 * fontsize * fontwidth) {
+        t.textContent = "";
+        return;
+    }
+    t.textContent = txt;
+    // Fit in full text width
+    if (t.getComputedTextLength() < w)
+        return;
+    if (truncate_text_right) {
+        // Truncate the right side of the text.
+        for (var x = txt.length - 2; x > 0; x--) {
+            if (t.getSubStringLength(0, x + 2) <= w) {
+                t.textContent = txt.substring(0, x) + "..";
+                return;
+            }
+        }
+    } else {
+        // Truncate the left side of the text.
+        for (var x = 2; x < txt.length; x++) {
+            if (t.getSubStringLength(x - 2, txt.length) <= w) {
+                t.textContent = ".." + txt.substring(x, txt.length);
+                return;
+            }
+        }
+    }
+    t.textContent = "";
+}
+// zoom
+function zoom_reset(e) {
+    if (e.tagName == "rect") {
+        e.attributes.x.value = format_percent(100 * parseInt(e.attributes["fg:x"].value) / total_samples);
+        e.attributes.width.value = format_percent(100 * parseInt(e.attributes["fg:w"].value) / total_samples);
+    }
+    if (e.childNodes == undefined) return;
+    for(var i = 0, c = e.childNodes; i < c.length; i++) {
+        zoom_reset(c[i]);
+    }
+}
+function zoom_child(e, x, zoomed_width_samples) {
+    if (e.tagName == "text") {
+        var parent_x = parseFloat(find_child(e.parentNode, "rect[x]").attributes.x.value);
+        e.attributes.x.value = format_percent(parent_x + (100 * 3 / frames.attributes.width.value));
+    } else if (e.tagName == "rect") {
+        e.attributes.x.value = format_percent(100 * (parseInt(e.attributes["fg:x"].value) - x) / zoomed_width_samples);
+        e.attributes.width.value = format_percent(100 * parseInt(e.attributes["fg:w"].value) / zoomed_width_samples);
+    }
+    if (e.childNodes == undefined) return;
+    for(var i = 0, c = e.childNodes; i < c.length; i++) {
+        zoom_child(c[i], x, zoomed_width_samples);
+    }
+}
+function zoom_parent(e) {
+    if (e.attributes) {
+        if (e.attributes.x != undefined) {
+            e.attributes.x.value = "0.0%";
+        }
+        if (e.attributes.width != undefined) {
+            e.attributes.width.value = "100.0%";
+        }
+    }
+    if (e.childNodes == undefined) return;
+    for(var i = 0, c = e.childNodes; i < c.length; i++) {
+        zoom_parent(c[i]);
+    }
+}
+function zoom(node) {
+    var attr = find_child(node, "rect").attributes;
+    var width = parseInt(attr["fg:w"].value);
+    var xmin = parseInt(attr["fg:x"].value);
+    var xmax = xmin + width;
+    var ymin = parseFloat(attr.y.value);
+    unzoombtn.classList.remove("hide");
+    var el = frames.children;
+    var to_update_text = [];
+    for (var i = 0; i < el.length; i++) {
+        var e = el[i];
+        var a = find_child(e, "rect").attributes;
+        var ex = parseInt(a["fg:x"].value);
+        var ew = parseInt(a["fg:w"].value);
+        // Is it an ancestor
+        if (!inverted) {
+            var upstack = parseFloat(a.y.value) > ymin;
+        } else {
+            var upstack = parseFloat(a.y.value) < ymin;
+        }
+        if (upstack) {
+            // Direct ancestor
+            if (ex <= xmin && (ex+ew) >= xmax) {
+                e.classList.add("parent");
+                zoom_parent(e);
+                to_update_text.push(e);
+            }
+            // not in current path
+            else
+                e.classList.add("hide");
+        }
+        // Children maybe
+        else {
+            // no common path
+            if (ex < xmin || ex >= xmax) {
+                e.classList.add("hide");
+            }
+            else {
+                zoom_child(e, xmin, width);
+                to_update_text.push(e);
+            }
+        }
+    }
+    update_text_for_elements(to_update_text);
+}
+function unzoom() {
+    unzoombtn.classList.add("hide");
+    var el = frames.children;
+    for(var i = 0; i < el.length; i++) {
+        el[i].classList.remove("parent");
+        el[i].classList.remove("hide");
+        zoom_reset(el[i]);
+    }
+    update_text_for_elements(el);
+}
+// search
+function reset_search() {
+    var el = document.querySelectorAll("#frames rect");
+    for (var i = 0; i < el.length; i++) {
+        orig_load(el[i], "fill")
+    }
+    var params = get_params();
+    delete params.s;
+    history.replaceState(null, null, parse_params(params));
+}
+function search_prompt() {
+    if (!searching) {
+        var term = prompt("Enter a search term (regexp " +
+            "allowed, eg: ^ext4_)", "");
+        if (term != null) {
+            search(term)
+        }
+    } else {
+        reset_search();
+        searching = 0;
+        searchbtn.classList.remove("show");
+        searchbtn.firstChild.nodeValue = "Search"
+        matchedtxt.classList.add("hide");
+        matchedtxt.firstChild.nodeValue = ""
+    }
+}
+function search(term) {
+    var re = new RegExp(term);
+    var el = frames.children;
+    var matches = new Object();
+    var maxwidth = 0;
+    for (var i = 0; i < el.length; i++) {
+        var e = el[i];
+        // Skip over frames which are either not visible, or below the zoomed-to frame
+        if (e.classList.contains("hide") || e.classList.contains("parent")) {
+            continue;
+        }
+        var func = g_to_func(e);
+        var rect = find_child(e, "rect");
+        if (func == null || rect == null)
+            continue;
+        // Save max width. Only works as we have a root frame
+        var w = parseInt(rect.attributes["fg:w"].value);
+        if (w > maxwidth)
+            maxwidth = w;
+        if (func.match(re)) {
+            // highlight
+            var x = parseInt(rect.attributes["fg:x"].value);
+            orig_save(rect, "fill");
+            rect.attributes.fill.value = searchcolor;
+            // remember matches
+            if (matches[x] == undefined) {
+                matches[x] = w;
+            } else {
+                if (w > matches[x]) {
+                    // overwrite with parent
+                    matches[x] = w;
+                }
+            }
+            searching = 1;
+        }
+    }
+    if (!searching)
+        return;
+    var params = get_params();
+    params.s = term;
+    history.replaceState(null, null, parse_params(params));
+
+    searchbtn.classList.add("show");
+    searchbtn.firstChild.nodeValue = "Reset Search";
+    // calculate percent matched, excluding vertical overlap
+    var count = 0;
+    var lastx = -1;
+    var lastw = 0;
+    var keys = Array();
+    for (k in matches) {
+        if (matches.hasOwnProperty(k))
+            keys.push(k);
+    }
+    // sort the matched frames by their x location
+    // ascending, then width descending
+    keys.sort(function(a, b){
+        return a - b;
+    });
+    // Step through frames saving only the biggest bottom-up frames
+    // thanks to the sort order. This relies on the tree property
+    // where children are always smaller than their parents.
+    for (var k in keys) {
+        var x = parseInt(keys[k]);
+        var w = matches[keys[k]];
+        if (x >= lastx + lastw) {
+            count += w;
+            lastx = x;
+            lastw = w;
+        }
+    }
+    // display matched percent
+    matchedtxt.classList.remove("hide");
+    var pct = 100 * count / maxwidth;
+    if (pct != 100) pct = pct.toFixed(1);
+    matchedtxt.firstChild.nodeValue = "Matched: " + pct + "%";
+}
+function format_percent(n) {
+    return n.toFixed(4) + "%";
+}
+]]></script><rect x="0" y="0" width="100%" height="662" fill="url(#background)"/><text id="title" fill="rgb(0,0,0)" x="50.0000%" y="24.00">Flame Graph</text><text id="details" fill="rgb(0,0,0)" x="10" y="645.00"> </text><text id="unzoom" class="hide" fill="rgb(0,0,0)" x="10" y="24.00">Reset Zoom</text><text id="search" fill="rgb(0,0,0)" x="1190" y="24.00">Search</text><text id="matched" fill="rgb(0,0,0)" x="1190" y="645.00"> </text><svg id="frames" x="10" width="1180" total_samples="119"><g><title>&lt;alloc::vec::Vec&lt;T&gt; as alloc::vec::spec_from_iter::SpecFromIter&lt;T,I&gt;&gt;::from_iter (1 samples, 0.84%)</title><rect x="0.0000%" y="309" width="0.8403%" height="15" fill="rgb(246,141,4)" fg:x="0" fg:w="1"/><text x="0.2500%" y="319.50"></text></g><g><title>&lt;core::iter::adapters::map::Map&lt;I,F&gt; as core::iter::traits::iterator::Iterator&gt;::fold (1 samples, 0.84%)</title><rect x="0.0000%" y="293" width="0.8403%" height="15" fill="rgb(229,23,39)" fg:x="0" fg:w="1"/><text x="0.2500%" y="303.50"></text></g><g><title>&lt;glommio::executor::LocalExecutor as core::default::Default&gt;::default (1 samples, 0.84%)</title><rect x="0.0000%" y="277" width="0.8403%" height="15" fill="rgb(206,12,3)" fg:x="0" fg:w="1"/><text x="0.2500%" y="287.50"></text></g><g><title>glommio::executor::LocalExecutorBuilder::make (1 samples, 0.84%)</title><rect x="0.0000%" y="261" width="0.8403%" height="15" fill="rgb(252,226,20)" fg:x="0" fg:w="1"/><text x="0.2500%" y="271.50"></text></g><g><title>glommio::reactor::Reactor::new (1 samples, 0.84%)</title><rect x="0.0000%" y="245" width="0.8403%" height="15" fill="rgb(216,123,35)" fg:x="0" fg:w="1"/><text x="0.2500%" y="255.50"></text></g><g><title>glommio::sys::uring::Reactor::new (1 samples, 0.84%)</title><rect x="0.0000%" y="229" width="0.8403%" height="15" fill="rgb(212,68,40)" fg:x="0" fg:w="1"/><text x="0.2500%" y="239.50"></text></g><g><title>glommio::sys::uring::SleepableRing::new (1 samples, 0.84%)</title><rect x="0.0000%" y="213" width="0.8403%" height="15" fill="rgb(254,125,32)" fg:x="0" fg:w="1"/><text x="0.2500%" y="223.50"></text></g><g><title>io_uring_queue_init_params (1 samples, 0.84%)</title><rect x="0.0000%" y="197" width="0.8403%" height="15" fill="rgb(253,97,22)" fg:x="0" fg:w="1"/><text x="0.2500%" y="207.50"></text></g><g><title>__sys_io_uring_setup (1 samples, 0.84%)</title><rect x="0.0000%" y="181" width="0.8403%" height="15" fill="rgb(241,101,14)" fg:x="0" fg:w="1"/><text x="0.2500%" y="191.50"></text></g><g><title>syscall (1 samples, 0.84%)</title><rect x="0.0000%" y="165" width="0.8403%" height="15" fill="rgb(238,103,29)" fg:x="0" fg:w="1"/><text x="0.2500%" y="175.50"></text></g><g><title>glommio::sys::blocking::BlockingThreadPool::new (1 samples, 0.84%)</title><rect x="0.8403%" y="229" width="0.8403%" height="15" fill="rgb(233,195,47)" fg:x="1" fg:w="1"/><text x="1.0903%" y="239.50"></text></g><g><title>std::sys::unix::thread::Thread::new (1 samples, 0.84%)</title><rect x="0.8403%" y="213" width="0.8403%" height="15" fill="rgb(246,218,30)" fg:x="1" fg:w="1"/><text x="1.0903%" y="223.50"></text></g><g><title>pthread_create (1 samples, 0.84%)</title><rect x="0.8403%" y="197" width="0.8403%" height="15" fill="rgb(219,145,47)" fg:x="1" fg:w="1"/><text x="1.0903%" y="207.50"></text></g><g><title>__sys_io_uring_setup (1 samples, 0.84%)</title><rect x="1.6807%" y="197" width="0.8403%" height="15" fill="rgb(243,12,26)" fg:x="2" fg:w="1"/><text x="1.9307%" y="207.50"></text></g><g><title>syscall (1 samples, 0.84%)</title><rect x="1.6807%" y="181" width="0.8403%" height="15" fill="rgb(214,87,16)" fg:x="2" fg:w="1"/><text x="1.9307%" y="191.50"></text></g><g><title>glommio::sys::uring::SleepableRing::new (3 samples, 2.52%)</title><rect x="1.6807%" y="229" width="2.5210%" height="15" fill="rgb(208,99,42)" fg:x="2" fg:w="3"/><text x="1.9307%" y="239.50">gl..</text></g><g><title>io_uring_queue_init_params (3 samples, 2.52%)</title><rect x="1.6807%" y="213" width="2.5210%" height="15" fill="rgb(253,99,2)" fg:x="2" fg:w="3"/><text x="1.9307%" y="223.50">io..</text></g><g><title>io_uring_queue_mmap (2 samples, 1.68%)</title><rect x="2.5210%" y="197" width="1.6807%" height="15" fill="rgb(220,168,23)" fg:x="3" fg:w="2"/><text x="2.7710%" y="207.50"></text></g><g><title>mmap64 (2 samples, 1.68%)</title><rect x="2.5210%" y="181" width="1.6807%" height="15" fill="rgb(242,38,24)" fg:x="3" fg:w="2"/><text x="2.7710%" y="191.50"></text></g><g><title>io_uring_queue_init_params (1 samples, 0.84%)</title><rect x="4.2017%" y="229" width="0.8403%" height="15" fill="rgb(225,182,9)" fg:x="5" fg:w="1"/><text x="4.4517%" y="239.50"></text></g><g><title>io_uring_queue_mmap (1 samples, 0.84%)</title><rect x="4.2017%" y="213" width="0.8403%" height="15" fill="rgb(243,178,37)" fg:x="5" fg:w="1"/><text x="4.4517%" y="223.50"></text></g><g><title>mmap64 (1 samples, 0.84%)</title><rect x="4.2017%" y="197" width="0.8403%" height="15" fill="rgb(232,139,19)" fg:x="5" fg:w="1"/><text x="4.4517%" y="207.50"></text></g><g><title>&lt;glommio::executor::LocalExecutor as core::default::Default&gt;::default (21 samples, 17.65%)</title><rect x="0.8403%" y="293" width="17.6471%" height="15" fill="rgb(225,201,24)" fg:x="1" fg:w="21"/><text x="1.0903%" y="303.50">&lt;glommio::executor::LocalEx..</text></g><g><title>glommio::executor::LocalExecutorBuilder::make (21 samples, 17.65%)</title><rect x="0.8403%" y="277" width="17.6471%" height="15" fill="rgb(221,47,46)" fg:x="1" fg:w="21"/><text x="1.0903%" y="287.50">glommio::executor::LocalExe..</text></g><g><title>glommio::reactor::Reactor::new (21 samples, 17.65%)</title><rect x="0.8403%" y="261" width="17.6471%" height="15" fill="rgb(249,23,13)" fg:x="1" fg:w="21"/><text x="1.0903%" y="271.50">glommio::reactor::Reactor::..</text></g><g><title>glommio::sys::uring::Reactor::new (21 samples, 17.65%)</title><rect x="0.8403%" y="245" width="17.6471%" height="15" fill="rgb(219,9,5)" fg:x="1" fg:w="21"/><text x="1.0903%" y="255.50">glommio::sys::uring::Reacto..</text></g><g><title>io_uring_register_buffers (16 samples, 13.45%)</title><rect x="5.0420%" y="229" width="13.4454%" height="15" fill="rgb(254,171,16)" fg:x="6" fg:w="16"/><text x="5.2920%" y="239.50">io_uring_register_bu..</text></g><g><title>__sys_io_uring_register (16 samples, 13.45%)</title><rect x="5.0420%" y="213" width="13.4454%" height="15" fill="rgb(230,171,20)" fg:x="6" fg:w="16"/><text x="5.2920%" y="223.50">__sys_io_uring_regis..</text></g><g><title>syscall (16 samples, 13.45%)</title><rect x="5.0420%" y="197" width="13.4454%" height="15" fill="rgb(210,71,41)" fg:x="6" fg:w="16"/><text x="5.2920%" y="207.50">syscall</text></g><g><title>core::ptr::drop_in_place&lt;criterion::bencher::AsyncBencher&lt;commit_log_append::GlommioAsyncExecutor&gt;&gt; (1 samples, 0.84%)</title><rect x="18.4874%" y="293" width="0.8403%" height="15" fill="rgb(206,173,20)" fg:x="22" fg:w="1"/><text x="18.7374%" y="303.50"></text></g><g><title>&lt;alloc::rc::Rc&lt;T&gt; as core::ops::drop::Drop&gt;::drop (1 samples, 0.84%)</title><rect x="18.4874%" y="277" width="0.8403%" height="15" fill="rgb(233,88,34)" fg:x="22" fg:w="1"/><text x="18.7374%" y="287.50"></text></g><g><title>&lt;laminarmq::storage::commit_log::segmented_log::SegmentedLog&lt;S,M,H,Idx,&lt;S as laminarmq::storage::Sizable&gt;::Size,SERP,SSP,C&gt; as laminarmq::storage::AsyncConsume&gt;::close::{{closure}} (1 samples, 0.84%)</title><rect x="20.1681%" y="197" width="0.8403%" height="15" fill="rgb(223,209,46)" fg:x="24" fg:w="1"/><text x="20.4181%" y="207.50"></text></g><g><title>&lt;laminarmq::storage::commit_log::segmented_log::segment::Segment&lt;S,M,H,Idx,&lt;S as laminarmq::storage::Sizable&gt;::Size,SERP&gt; as laminarmq::storage::AsyncConsume&gt;::close::{{closure}} (1 samples, 0.84%)</title><rect x="20.1681%" y="181" width="0.8403%" height="15" fill="rgb(250,43,18)" fg:x="24" fg:w="1"/><text x="20.4181%" y="191.50"></text></g><g><title>&lt;laminarmq::storage::commit_log::segmented_log::store::Store&lt;S,H&gt; as laminarmq::storage::AsyncConsume&gt;::close::{{closure}} (1 samples, 0.84%)</title><rect x="20.1681%" y="165" width="0.8403%" height="15" fill="rgb(208,13,10)" fg:x="24" fg:w="1"/><text x="20.4181%" y="175.50"></text></g><g><title>&lt;laminarmq::storage::impls::glommio::storage::dma::DmaStorage as laminarmq::storage::AsyncConsume&gt;::close::{{closure}} (1 samples, 0.84%)</title><rect x="20.1681%" y="149" width="0.8403%" height="15" fill="rgb(212,200,36)" fg:x="24" fg:w="1"/><text x="20.4181%" y="159.50"></text></g><g><title>&lt;glommio::io::dma_file_stream::DmaStreamWriter as futures_io::if_std::AsyncWrite&gt;::poll_close (1 samples, 0.84%)</title><rect x="20.1681%" y="133" width="0.8403%" height="15" fill="rgb(225,90,30)" fg:x="24" fg:w="1"/><text x="20.4181%" y="143.50"></text></g><g><title>&lt;&amp;glommio::io::dma_file_stream::DmaStreamWriter as futures_io::if_std::AsyncWrite&gt;::poll_close (1 samples, 0.84%)</title><rect x="20.1681%" y="117" width="0.8403%" height="15" fill="rgb(236,182,39)" fg:x="24" fg:w="1"/><text x="20.4181%" y="127.50"></text></g><g><title>glommio::io::dma_file_stream::DmaStreamWriterState::initiate_close (1 samples, 0.84%)</title><rect x="20.1681%" y="101" width="0.8403%" height="15" fill="rgb(212,144,35)" fg:x="24" fg:w="1"/><text x="20.4181%" y="111.50"></text></g><g><title>glommio::executor::LocalExecutor::spawn (1 samples, 0.84%)</title><rect x="20.1681%" y="85" width="0.8403%" height="15" fill="rgb(228,63,44)" fg:x="24" fg:w="1"/><text x="20.4181%" y="95.50"></text></g><g><title>glommio::executor::multitask::LocalExecutor::spawn_and_run (1 samples, 0.84%)</title><rect x="20.1681%" y="69" width="0.8403%" height="15" fill="rgb(228,109,6)" fg:x="24" fg:w="1"/><text x="20.4181%" y="79.50"></text></g><g><title>glommio::task::raw::RawTask&lt;F,R,S&gt;::run (1 samples, 0.84%)</title><rect x="20.1681%" y="53" width="0.8403%" height="15" fill="rgb(238,117,24)" fg:x="24" fg:w="1"/><text x="20.4181%" y="63.50"></text></g><g><title>glommio::task::raw::RawTask&lt;F,R,S&gt;::schedule (1 samples, 0.84%)</title><rect x="20.1681%" y="37" width="0.8403%" height="15" fill="rgb(242,26,26)" fg:x="24" fg:w="1"/><text x="20.4181%" y="47.50"></text></g><g><title>&lt;laminarmq::storage::impls::glommio::storage::dma::DmaStorage as laminarmq::storage::Sizable&gt;::size (1 samples, 0.84%)</title><rect x="26.8908%" y="181" width="0.8403%" height="15" fill="rgb(221,92,48)" fg:x="32" fg:w="1"/><text x="27.1408%" y="191.50"></text></g><g><title>bincode::internal::serialize (2 samples, 1.68%)</title><rect x="27.7311%" y="181" width="1.6807%" height="15" fill="rgb(209,209,32)" fg:x="33" fg:w="2"/><text x="27.9811%" y="191.50"></text></g><g><title>malloc (1 samples, 0.84%)</title><rect x="28.5714%" y="165" width="0.8403%" height="15" fill="rgb(221,70,22)" fg:x="34" fg:w="1"/><text x="28.8214%" y="175.50"></text></g><g><title>core::ptr::drop_in_place&lt;laminarmq::storage::commit_log::segmented_log::store::Store&lt;laminarmq::storage::impls::in_mem::storage::InMemStorage,crc32fast::Hasher&gt;::append&lt;laminarmq::storage::commit_log::segmented_log::segment::Segment&lt;S,M,H,Idx,&lt;S as laminarmq::storage::Sizable&gt;::Size,SERP&gt;::append::{{closure}}::SBuf&lt;&amp;[u8],alloc::vec::Vec&lt;u8&gt;&gt;,futures_lite::stream::Chain&lt;futures_lite::stream::Iter&lt;core::array::iter::IntoIter&lt;core::result::Result&lt;laminarmq::storage::commit_log::segmented_log::segment::Segment&lt;S,M,H,Idx,&lt;S as laminarmq::storage::Sizable&gt;::Size,SERP&gt;::append::{{closure}}::SBuf&lt;&amp;[u8],alloc::vec::Vec&lt;u8&gt;&gt;,core::convert::Infallible&gt;,2_usize&gt;&gt;,futures_lite::stream::Map&lt;futures_lite::stream::Map&lt;futures_lite::stream::Once&lt;&amp;[u8]&gt;,commit_log_append::infallible&lt;&amp;[u8]&gt;&gt;,laminarmq::storage::commit_log::segmented_log::segment::Segment&lt;laminarmq::storage::impls::in_mem::storage::InMemStorage,(),crc32fast::Hasher,u32,&lt;laminarmq::storage::impls::in_mem::storage::InMemStorage as laminarmq::storage::Sizable&gt;::Size,laminarmq::common::serde_compat::bincode::BinCode&gt;::append&lt;&amp;[u8],futures_lite::stream::Map&lt;futures_lite::stream::Once&lt;&amp;[u8]&gt;,commit_log_append::infallible&lt;&amp;[u8]&gt;&gt;,core::convert::Infallible&gt;::{{closure}}::{{closure}}&gt;&gt;,core::convert::Infallible&gt;::{{closure}}&gt; (1 samples, 0.84%)</title><rect x="29.4118%" y="181" width="0.8403%" height="15" fill="rgb(248,145,5)" fg:x="35" fg:w="1"/><text x="29.6618%" y="191.50"></text></g><g><title>&lt;futures_lite::stream::NextFuture&lt;S&gt; as core::future::future::Future&gt;::poll (7 samples, 5.88%)</title><rect x="42.0168%" y="165" width="5.8824%" height="15" fill="rgb(226,116,26)" fg:x="50" fg:w="7"/><text x="42.2668%" y="175.50">&lt;future..</text></g><g><title>crc32fast::Hasher::update (7 samples, 5.88%)</title><rect x="42.0168%" y="149" width="5.8824%" height="15" fill="rgb(244,5,17)" fg:x="50" fg:w="7"/><text x="42.2668%" y="159.50">crc32fa..</text></g><g><title>crc32fast::baseline::update_fast_16 (5 samples, 4.20%)</title><rect x="43.6975%" y="133" width="4.2017%" height="15" fill="rgb(252,159,33)" fg:x="52" fg:w="5"/><text x="43.9475%" y="143.50">crc32..</text></g><g><title>&lt;laminarmq::storage::impls::glommio::storage::dma::DmaStorage as laminarmq::storage::Storage&gt;::append_slice (2 samples, 1.68%)</title><rect x="47.8992%" y="165" width="1.6807%" height="15" fill="rgb(206,71,0)" fg:x="57" fg:w="2"/><text x="48.1492%" y="175.50"></text></g><g><title>&lt;laminarmq::storage::impls::glommio::storage::dma::DmaStorage as laminarmq::storage::Storage&gt;::append_slice::{{closure}} (2 samples, 1.68%)</title><rect x="49.5798%" y="165" width="1.6807%" height="15" fill="rgb(233,118,54)" fg:x="59" fg:w="2"/><text x="49.8298%" y="175.50"></text></g><g><title>&lt;glommio::io::dma_file_stream::DmaStreamWriter as futures_io::if_std::AsyncWrite&gt;::poll_write (1 samples, 0.84%)</title><rect x="50.4202%" y="149" width="0.8403%" height="15" fill="rgb(234,83,48)" fg:x="60" fg:w="1"/><text x="50.6702%" y="159.50"></text></g><g><title>&lt;laminarmq::storage::impls::glommio::storage::dma::DmaStorage as laminarmq::storage::Storage&gt;::append_slice (4 samples, 3.36%)</title><rect x="51.2605%" y="165" width="3.3613%" height="15" fill="rgb(228,3,54)" fg:x="61" fg:w="4"/><text x="51.5105%" y="175.50">&lt;la..</text></g><g><title>malloc (4 samples, 3.36%)</title><rect x="51.2605%" y="149" width="3.3613%" height="15" fill="rgb(226,155,13)" fg:x="61" fg:w="4"/><text x="51.5105%" y="159.50">mal..</text></g><g><title>laminarmq::storage::Storage::append::{{closure}} (36 samples, 30.25%)</title><rect x="30.2521%" y="181" width="30.2521%" height="15" fill="rgb(241,28,37)" fg:x="36" fg:w="36"/><text x="30.5021%" y="191.50">laminarmq::storage::Storage::append::{{closure}}</text></g><g><title>__libc_free (7 samples, 5.88%)</title><rect x="54.6218%" y="165" width="5.8824%" height="15" fill="rgb(233,93,10)" fg:x="65" fg:w="7"/><text x="54.8718%" y="175.50">__libc_..</text></g><g><title>&lt;&amp;glommio::io::dma_file_stream::DmaStreamWriter as futures_io::if_std::AsyncWrite&gt;::poll_write (1 samples, 0.84%)</title><rect x="64.7059%" y="133" width="0.8403%" height="15" fill="rgb(225,113,19)" fg:x="77" fg:w="1"/><text x="64.9559%" y="143.50"></text></g><g><title>&lt;laminarmq::storage::impls::glommio::storage::dma::DmaStorage as laminarmq::storage::Storage&gt;::append_slice::{{closure}} (5 samples, 4.20%)</title><rect x="63.0252%" y="165" width="4.2017%" height="15" fill="rgb(241,2,18)" fg:x="75" fg:w="5"/><text x="63.2752%" y="175.50">&lt;lami..</text></g><g><title>&lt;glommio::io::dma_file_stream::DmaStreamWriter as futures_io::if_std::AsyncWrite&gt;::poll_write (3 samples, 2.52%)</title><rect x="64.7059%" y="149" width="2.5210%" height="15" fill="rgb(228,207,21)" fg:x="77" fg:w="3"/><text x="64.9559%" y="159.50">&lt;g..</text></g><g><title>&lt;glommio::io::dma_file_stream::DmaStreamWriter as futures_io::if_std::AsyncWrite&gt;::poll_close (2 samples, 1.68%)</title><rect x="65.5462%" y="133" width="1.6807%" height="15" fill="rgb(213,211,35)" fg:x="78" fg:w="2"/><text x="65.7962%" y="143.50"></text></g><g><title>&lt;laminarmq::storage::impls::glommio::storage::dma::DmaStorage as laminarmq::storage::Storage&gt;::append_slice (1 samples, 0.84%)</title><rect x="67.2269%" y="165" width="0.8403%" height="15" fill="rgb(209,83,10)" fg:x="80" fg:w="1"/><text x="67.4769%" y="175.50"></text></g><g><title>__rdl_alloc (1 samples, 0.84%)</title><rect x="67.2269%" y="149" width="0.8403%" height="15" fill="rgb(209,164,1)" fg:x="80" fg:w="1"/><text x="67.4769%" y="159.50"></text></g><g><title>&lt;laminarmq::storage::commit_log::segmented_log::SegmentedLog&lt;S,M,H,Idx,&lt;S as laminarmq::storage::Sizable&gt;::Size,SERP,SSP,C&gt; as laminarmq::storage::commit_log::CommitLog&lt;laminarmq::storage::commit_log::segmented_log::MetaWithIdx&lt;M,Idx&gt;,&lt;S as laminarmq::storage::Storage&gt;::Content&gt;&gt;::append::{{closure}} (57 samples, 47.90%)</title><rect x="21.0084%" y="197" width="47.8992%" height="15" fill="rgb(213,184,43)" fg:x="25" fg:w="57"/><text x="21.2584%" y="207.50">&lt;laminarmq::storage::commit_log::segmented_log::SegmentedLog&lt;S,M,H,Idx,&lt;S as la..</text></g><g><title>laminarmq::storage::commit_log::segmented_log::index::Index&lt;S,Idx&gt;::append::{{closure}} (10 samples, 8.40%)</title><rect x="60.5042%" y="181" width="8.4034%" height="15" fill="rgb(231,61,34)" fg:x="72" fg:w="10"/><text x="60.7542%" y="191.50">laminarmq::s..</text></g><g><title>__libc_free (1 samples, 0.84%)</title><rect x="68.0672%" y="165" width="0.8403%" height="15" fill="rgb(235,75,3)" fg:x="81" fg:w="1"/><text x="68.3172%" y="175.50"></text></g><g><title>__libc_free (2 samples, 1.68%)</title><rect x="68.9076%" y="197" width="1.6807%" height="15" fill="rgb(220,106,47)" fg:x="82" fg:w="2"/><text x="69.1576%" y="207.50"></text></g><g><title>core::ptr::drop_in_place&lt;&lt;laminarmq::storage::commit_log::segmented_log::SegmentedLog&lt;laminarmq::storage::impls::glommio::storage::dma::DmaStorage,(),crc32fast::Hasher,u32,&lt;laminarmq::storage::impls::glommio::storage::dma::DmaStorage as laminarmq::storage::Sizable&gt;::Size,laminarmq::common::serde_compat::bincode::BinCode,laminarmq::storage::impls::common::DiskBackedSegmentStorageProvider&lt;laminarmq::storage::impls::glommio::storage::dma::DmaStorage,laminarmq::storage::impls::glommio::storage::dma::DmaStorageProvider,u32&gt;,laminarmq::common::cache::NoOpCache&lt;usize,()&gt;&gt; as laminarmq::storage::commit_log::CommitLog&lt;laminarmq::storage::commit_log::segmented_log::MetaWithIdx&lt;(),u32&gt;,&lt;laminarmq::storage::impls::glommio::storage::dma::DmaStorage as laminarmq::storage::Storage&gt;::Content&gt;&gt;::append&lt;futures_lite::stream::Map&lt;futures_lite::stream::Once&lt;&amp;[u8]&gt;,commit_log_append::infallible&lt;&amp;[u8]&gt;&gt;,&amp;[u8],core::convert::Infallible&gt;::{{closure}}&gt; (1 samples, 0.84%)</title><rect x="70.5882%" y="197" width="0.8403%" height="15" fill="rgb(210,196,33)" fg:x="84" fg:w="1"/><text x="70.8382%" y="207.50"></text></g><g><title>laminarmq::storage::commit_log::segmented_log::SegmentedLog&lt;S,M,H,Idx,&lt;S as laminarmq::storage::Sizable&gt;::Size,SERP,SSP,C&gt;::new::{{closure}} (1 samples, 0.84%)</title><rect x="71.4286%" y="197" width="0.8403%" height="15" fill="rgb(229,154,42)" fg:x="85" fg:w="1"/><text x="71.6786%" y="207.50"></text></g><g><title>laminarmq::storage::commit_log::segmented_log::segment::Segment&lt;S,M,H,Idx,&lt;S as laminarmq::storage::Sizable&gt;::Size,SERP&gt;::with_segment_storage_provider_config_and_base_index::{{closure}} (1 samples, 0.84%)</title><rect x="71.4286%" y="181" width="0.8403%" height="15" fill="rgb(228,114,26)" fg:x="85" fg:w="1"/><text x="71.6786%" y="191.50"></text></g><g><title>&lt;laminarmq::storage::impls::common::DiskBackedSegmentStorageProvider&lt;S,PASP,Idx&gt; as laminarmq::storage::commit_log::segmented_log::segment::SegmentStorageProvider&lt;S,Idx&gt;&gt;::obtain::{{closure}} (1 samples, 0.84%)</title><rect x="71.4286%" y="165" width="0.8403%" height="15" fill="rgb(208,144,1)" fg:x="85" fg:w="1"/><text x="71.6786%" y="175.50"></text></g><g><title>&lt;laminarmq::storage::impls::glommio::storage::dma::DmaStorageProvider as laminarmq::storage::impls::common::PathAddressedStorageProvider&lt;laminarmq::storage::impls::glommio::storage::dma::DmaStorage&gt;&gt;::obtain_storage::{{closure}} (1 samples, 0.84%)</title><rect x="71.4286%" y="149" width="0.8403%" height="15" fill="rgb(239,112,37)" fg:x="85" fg:w="1"/><text x="71.6786%" y="159.50"></text></g><g><title>glommio::io::open_options::OpenOptions::dma_open::{{closure}} (1 samples, 0.84%)</title><rect x="71.4286%" y="133" width="0.8403%" height="15" fill="rgb(210,96,50)" fg:x="85" fg:w="1"/><text x="71.6786%" y="143.50"></text></g><g><title>glommio::io::glommio_file::GlommioFile::open_at::{{closure}} (1 samples, 0.84%)</title><rect x="71.4286%" y="117" width="0.8403%" height="15" fill="rgb(222,178,2)" fg:x="85" fg:w="1"/><text x="71.6786%" y="127.50"></text></g><g><title>glommio::io::glommio_file::GlommioFile::statx::{{closure}} (1 samples, 0.84%)</title><rect x="71.4286%" y="101" width="0.8403%" height="15" fill="rgb(226,74,18)" fg:x="85" fg:w="1"/><text x="71.6786%" y="111.50"></text></g><g><title>glommio::sys::source::Source::extract_source_type (1 samples, 0.84%)</title><rect x="71.4286%" y="85" width="0.8403%" height="15" fill="rgb(225,67,54)" fg:x="85" fg:w="1"/><text x="71.6786%" y="95.50"></text></g><g><title>&lt;core::pin::Pin&lt;P&gt; as core::future::future::Future&gt;::poll (72 samples, 60.50%)</title><rect x="19.3277%" y="213" width="60.5042%" height="15" fill="rgb(251,92,32)" fg:x="23" fg:w="72"/><text x="19.5777%" y="223.50">&lt;core::pin::Pin&lt;P&gt; as core::future::future::Future&gt;::poll</text></g><g><title>malloc (9 samples, 7.56%)</title><rect x="72.2689%" y="197" width="7.5630%" height="15" fill="rgb(228,149,22)" fg:x="86" fg:w="9"/><text x="72.5189%" y="207.50">malloc</text></g><g><title>glommio::executor::LocalExecutor::run_task_queues (73 samples, 61.34%)</title><rect x="19.3277%" y="245" width="61.3445%" height="15" fill="rgb(243,54,13)" fg:x="23" fg:w="73"/><text x="19.5777%" y="255.50">glommio::executor::LocalExecutor::run_task_queues</text></g><g><title>glommio::task::raw::RawTask&lt;F,R,S&gt;::run (73 samples, 61.34%)</title><rect x="19.3277%" y="229" width="61.3445%" height="15" fill="rgb(243,180,28)" fg:x="23" fg:w="73"/><text x="19.5777%" y="239.50">glommio::task::raw::RawTask&lt;F,R,S&gt;::run</text></g><g><title>glommio::sys::source::Source::result (1 samples, 0.84%)</title><rect x="79.8319%" y="213" width="0.8403%" height="15" fill="rgb(208,167,24)" fg:x="95" fg:w="1"/><text x="80.0819%" y="223.50"></text></g><g><title>&lt;glommio::sys::uring::SleepableRing as glommio::sys::uring::UringCommon&gt;::consume_one_event (1 samples, 0.84%)</title><rect x="81.5126%" y="197" width="0.8403%" height="15" fill="rgb(245,73,45)" fg:x="97" fg:w="1"/><text x="81.7626%" y="207.50"></text></g><g><title>__io_uring_get_cqe (1 samples, 0.84%)</title><rect x="81.5126%" y="181" width="0.8403%" height="15" fill="rgb(237,203,48)" fg:x="97" fg:w="1"/><text x="81.7626%" y="191.50"></text></g><g><title>glommio::sys::uring::Reactor::link_rings_and_sleep (3 samples, 2.52%)</title><rect x="82.3529%" y="197" width="2.5210%" height="15" fill="rgb(211,197,16)" fg:x="98" fg:w="3"/><text x="82.6029%" y="207.50">gl..</text></g><g><title>io_uring_submit (2 samples, 1.68%)</title><rect x="83.1933%" y="181" width="1.6807%" height="15" fill="rgb(243,99,51)" fg:x="99" fg:w="2"/><text x="83.4433%" y="191.50"></text></g><g><title>__sys_io_uring_enter2 (2 samples, 1.68%)</title><rect x="83.1933%" y="165" width="1.6807%" height="15" fill="rgb(215,123,29)" fg:x="99" fg:w="2"/><text x="83.4433%" y="175.50"></text></g><g><title>syscall (2 samples, 1.68%)</title><rect x="83.1933%" y="149" width="1.6807%" height="15" fill="rgb(239,186,37)" fg:x="99" fg:w="2"/><text x="83.4433%" y="159.50"></text></g><g><title>&lt;glommio::sys::uring::SleepableRing as glommio::sys::uring::UringCommon&gt;::submit_one_event (1 samples, 0.84%)</title><rect x="84.8739%" y="181" width="0.8403%" height="15" fill="rgb(252,136,39)" fg:x="101" fg:w="1"/><text x="85.1239%" y="191.50"></text></g><g><title>glommio::sys::uring::UringCommon::consume_submission_queue (4 samples, 3.36%)</title><rect x="84.8739%" y="197" width="3.3613%" height="15" fill="rgb(223,213,32)" fg:x="101" fg:w="4"/><text x="85.1239%" y="207.50">glo..</text></g><g><title>io_uring_submit (3 samples, 2.52%)</title><rect x="85.7143%" y="181" width="2.5210%" height="15" fill="rgb(233,115,5)" fg:x="102" fg:w="3"/><text x="85.9643%" y="191.50">io..</text></g><g><title>__sys_io_uring_enter2 (3 samples, 2.52%)</title><rect x="85.7143%" y="165" width="2.5210%" height="15" fill="rgb(207,226,44)" fg:x="102" fg:w="3"/><text x="85.9643%" y="175.50">__..</text></g><g><title>syscall (3 samples, 2.52%)</title><rect x="85.7143%" y="149" width="2.5210%" height="15" fill="rgb(208,126,0)" fg:x="102" fg:w="3"/><text x="85.9643%" y="159.50">sy..</text></g><g><title>glommio::sys::uring::UringCommon::flush_cancellations (1 samples, 0.84%)</title><rect x="88.2353%" y="197" width="0.8403%" height="15" fill="rgb(244,66,21)" fg:x="105" fg:w="1"/><text x="88.4853%" y="207.50"></text></g><g><title>glommio::sys::uring::UringCommon::consume_cancellation_queue (1 samples, 0.84%)</title><rect x="88.2353%" y="181" width="0.8403%" height="15" fill="rgb(222,97,12)" fg:x="105" fg:w="1"/><text x="88.4853%" y="191.50"></text></g><g><title>&lt;glommio::sys::uring::SleepableRing as glommio::sys::uring::UringCommon&gt;::submit_one_event (1 samples, 0.84%)</title><rect x="88.2353%" y="165" width="0.8403%" height="15" fill="rgb(219,213,19)" fg:x="105" fg:w="1"/><text x="88.4853%" y="175.50"></text></g><g><title>std::sys::unix::time::inner::&lt;impl std::sys::unix::time::Timespec&gt;::now (1 samples, 0.84%)</title><rect x="88.2353%" y="149" width="0.8403%" height="15" fill="rgb(252,169,30)" fg:x="105" fg:w="1"/><text x="88.4853%" y="159.50"></text></g><g><title>clock_gettime (1 samples, 0.84%)</title><rect x="88.2353%" y="133" width="0.8403%" height="15" fill="rgb(206,32,51)" fg:x="105" fg:w="1"/><text x="88.4853%" y="143.50"></text></g><g><title>glommio::parking::Parker::park (11 samples, 9.24%)</title><rect x="80.6723%" y="245" width="9.2437%" height="15" fill="rgb(250,172,42)" fg:x="96" fg:w="11"/><text x="80.9223%" y="255.50">glommio::park..</text></g><g><title>glommio::reactor::Reactor::react (11 samples, 9.24%)</title><rect x="80.6723%" y="229" width="9.2437%" height="15" fill="rgb(209,34,43)" fg:x="96" fg:w="11"/><text x="80.9223%" y="239.50">glommio::reac..</text></g><g><title>glommio::sys::uring::Reactor::wait (10 samples, 8.40%)</title><rect x="81.5126%" y="213" width="8.4034%" height="15" fill="rgb(223,11,35)" fg:x="97" fg:w="10"/><text x="81.7626%" y="223.50">glommio::sys..</text></g><g><title>syscall (1 samples, 0.84%)</title><rect x="89.0756%" y="197" width="0.8403%" height="15" fill="rgb(251,219,26)" fg:x="106" fg:w="1"/><text x="89.3256%" y="207.50"></text></g><g><title>glommio::sys::uring::SleepableRing::prepare_throughput_preemption_timer (1 samples, 0.84%)</title><rect x="89.9160%" y="213" width="0.8403%" height="15" fill="rgb(231,119,3)" fg:x="107" fg:w="1"/><text x="90.1660%" y="223.50"></text></g><g><title>&lt;glommio::sys::uring::SleepableRing as glommio::sys::uring::UringCommon&gt;::submit_one_event (1 samples, 0.84%)</title><rect x="90.7563%" y="197" width="0.8403%" height="15" fill="rgb(216,97,11)" fg:x="108" fg:w="1"/><text x="91.0063%" y="207.50"></text></g><g><title>std::sys::unix::time::inner::&lt;impl std::sys::unix::time::Timespec&gt;::now (1 samples, 0.84%)</title><rect x="90.7563%" y="181" width="0.8403%" height="15" fill="rgb(223,59,9)" fg:x="108" fg:w="1"/><text x="91.0063%" y="191.50"></text></g><g><title>clock_gettime (1 samples, 0.84%)</title><rect x="90.7563%" y="165" width="0.8403%" height="15" fill="rgb(233,93,31)" fg:x="108" fg:w="1"/><text x="91.0063%" y="175.50"></text></g><g><title>glommio::sys::uring::UringCommon::consume_submission_queue (6 samples, 5.04%)</title><rect x="90.7563%" y="213" width="5.0420%" height="15" fill="rgb(239,81,33)" fg:x="108" fg:w="6"/><text x="91.0063%" y="223.50">glommi..</text></g><g><title>&lt;glommio::sys::uring::SleepableRing as glommio::sys::uring::UringCommon&gt;::submit_sqes (5 samples, 4.20%)</title><rect x="91.5966%" y="197" width="4.2017%" height="15" fill="rgb(213,120,34)" fg:x="109" fg:w="5"/><text x="91.8466%" y="207.50">&lt;glom..</text></g><g><title>io_uring_submit (5 samples, 4.20%)</title><rect x="91.5966%" y="181" width="4.2017%" height="15" fill="rgb(243,49,53)" fg:x="109" fg:w="5"/><text x="91.8466%" y="191.50">io_ur..</text></g><g><title>__sys_io_uring_enter2 (5 samples, 4.20%)</title><rect x="91.5966%" y="165" width="4.2017%" height="15" fill="rgb(247,216,33)" fg:x="109" fg:w="5"/><text x="91.8466%" y="175.50">__sys..</text></g><g><title>syscall (5 samples, 4.20%)</title><rect x="91.5966%" y="149" width="4.2017%" height="15" fill="rgb(226,26,14)" fg:x="109" fg:w="5"/><text x="91.8466%" y="159.50">sysca..</text></g><g><title>glommio::parking::Parker::poll_io (8 samples, 6.72%)</title><rect x="89.9160%" y="245" width="6.7227%" height="15" fill="rgb(215,49,53)" fg:x="107" fg:w="8"/><text x="90.1660%" y="255.50">glommio::..</text></g><g><title>glommio::sys::uring::Reactor::wait (8 samples, 6.72%)</title><rect x="89.9160%" y="229" width="6.7227%" height="15" fill="rgb(245,162,40)" fg:x="107" fg:w="8"/><text x="90.1660%" y="239.50">glommio::..</text></g><g><title>glommio::sys::uring::UringCommon::flush_cancellations (1 samples, 0.84%)</title><rect x="95.7983%" y="213" width="0.8403%" height="15" fill="rgb(229,68,17)" fg:x="114" fg:w="1"/><text x="96.0483%" y="223.50"></text></g><g><title>&lt;glommio::sys::uring::PollRing as glommio::sys::uring::UringCommon&gt;::submit_one_event (1 samples, 0.84%)</title><rect x="95.7983%" y="197" width="0.8403%" height="15" fill="rgb(213,182,10)" fg:x="114" fg:w="1"/><text x="96.0483%" y="207.50"></text></g><g><title>std::sys::unix::time::inner::&lt;impl std::sys::unix::time::Timespec&gt;::now (1 samples, 0.84%)</title><rect x="95.7983%" y="181" width="0.8403%" height="15" fill="rgb(245,125,30)" fg:x="114" fg:w="1"/><text x="96.0483%" y="191.50"></text></g><g><title>glommio::reactor::Reactor::process_timers (1 samples, 0.84%)</title><rect x="96.6387%" y="229" width="0.8403%" height="15" fill="rgb(232,202,2)" fg:x="115" fg:w="1"/><text x="96.8887%" y="239.50"></text></g><g><title>glommio::sys::uring::UringCommon::consume_cancellation_queue (1 samples, 0.84%)</title><rect x="97.4790%" y="197" width="0.8403%" height="15" fill="rgb(237,140,51)" fg:x="116" fg:w="1"/><text x="97.7290%" y="207.50"></text></g><g><title>&lt;glommio::sys::uring::SleepableRing as glommio::sys::uring::UringCommon&gt;::submit_one_event (1 samples, 0.84%)</title><rect x="97.4790%" y="181" width="0.8403%" height="15" fill="rgb(236,157,25)" fg:x="116" fg:w="1"/><text x="97.7290%" y="191.50"></text></g><g><title>_start (118 samples, 99.16%)</title><rect x="0.0000%" y="581" width="99.1597%" height="15" fill="rgb(219,209,0)" fg:x="0" fg:w="118"/><text x="0.2500%" y="591.50">_start</text></g><g><title>__libc_start_main (118 samples, 99.16%)</title><rect x="0.0000%" y="565" width="99.1597%" height="15" fill="rgb(240,116,54)" fg:x="0" fg:w="118"/><text x="0.2500%" y="575.50">__libc_start_main</text></g><g><title>main (118 samples, 99.16%)</title><rect x="0.0000%" y="549" width="99.1597%" height="15" fill="rgb(216,10,36)" fg:x="0" fg:w="118"/><text x="0.2500%" y="559.50">main</text></g><g><title>std::rt::lang_start_internal (118 samples, 99.16%)</title><rect x="0.0000%" y="533" width="99.1597%" height="15" fill="rgb(222,72,44)" fg:x="0" fg:w="118"/><text x="0.2500%" y="543.50">std::rt::lang_start_internal</text></g><g><title>std::panic::catch_unwind (118 samples, 99.16%)</title><rect x="0.0000%" y="517" width="99.1597%" height="15" fill="rgb(232,159,9)" fg:x="0" fg:w="118"/><text x="0.2500%" y="527.50">std::panic::catch_unwind</text></g><g><title>std::panicking::try (118 samples, 99.16%)</title><rect x="0.0000%" y="501" width="99.1597%" height="15" fill="rgb(210,39,32)" fg:x="0" fg:w="118"/><text x="0.2500%" y="511.50">std::panicking::try</text></g><g><title>std::panicking::try::do_call (118 samples, 99.16%)</title><rect x="0.0000%" y="485" width="99.1597%" height="15" fill="rgb(216,194,45)" fg:x="0" fg:w="118"/><text x="0.2500%" y="495.50">std::panicking::try::do_call</text></g><g><title>std::rt::lang_start_internal::{{closure}} (118 samples, 99.16%)</title><rect x="0.0000%" y="469" width="99.1597%" height="15" fill="rgb(218,18,35)" fg:x="0" fg:w="118"/><text x="0.2500%" y="479.50">std::rt::lang_start_internal::{{closure}}</text></g><g><title>std::panic::catch_unwind (118 samples, 99.16%)</title><rect x="0.0000%" y="453" width="99.1597%" height="15" fill="rgb(207,83,51)" fg:x="0" fg:w="118"/><text x="0.2500%" y="463.50">std::panic::catch_unwind</text></g><g><title>std::panicking::try (118 samples, 99.16%)</title><rect x="0.0000%" y="437" width="99.1597%" height="15" fill="rgb(225,63,43)" fg:x="0" fg:w="118"/><text x="0.2500%" y="447.50">std::panicking::try</text></g><g><title>std::panicking::try::do_call (118 samples, 99.16%)</title><rect x="0.0000%" y="421" width="99.1597%" height="15" fill="rgb(207,57,36)" fg:x="0" fg:w="118"/><text x="0.2500%" y="431.50">std::panicking::try::do_call</text></g><g><title>core::ops::function::impls::&lt;impl core::ops::function::FnOnce&lt;A&gt; for &amp;F&gt;::call_once (118 samples, 99.16%)</title><rect x="0.0000%" y="405" width="99.1597%" height="15" fill="rgb(216,99,33)" fg:x="0" fg:w="118"/><text x="0.2500%" y="415.50">core::ops::function::impls::&lt;impl core::ops::function::FnOnce&lt;A&gt; for &amp;F&gt;::call_once</text></g><g><title>std::rt::lang_start::{{closure}} (118 samples, 99.16%)</title><rect x="0.0000%" y="389" width="99.1597%" height="15" fill="rgb(225,42,16)" fg:x="0" fg:w="118"/><text x="0.2500%" y="399.50">std::rt::lang_start::{{closure}}</text></g><g><title>std::sys_common::backtrace::__rust_begin_short_backtrace (118 samples, 99.16%)</title><rect x="0.0000%" y="373" width="99.1597%" height="15" fill="rgb(220,201,45)" fg:x="0" fg:w="118"/><text x="0.2500%" y="383.50">std::sys_common::backtrace::__rust_begin_short_backtrace</text></g><g><title>commit_log_append::main (118 samples, 99.16%)</title><rect x="0.0000%" y="357" width="99.1597%" height="15" fill="rgb(225,33,4)" fg:x="0" fg:w="118"/><text x="0.2500%" y="367.50">commit_log_append::main</text></g><g><title>criterion::benchmark_group::BenchmarkGroup&lt;M&gt;::bench_with_input (118 samples, 99.16%)</title><rect x="0.0000%" y="341" width="99.1597%" height="15" fill="rgb(224,33,50)" fg:x="0" fg:w="118"/><text x="0.2500%" y="351.50">criterion::benchmark_group::BenchmarkGroup&lt;M&gt;::bench_with_input</text></g><g><title>criterion::routine::Routine::profile (118 samples, 99.16%)</title><rect x="0.0000%" y="325" width="99.1597%" height="15" fill="rgb(246,198,51)" fg:x="0" fg:w="118"/><text x="0.2500%" y="335.50">criterion::routine::Routine::profile</text></g><g><title>&lt;criterion::routine::Function&lt;M,F,T&gt; as criterion::routine::Routine&lt;M,T&gt;&gt;::warm_up (117 samples, 98.32%)</title><rect x="0.8403%" y="309" width="98.3193%" height="15" fill="rgb(205,22,4)" fg:x="1" fg:w="117"/><text x="1.0903%" y="319.50">&lt;criterion::routine::Function&lt;M,F,T&gt; as criterion::routine::Routine&lt;M,T&gt;&gt;::warm_up</text></g><g><title>criterion::bencher::AsyncBencher&lt;A,M&gt;::iter_custom (95 samples, 79.83%)</title><rect x="19.3277%" y="293" width="79.8319%" height="15" fill="rgb(206,3,8)" fg:x="23" fg:w="95"/><text x="19.5777%" y="303.50">criterion::bencher::AsyncBencher&lt;A,M&gt;::iter_custom</text></g><g><title>glommio::executor::LocalExecutor::run (95 samples, 79.83%)</title><rect x="19.3277%" y="277" width="79.8319%" height="15" fill="rgb(251,23,15)" fg:x="23" fg:w="95"/><text x="19.5777%" y="287.50">glommio::executor::LocalExecutor::run</text></g><g><title>scoped_tls::ScopedKey&lt;T&gt;::set (95 samples, 79.83%)</title><rect x="19.3277%" y="261" width="79.8319%" height="15" fill="rgb(252,88,28)" fg:x="23" fg:w="95"/><text x="19.5777%" y="271.50">scoped_tls::ScopedKey&lt;T&gt;::set</text></g><g><title>glommio::reactor::Reactor::spin_poll_io (3 samples, 2.52%)</title><rect x="96.6387%" y="245" width="2.5210%" height="15" fill="rgb(212,127,14)" fg:x="115" fg:w="3"/><text x="96.8887%" y="255.50">gl..</text></g><g><title>glommio::sys::uring::Reactor::poll_io (2 samples, 1.68%)</title><rect x="97.4790%" y="229" width="1.6807%" height="15" fill="rgb(247,145,37)" fg:x="116" fg:w="2"/><text x="97.7290%" y="239.50"></text></g><g><title>glommio::sys::uring::UringCommon::poll (2 samples, 1.68%)</title><rect x="97.4790%" y="213" width="1.6807%" height="15" fill="rgb(209,117,53)" fg:x="116" fg:w="2"/><text x="97.7290%" y="223.50"></text></g><g><title>glommio::sys::uring::UringCommon::consume_submission_queue (1 samples, 0.84%)</title><rect x="98.3193%" y="197" width="0.8403%" height="15" fill="rgb(212,90,42)" fg:x="117" fg:w="1"/><text x="98.5693%" y="207.50"></text></g><g><title>io_uring_submit (1 samples, 0.84%)</title><rect x="98.3193%" y="181" width="0.8403%" height="15" fill="rgb(218,164,37)" fg:x="117" fg:w="1"/><text x="98.5693%" y="191.50"></text></g><g><title>__sys_io_uring_enter2 (1 samples, 0.84%)</title><rect x="98.3193%" y="165" width="0.8403%" height="15" fill="rgb(246,65,34)" fg:x="117" fg:w="1"/><text x="98.5693%" y="175.50"></text></g><g><title>syscall (1 samples, 0.84%)</title><rect x="98.3193%" y="149" width="0.8403%" height="15" fill="rgb(231,100,33)" fg:x="117" fg:w="1"/><text x="98.5693%" y="159.50"></text></g><g><title>all (119 samples, 100%)</title><rect x="0.0000%" y="613" width="100.0000%" height="15" fill="rgb(228,126,14)" fg:x="0" fg:w="119"/><text x="0.2500%" y="623.50"></text></g><g><title>commit_log_appe (119 samples, 100.00%)</title><rect x="0.0000%" y="597" width="100.0000%" height="15" fill="rgb(215,173,21)" fg:x="0" fg:w="119"/><text x="0.2500%" y="607.50">commit_log_appe</text></g><g><title>std::sys::unix::thread::Thread::new::thread_start (1 samples, 0.84%)</title><rect x="99.1597%" y="581" width="0.8403%" height="15" fill="rgb(210,6,40)" fg:x="118" fg:w="1"/><text x="99.4097%" y="591.50"></text></g><g><title>&lt;alloc::boxed::Box&lt;F,A&gt; as core::ops::function::FnOnce&lt;Args&gt;&gt;::call_once (1 samples, 0.84%)</title><rect x="99.1597%" y="565" width="0.8403%" height="15" fill="rgb(212,48,18)" fg:x="118" fg:w="1"/><text x="99.4097%" y="575.50"></text></g><g><title>&lt;alloc::boxed::Box&lt;F,A&gt; as core::ops::function::FnOnce&lt;Args&gt;&gt;::call_once (1 samples, 0.84%)</title><rect x="99.1597%" y="549" width="0.8403%" height="15" fill="rgb(230,214,11)" fg:x="118" fg:w="1"/><text x="99.4097%" y="559.50"></text></g><g><title>core::ops::function::FnOnce::call_once{{vtable.shim}} (1 samples, 0.84%)</title><rect x="99.1597%" y="533" width="0.8403%" height="15" fill="rgb(254,105,39)" fg:x="118" fg:w="1"/><text x="99.4097%" y="543.50"></text></g><g><title>std::sys::unix::thread::guard::current (1 samples, 0.84%)</title><rect x="99.1597%" y="517" width="0.8403%" height="15" fill="rgb(245,158,5)" fg:x="118" fg:w="1"/><text x="99.4097%" y="527.50"></text></g><g><title>pthread_getattr_np (1 samples, 0.84%)</title><rect x="99.1597%" y="501" width="0.8403%" height="15" fill="rgb(249,208,11)" fg:x="118" fg:w="1"/><text x="99.4097%" y="511.50"></text></g><g><title>pthread_getaffinity_np (1 samples, 0.84%)</title><rect x="99.1597%" y="485" width="0.8403%" height="15" fill="rgb(210,39,28)" fg:x="118" fg:w="1"/><text x="99.4097%" y="495.50"></text></g></svg></svg>

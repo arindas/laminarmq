@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["INDEX_FILE_EXTENSION","INDEX_RECORD_LENGTH"],"enum":["IndexError"],"fn":["index_records_in_storage"],"struct":["Index","IndexRecord"]};

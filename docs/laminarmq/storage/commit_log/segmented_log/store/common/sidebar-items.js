@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["RECORD_HEADER_LENGTH","STORE_FILE_EXTENSION"],"struct":["RecordHeader"]};

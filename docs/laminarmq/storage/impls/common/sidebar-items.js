@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["INDEX_FILE_EXTENSION","STORE_FILE_EXTENSION"],"struct":["DiskBackedSegmentStorageProvider"],"trait":["PathAddressedStorageProvider"]};

@@ -1,0 +1,491 @@
+<?xml version="1.0" standalone="no"?><!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd"><svg version="1.1" width="1200" height="646" onload="init(evt)" viewBox="0 0 1200 646" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:fg="http://github.com/jonhoo/inferno"><!--Flame graph stack visualization. See https://github.com/brendangregg/FlameGraph for latest version, and http://www.brendangregg.com/flamegraphs.html for examples.--><!--NOTES: --><defs><linearGradient id="background" y1="0" y2="1" x1="0" x2="0"><stop stop-color="#eeeeee" offset="5%"/><stop stop-color="#eeeeb0" offset="95%"/></linearGradient></defs><style type="text/css">
+text { font-family:monospace; font-size:12px }
+#title { text-anchor:middle; font-size:17px; }
+#matched { text-anchor:end; }
+#search { text-anchor:end; opacity:0.1; cursor:pointer; }
+#search:hover, #search.show { opacity:1; }
+#subtitle { text-anchor:middle; font-color:rgb(160,160,160); }
+#unzoom { cursor:pointer; }
+#frames > *:hover { stroke:black; stroke-width:0.5; cursor:pointer; }
+.hide { display:none; }
+.parent { opacity:0.5; }
+</style><script type="text/ecmascript"><![CDATA[
+        var nametype = 'Function:';
+        var fontsize = 12;
+        var fontwidth = 0.59;
+        var xpad = 10;
+        var inverted = false;
+        var searchcolor = 'rgb(230,0,230)';
+        var fluiddrawing = true;
+        var truncate_text_right = false;
+    ]]><![CDATA["use strict";
+var details, searchbtn, unzoombtn, matchedtxt, svg, searching, frames, known_font_width;
+function init(evt) {
+    details = document.getElementById("details").firstChild;
+    searchbtn = document.getElementById("search");
+    unzoombtn = document.getElementById("unzoom");
+    matchedtxt = document.getElementById("matched");
+    svg = document.getElementsByTagName("svg")[0];
+    frames = document.getElementById("frames");
+    known_font_width = get_monospace_width(frames);
+    total_samples = parseInt(frames.attributes.total_samples.value);
+    searching = 0;
+
+    // Use GET parameters to restore a flamegraph's state.
+    var restore_state = function() {
+        var params = get_params();
+        if (params.x && params.y)
+            zoom(find_group(document.querySelector('[*|x="' + params.x + '"][y="' + params.y + '"]')));
+        if (params.s)
+            search(params.s);
+    };
+
+    if (fluiddrawing) {
+        // Make width dynamic so the SVG fits its parent's width.
+        svg.removeAttribute("width");
+        // Edge requires us to have a viewBox that gets updated with size changes.
+        var isEdge = /Edge\/\d./i.test(navigator.userAgent);
+        if (!isEdge) {
+            svg.removeAttribute("viewBox");
+        }
+        var update_for_width_change = function() {
+            if (isEdge) {
+                svg.attributes.viewBox.value = "0 0 " + svg.width.baseVal.value + " " + svg.height.baseVal.value;
+            }
+
+            // Keep consistent padding on left and right of frames container.
+            frames.attributes.width.value = svg.width.baseVal.value - xpad * 2;
+
+            // Text truncation needs to be adjusted for the current width.
+            update_text_for_elements(frames.children);
+
+            // Keep search elements at a fixed distance from right edge.
+            var svgWidth = svg.width.baseVal.value;
+            searchbtn.attributes.x.value = svgWidth - xpad;
+            matchedtxt.attributes.x.value = svgWidth - xpad;
+        };
+        window.addEventListener('resize', function() {
+            update_for_width_change();
+        });
+        // This needs to be done asynchronously for Safari to work.
+        setTimeout(function() {
+            unzoom();
+            update_for_width_change();
+            restore_state();
+        }, 0);
+    } else {
+        restore_state();
+    }
+}
+// event listeners
+window.addEventListener("click", function(e) {
+    var target = find_group(e.target);
+    if (target) {
+        if (target.nodeName == "a") {
+            if (e.ctrlKey === false) return;
+            e.preventDefault();
+        }
+        if (target.classList.contains("parent")) unzoom();
+        zoom(target);
+
+        // set parameters for zoom state
+        var el = target.querySelector("rect");
+        if (el && el.attributes && el.attributes.y && el.attributes["fg:x"]) {
+            var params = get_params()
+            params.x = el.attributes["fg:x"].value;
+            params.y = el.attributes.y.value;
+            history.replaceState(null, null, parse_params(params));
+        }
+    }
+    else if (e.target.id == "unzoom") {
+        unzoom();
+
+        // remove zoom state
+        var params = get_params();
+        if (params.x) delete params.x;
+        if (params.y) delete params.y;
+        history.replaceState(null, null, parse_params(params));
+    }
+    else if (e.target.id == "search") search_prompt();
+}, false)
+// mouse-over for info
+// show
+window.addEventListener("mouseover", function(e) {
+    var target = find_group(e.target);
+    if (target) details.nodeValue = nametype + " " + g_to_text(target);
+}, false)
+// clear
+window.addEventListener("mouseout", function(e) {
+    var target = find_group(e.target);
+    if (target) details.nodeValue = ' ';
+}, false)
+// ctrl-F for search
+window.addEventListener("keydown",function (e) {
+    if (e.keyCode === 114 || (e.ctrlKey && e.keyCode === 70)) {
+        e.preventDefault();
+        search_prompt();
+    }
+}, false)
+// functions
+function get_params() {
+    var params = {};
+    var paramsarr = window.location.search.substr(1).split('&');
+    for (var i = 0; i < paramsarr.length; ++i) {
+        var tmp = paramsarr[i].split("=");
+        if (!tmp[0] || !tmp[1]) continue;
+        params[tmp[0]]  = decodeURIComponent(tmp[1]);
+    }
+    return params;
+}
+function parse_params(params) {
+    var uri = "?";
+    for (var key in params) {
+        uri += key + '=' + encodeURIComponent(params[key]) + '&';
+    }
+    if (uri.slice(-1) == "&")
+        uri = uri.substring(0, uri.length - 1);
+    if (uri == '?')
+        uri = window.location.href.split('?')[0];
+    return uri;
+}
+function find_child(node, selector) {
+    var children = node.querySelectorAll(selector);
+    if (children.length) return children[0];
+    return;
+}
+function find_group(node) {
+    var parent = node.parentElement;
+    if (!parent) return;
+    if (parent.id == "frames") return node;
+    return find_group(parent);
+}
+function orig_save(e, attr, val) {
+    if (e.attributes["fg:orig_" + attr] != undefined) return;
+    if (e.attributes[attr] == undefined) return;
+    if (val == undefined) val = e.attributes[attr].value;
+    e.setAttribute("fg:orig_" + attr, val);
+}
+function orig_load(e, attr) {
+    if (e.attributes["fg:orig_"+attr] == undefined) return;
+    e.attributes[attr].value = e.attributes["fg:orig_" + attr].value;
+    e.removeAttribute("fg:orig_" + attr);
+}
+function g_to_text(e) {
+    var text = find_child(e, "title").firstChild.nodeValue;
+    return (text)
+}
+function g_to_func(e) {
+    var func = g_to_text(e);
+    // if there's any manipulation we want to do to the function
+    // name before it's searched, do it here before returning.
+    return (func);
+}
+function get_monospace_width(frames) {
+    // Given the id="frames" element, return the width of text characters if
+    // this is a monospace font, otherwise return 0.
+    text = find_child(frames.children[0], "text");
+    originalContent = text.textContent;
+    text.textContent = "!";
+    bangWidth = text.getComputedTextLength();
+    text.textContent = "W";
+    wWidth = text.getComputedTextLength();
+    text.textContent = originalContent;
+    if (bangWidth === wWidth) {
+        return bangWidth;
+    } else {
+        return 0;
+    }
+}
+function update_text_for_elements(elements) {
+    // In order to render quickly in the browser, you want to do one pass of
+    // reading attributes, and one pass of mutating attributes. See
+    // https://web.dev/avoid-large-complex-layouts-and-layout-thrashing/ for details.
+
+    // Fall back to inefficient calculation, if we're variable-width font.
+    // TODO This should be optimized somehow too.
+    if (known_font_width === 0) {
+        for (var i = 0; i < elements.length; i++) {
+            update_text(elements[i]);
+        }
+        return;
+    }
+
+    var textElemNewAttributes = [];
+    for (var i = 0; i < elements.length; i++) {
+        var e = elements[i];
+        var r = find_child(e, "rect");
+        var t = find_child(e, "text");
+        var w = parseFloat(r.attributes.width.value) * frames.attributes.width.value / 100 - 3;
+        var txt = find_child(e, "title").textContent.replace(/\([^(]*\)$/,"");
+        var newX = format_percent((parseFloat(r.attributes.x.value) + (100 * 3 / frames.attributes.width.value)));
+
+        // Smaller than this size won't fit anything
+        if (w < 2 * known_font_width) {
+            textElemNewAttributes.push([newX, ""]);
+            continue;
+        }
+
+        // Fit in full text width
+        if (txt.length * known_font_width < w) {
+            textElemNewAttributes.push([newX, txt]);
+            continue;
+        }
+
+        var substringLength = Math.floor(w / known_font_width) - 2;
+        if (truncate_text_right) {
+            // Truncate the right side of the text.
+            textElemNewAttributes.push([newX, txt.substring(0, substringLength) + ".."]);
+            continue;
+        } else {
+            // Truncate the left side of the text.
+            textElemNewAttributes.push([newX, ".." + txt.substring(txt.length - substringLength, txt.length)]);
+            continue;
+        }
+    }
+
+    console.assert(textElemNewAttributes.length === elements.length, "Resize failed, please file a bug at https://github.com/jonhoo/inferno/");
+
+    // Now that we know new textContent, set it all in one go so we don't refresh a bazillion times.
+    for (var i = 0; i < elements.length; i++) {
+        var e = elements[i];
+        var values = textElemNewAttributes[i];
+        var t = find_child(e, "text");
+        t.attributes.x.value = values[0];
+        t.textContent = values[1];
+    }
+}
+
+function update_text(e) {
+    var r = find_child(e, "rect");
+    var t = find_child(e, "text");
+    var w = parseFloat(r.attributes.width.value) * frames.attributes.width.value / 100 - 3;
+    var txt = find_child(e, "title").textContent.replace(/\([^(]*\)$/,"");
+    t.attributes.x.value = format_percent((parseFloat(r.attributes.x.value) + (100 * 3 / frames.attributes.width.value)));
+
+    // Smaller than this size won't fit anything
+    if (w < 2 * fontsize * fontwidth) {
+        t.textContent = "";
+        return;
+    }
+    t.textContent = txt;
+    // Fit in full text width
+    if (t.getComputedTextLength() < w)
+        return;
+    if (truncate_text_right) {
+        // Truncate the right side of the text.
+        for (var x = txt.length - 2; x > 0; x--) {
+            if (t.getSubStringLength(0, x + 2) <= w) {
+                t.textContent = txt.substring(0, x) + "..";
+                return;
+            }
+        }
+    } else {
+        // Truncate the left side of the text.
+        for (var x = 2; x < txt.length; x++) {
+            if (t.getSubStringLength(x - 2, txt.length) <= w) {
+                t.textContent = ".." + txt.substring(x, txt.length);
+                return;
+            }
+        }
+    }
+    t.textContent = "";
+}
+// zoom
+function zoom_reset(e) {
+    if (e.tagName == "rect") {
+        e.attributes.x.value = format_percent(100 * parseInt(e.attributes["fg:x"].value) / total_samples);
+        e.attributes.width.value = format_percent(100 * parseInt(e.attributes["fg:w"].value) / total_samples);
+    }
+    if (e.childNodes == undefined) return;
+    for(var i = 0, c = e.childNodes; i < c.length; i++) {
+        zoom_reset(c[i]);
+    }
+}
+function zoom_child(e, x, zoomed_width_samples) {
+    if (e.tagName == "text") {
+        var parent_x = parseFloat(find_child(e.parentNode, "rect[x]").attributes.x.value);
+        e.attributes.x.value = format_percent(parent_x + (100 * 3 / frames.attributes.width.value));
+    } else if (e.tagName == "rect") {
+        e.attributes.x.value = format_percent(100 * (parseInt(e.attributes["fg:x"].value) - x) / zoomed_width_samples);
+        e.attributes.width.value = format_percent(100 * parseInt(e.attributes["fg:w"].value) / zoomed_width_samples);
+    }
+    if (e.childNodes == undefined) return;
+    for(var i = 0, c = e.childNodes; i < c.length; i++) {
+        zoom_child(c[i], x, zoomed_width_samples);
+    }
+}
+function zoom_parent(e) {
+    if (e.attributes) {
+        if (e.attributes.x != undefined) {
+            e.attributes.x.value = "0.0%";
+        }
+        if (e.attributes.width != undefined) {
+            e.attributes.width.value = "100.0%";
+        }
+    }
+    if (e.childNodes == undefined) return;
+    for(var i = 0, c = e.childNodes; i < c.length; i++) {
+        zoom_parent(c[i]);
+    }
+}
+function zoom(node) {
+    var attr = find_child(node, "rect").attributes;
+    var width = parseInt(attr["fg:w"].value);
+    var xmin = parseInt(attr["fg:x"].value);
+    var xmax = xmin + width;
+    var ymin = parseFloat(attr.y.value);
+    unzoombtn.classList.remove("hide");
+    var el = frames.children;
+    var to_update_text = [];
+    for (var i = 0; i < el.length; i++) {
+        var e = el[i];
+        var a = find_child(e, "rect").attributes;
+        var ex = parseInt(a["fg:x"].value);
+        var ew = parseInt(a["fg:w"].value);
+        // Is it an ancestor
+        if (!inverted) {
+            var upstack = parseFloat(a.y.value) > ymin;
+        } else {
+            var upstack = parseFloat(a.y.value) < ymin;
+        }
+        if (upstack) {
+            // Direct ancestor
+            if (ex <= xmin && (ex+ew) >= xmax) {
+                e.classList.add("parent");
+                zoom_parent(e);
+                to_update_text.push(e);
+            }
+            // not in current path
+            else
+                e.classList.add("hide");
+        }
+        // Children maybe
+        else {
+            // no common path
+            if (ex < xmin || ex >= xmax) {
+                e.classList.add("hide");
+            }
+            else {
+                zoom_child(e, xmin, width);
+                to_update_text.push(e);
+            }
+        }
+    }
+    update_text_for_elements(to_update_text);
+}
+function unzoom() {
+    unzoombtn.classList.add("hide");
+    var el = frames.children;
+    for(var i = 0; i < el.length; i++) {
+        el[i].classList.remove("parent");
+        el[i].classList.remove("hide");
+        zoom_reset(el[i]);
+    }
+    update_text_for_elements(el);
+}
+// search
+function reset_search() {
+    var el = document.querySelectorAll("#frames rect");
+    for (var i = 0; i < el.length; i++) {
+        orig_load(el[i], "fill")
+    }
+    var params = get_params();
+    delete params.s;
+    history.replaceState(null, null, parse_params(params));
+}
+function search_prompt() {
+    if (!searching) {
+        var term = prompt("Enter a search term (regexp " +
+            "allowed, eg: ^ext4_)", "");
+        if (term != null) {
+            search(term)
+        }
+    } else {
+        reset_search();
+        searching = 0;
+        searchbtn.classList.remove("show");
+        searchbtn.firstChild.nodeValue = "Search"
+        matchedtxt.classList.add("hide");
+        matchedtxt.firstChild.nodeValue = ""
+    }
+}
+function search(term) {
+    var re = new RegExp(term);
+    var el = frames.children;
+    var matches = new Object();
+    var maxwidth = 0;
+    for (var i = 0; i < el.length; i++) {
+        var e = el[i];
+        // Skip over frames which are either not visible, or below the zoomed-to frame
+        if (e.classList.contains("hide") || e.classList.contains("parent")) {
+            continue;
+        }
+        var func = g_to_func(e);
+        var rect = find_child(e, "rect");
+        if (func == null || rect == null)
+            continue;
+        // Save max width. Only works as we have a root frame
+        var w = parseInt(rect.attributes["fg:w"].value);
+        if (w > maxwidth)
+            maxwidth = w;
+        if (func.match(re)) {
+            // highlight
+            var x = parseInt(rect.attributes["fg:x"].value);
+            orig_save(rect, "fill");
+            rect.attributes.fill.value = searchcolor;
+            // remember matches
+            if (matches[x] == undefined) {
+                matches[x] = w;
+            } else {
+                if (w > matches[x]) {
+                    // overwrite with parent
+                    matches[x] = w;
+                }
+            }
+            searching = 1;
+        }
+    }
+    if (!searching)
+        return;
+    var params = get_params();
+    params.s = term;
+    history.replaceState(null, null, parse_params(params));
+
+    searchbtn.classList.add("show");
+    searchbtn.firstChild.nodeValue = "Reset Search";
+    // calculate percent matched, excluding vertical overlap
+    var count = 0;
+    var lastx = -1;
+    var lastw = 0;
+    var keys = Array();
+    for (k in matches) {
+        if (matches.hasOwnProperty(k))
+            keys.push(k);
+    }
+    // sort the matched frames by their x location
+    // ascending, then width descending
+    keys.sort(function(a, b){
+        return a - b;
+    });
+    // Step through frames saving only the biggest bottom-up frames
+    // thanks to the sort order. This relies on the tree property
+    // where children are always smaller than their parents.
+    for (var k in keys) {
+        var x = parseInt(keys[k]);
+        var w = matches[keys[k]];
+        if (x >= lastx + lastw) {
+            count += w;
+            lastx = x;
+            lastw = w;
+        }
+    }
+    // display matched percent
+    matchedtxt.classList.remove("hide");
+    var pct = 100 * count / maxwidth;
+    if (pct != 100) pct = pct.toFixed(1);
+    matchedtxt.firstChild.nodeValue = "Matched: " + pct + "%";
+}
+function format_percent(n) {
+    return n.toFixed(4) + "%";
+}
+]]></script><rect x="0" y="0" width="100%" height="646" fill="url(#background)"/><text id="title" fill="rgb(0,0,0)" x="50.0000%" y="24.00">Flame Graph</text><text id="details" fill="rgb(0,0,0)" x="10" y="629.00"> </text><text id="unzoom" class="hide" fill="rgb(0,0,0)" x="10" y="24.00">Reset Zoom</text><text id="search" fill="rgb(0,0,0)" x="1190" y="24.00">Search</text><text id="matched" fill="rgb(0,0,0)" x="1190" y="629.00"> </text><svg id="frames" x="10" width="1180" total_samples="161"><g><title>&lt;futures_lite::stream::CountFuture&lt;S&gt; as core::future::future::Future&gt;::poll (1 samples, 0.62%)</title><rect x="0.0000%" y="197" width="0.6211%" height="15" fill="rgb(232,78,48)" fg:x="0" fg:w="1"/><text x="0.2500%" y="207.50"></text></g><g><title>&lt;async_stream::async_stream::AsyncStream&lt;T,U&gt; as futures_core::stream::Stream&gt;::poll_next (1 samples, 0.62%)</title><rect x="0.0000%" y="181" width="0.6211%" height="15" fill="rgb(233,21,19)" fg:x="0" fg:w="1"/><text x="0.2500%" y="191.50"></text></g><g><title>&lt;laminarmq::storage::commit_log::segmented_log::segment::Segment&lt;S,M,H,Idx,&lt;S as laminarmq::storage::Sizable&gt;::Size,SERP&gt; as laminarmq::storage::AsyncIndexedRead&gt;::read::{{closure}} (1 samples, 0.62%)</title><rect x="0.0000%" y="165" width="0.6211%" height="15" fill="rgb(215,109,37)" fg:x="0" fg:w="1"/><text x="0.2500%" y="175.50"></text></g><g><title>&lt;laminarmq::storage::impls::tokio::storage::std_seek_read::StdSeekReadFileStorage as laminarmq::storage::Storage&gt;::read::{{closure}} (1 samples, 0.62%)</title><rect x="0.0000%" y="149" width="0.6211%" height="15" fill="rgb(221,226,49)" fg:x="0" fg:w="1"/><text x="0.2500%" y="159.50"></text></g><g><title>&lt;&amp;mut T as tokio::io::async_seek::AsyncSeek&gt;::poll_complete (1 samples, 0.62%)</title><rect x="0.0000%" y="133" width="0.6211%" height="15" fill="rgb(207,51,43)" fg:x="0" fg:w="1"/><text x="0.2500%" y="143.50"></text></g><g><title>&lt;tokio::fs::file::File as tokio::io::async_seek::AsyncSeek&gt;::poll_complete (1 samples, 0.62%)</title><rect x="0.0000%" y="117" width="0.6211%" height="15" fill="rgb(231,75,31)" fg:x="0" fg:w="1"/><text x="0.2500%" y="127.50"></text></g><g><title>&lt;tokio::runtime::task::join::JoinHandle&lt;T&gt; as core::future::future::Future&gt;::poll (1 samples, 0.62%)</title><rect x="0.0000%" y="101" width="0.6211%" height="15" fill="rgb(242,133,26)" fg:x="0" fg:w="1"/><text x="0.2500%" y="111.50"></text></g><g><title>tokio::runtime::task::harness::Harness&lt;T,S&gt;::try_read_output (1 samples, 0.62%)</title><rect x="0.0000%" y="85" width="0.6211%" height="15" fill="rgb(235,200,9)" fg:x="0" fg:w="1"/><text x="0.2500%" y="95.50"></text></g><g><title>tokio::runtime::task::harness::can_read_output (1 samples, 0.62%)</title><rect x="0.0000%" y="69" width="0.6211%" height="15" fill="rgb(229,17,13)" fg:x="0" fg:w="1"/><text x="0.2500%" y="79.50"></text></g><g><title>&lt;futures_lite::stream::NextFuture&lt;S&gt; as core::future::future::Future&gt;::poll (8 samples, 4.97%)</title><rect x="1.8634%" y="165" width="4.9689%" height="15" fill="rgb(230,188,29)" fg:x="3" fg:w="8"/><text x="2.1134%" y="175.50">&lt;futur..</text></g><g><title>&lt;crc32fast::Hasher as core::hash::Hasher&gt;::write (6 samples, 3.73%)</title><rect x="3.1056%" y="149" width="3.7267%" height="15" fill="rgb(236,172,17)" fg:x="5" fg:w="6"/><text x="3.3556%" y="159.50">&lt;crc..</text></g><g><title>crc32fast::baseline::update_fast_16 (6 samples, 3.73%)</title><rect x="3.1056%" y="133" width="3.7267%" height="15" fill="rgb(228,128,51)" fg:x="5" fg:w="6"/><text x="3.3556%" y="143.50">crc3..</text></g><g><title>&lt;tokio::io::util::write_all::WriteAll&lt;W&gt; as core::future::future::Future&gt;::poll (1 samples, 0.62%)</title><rect x="6.8323%" y="149" width="0.6211%" height="15" fill="rgb(222,60,34)" fg:x="11" fg:w="1"/><text x="7.0823%" y="159.50"></text></g><g><title>tokio::io::util::buf_writer::BufWriter&lt;W&gt;::flush_buf (1 samples, 0.62%)</title><rect x="6.8323%" y="133" width="0.6211%" height="15" fill="rgb(246,43,51)" fg:x="11" fg:w="1"/><text x="7.0823%" y="143.50"></text></g><g><title>&lt;tokio::fs::file::File as tokio::io::async_write::AsyncWrite&gt;::poll_write (1 samples, 0.62%)</title><rect x="6.8323%" y="117" width="0.6211%" height="15" fill="rgb(218,227,8)" fg:x="11" fg:w="1"/><text x="7.0823%" y="127.50"></text></g><g><title>tokio::runtime::blocking::pool::spawn_mandatory_blocking (1 samples, 0.62%)</title><rect x="6.8323%" y="101" width="0.6211%" height="15" fill="rgb(237,144,49)" fg:x="11" fg:w="1"/><text x="7.0823%" y="111.50"></text></g><g><title>tokio::runtime::blocking::pool::Spawner::spawn_task (1 samples, 0.62%)</title><rect x="6.8323%" y="85" width="0.6211%" height="15" fill="rgb(254,26,23)" fg:x="11" fg:w="1"/><text x="7.0823%" y="95.50"></text></g><g><title>syscall (1 samples, 0.62%)</title><rect x="6.8323%" y="69" width="0.6211%" height="15" fill="rgb(225,54,15)" fg:x="11" fg:w="1"/><text x="7.0823%" y="79.50"></text></g><g><title>tokio::sync::batch_semaphore::Semaphore::add_permits_locked (2 samples, 1.24%)</title><rect x="7.4534%" y="149" width="1.2422%" height="15" fill="rgb(221,163,3)" fg:x="12" fg:w="2"/><text x="7.7034%" y="159.50"></text></g><g><title>&lt;tokio::sync::batch_semaphore::Acquire as core::future::future::Future&gt;::poll (1 samples, 0.62%)</title><rect x="9.3168%" y="133" width="0.6211%" height="15" fill="rgb(215,133,48)" fg:x="15" fg:w="1"/><text x="9.5668%" y="143.50"></text></g><g><title>&lt;laminarmq::storage::impls::tokio::storage::std_seek_read::StdSeekReadFileStorage as laminarmq::storage::Storage&gt;::append_slice::{{closure}} (6 samples, 3.73%)</title><rect x="6.8323%" y="165" width="3.7267%" height="15" fill="rgb(208,200,40)" fg:x="11" fg:w="6"/><text x="7.0823%" y="175.50">&lt;lam..</text></g><g><title>tokio::sync::rwlock::RwLock&lt;T&gt;::write::{{closure}} (3 samples, 1.86%)</title><rect x="8.6957%" y="149" width="1.8634%" height="15" fill="rgb(254,85,34)" fg:x="14" fg:w="3"/><text x="8.9457%" y="159.50">t..</text></g><g><title>tokio::sync::batch_semaphore::Semaphore::acquire (1 samples, 0.62%)</title><rect x="9.9379%" y="133" width="0.6211%" height="15" fill="rgb(222,32,11)" fg:x="16" fg:w="1"/><text x="10.1879%" y="143.50"></text></g><g><title>segmented_log_read_stream::time_tokio_std_seek_read_segmented_log::{{closure}} (18 samples, 11.18%)</title><rect x="0.0000%" y="213" width="11.1801%" height="15" fill="rgb(223,71,4)" fg:x="0" fg:w="18"/><text x="0.2500%" y="223.50">segmented_log_re..</text></g><g><title>&lt;laminarmq::storage::commit_log::segmented_log::SegmentedLog&lt;S,M,H,Idx,&lt;S as laminarmq::storage::Sizable&gt;::Size,SERP,SSP,C&gt; as laminarmq::storage::commit_log::CommitLog&lt;laminarmq::storage::commit_log::segmented_log::MetaWithIdx&lt;M,Idx&gt;,&lt;S as laminarmq::storage::Storage&gt;::Content&gt;&gt;::append::{{closure}} (17 samples, 10.56%)</title><rect x="0.6211%" y="197" width="10.5590%" height="15" fill="rgb(208,153,52)" fg:x="1" fg:w="17"/><text x="0.8711%" y="207.50">&lt;laminarmq::sto..</text></g><g><title>laminarmq::storage::Storage::append::{{closure}} (16 samples, 9.94%)</title><rect x="1.2422%" y="181" width="9.9379%" height="15" fill="rgb(205,207,53)" fg:x="2" fg:w="16"/><text x="1.4922%" y="191.50">laminarmq::sto..</text></g><g><title>__libc_free (1 samples, 0.62%)</title><rect x="10.5590%" y="165" width="0.6211%" height="15" fill="rgb(250,0,2)" fg:x="17" fg:w="1"/><text x="10.8090%" y="175.50"></text></g><g><title>&lt;alloc::vec::Vec&lt;T&gt; as alloc::vec::spec_from_iter::SpecFromIter&lt;T,I&gt;&gt;::from_iter (23 samples, 14.29%)</title><rect x="0.0000%" y="293" width="14.2857%" height="15" fill="rgb(220,183,19)" fg:x="0" fg:w="23"/><text x="0.2500%" y="303.50">&lt;alloc::vec::Vec&lt;T&gt; as..</text></g><g><title>&lt;core::iter::adapters::map::Map&lt;I,F&gt; as core::iter::traits::iterator::Iterator&gt;::fold (23 samples, 14.29%)</title><rect x="0.0000%" y="277" width="14.2857%" height="15" fill="rgb(229,22,12)" fg:x="0" fg:w="23"/><text x="0.2500%" y="287.50">&lt;core::iter::adapters:..</text></g><g><title>criterion::bencher::AsyncBencher&lt;A,M&gt;::iter_custom (23 samples, 14.29%)</title><rect x="0.0000%" y="261" width="14.2857%" height="15" fill="rgb(249,33,36)" fg:x="0" fg:w="23"/><text x="0.2500%" y="271.50">criterion::bencher::As..</text></g><g><title>&lt;tokio::runtime::runtime::Runtime as criterion::async_executor::AsyncExecutor&gt;::block_on (23 samples, 14.29%)</title><rect x="0.0000%" y="245" width="14.2857%" height="15" fill="rgb(207,161,43)" fg:x="0" fg:w="23"/><text x="0.2500%" y="255.50">&lt;tokio::runtime::runti..</text></g><g><title>tokio::runtime::park::CachedParkThread::block_on (23 samples, 14.29%)</title><rect x="0.0000%" y="229" width="14.2857%" height="15" fill="rgb(214,171,47)" fg:x="0" fg:w="23"/><text x="0.2500%" y="239.50">tokio::runtime::park::..</text></g><g><title>tokio::runtime::park::Inner::park (5 samples, 3.11%)</title><rect x="11.1801%" y="213" width="3.1056%" height="15" fill="rgb(241,204,32)" fg:x="18" fg:w="5"/><text x="11.4301%" y="223.50">tok..</text></g><g><title>std::sys::unix::locks::futex_condvar::Condvar::wait (5 samples, 3.11%)</title><rect x="11.1801%" y="197" width="3.1056%" height="15" fill="rgb(239,146,38)" fg:x="18" fg:w="5"/><text x="11.4301%" y="207.50">std..</text></g><g><title>std::sys::unix::locks::futex_condvar::Condvar::wait_optional_timeout (5 samples, 3.11%)</title><rect x="11.1801%" y="181" width="3.1056%" height="15" fill="rgb(235,148,48)" fg:x="18" fg:w="5"/><text x="11.4301%" y="191.50">std..</text></g><g><title>std::sys::unix::futex::futex_wait (5 samples, 3.11%)</title><rect x="11.1801%" y="165" width="3.1056%" height="15" fill="rgb(211,64,39)" fg:x="18" fg:w="5"/><text x="11.4301%" y="175.50">std..</text></g><g><title>syscall (4 samples, 2.48%)</title><rect x="11.8012%" y="149" width="2.4845%" height="15" fill="rgb(229,17,6)" fg:x="19" fg:w="4"/><text x="12.0512%" y="159.50">sy..</text></g><g><title>&lt;alloc::vec::Vec&lt;T&gt; as laminarmq::common::split::SplitAt&lt;T&gt;&gt;::split_at (1 samples, 0.62%)</title><rect x="14.9068%" y="165" width="0.6211%" height="15" fill="rgb(245,92,9)" fg:x="24" fg:w="1"/><text x="15.1568%" y="175.50"></text></g><g><title>&lt;tokio::runtime::task::join::JoinHandle&lt;T&gt; as core::future::future::Future&gt;::poll (1 samples, 0.62%)</title><rect x="16.7702%" y="117" width="0.6211%" height="15" fill="rgb(206,122,39)" fg:x="27" fg:w="1"/><text x="17.0202%" y="127.50"></text></g><g><title>tokio::runtime::task::harness::Harness&lt;T,S&gt;::try_read_output (1 samples, 0.62%)</title><rect x="16.7702%" y="101" width="0.6211%" height="15" fill="rgb(207,218,41)" fg:x="27" fg:w="1"/><text x="17.0202%" y="111.50"></text></g><g><title>tokio::runtime::task::harness::can_read_output (1 samples, 0.62%)</title><rect x="16.7702%" y="85" width="0.6211%" height="15" fill="rgb(208,150,41)" fg:x="27" fg:w="1"/><text x="17.0202%" y="95.50"></text></g><g><title>&lt;tokio::fs::file::File as tokio::io::async_seek::AsyncSeek&gt;::poll_complete (4 samples, 2.48%)</title><rect x="15.5280%" y="133" width="2.4845%" height="15" fill="rgb(225,55,22)" fg:x="25" fg:w="4"/><text x="15.7780%" y="143.50">&lt;t..</text></g><g><title>tokio::runtime::task::harness::Harness&lt;T,S&gt;::dealloc (1 samples, 0.62%)</title><rect x="17.3913%" y="117" width="0.6211%" height="15" fill="rgb(218,53,4)" fg:x="28" fg:w="1"/><text x="17.6413%" y="127.50"></text></g><g><title>tokio::runtime::park::drop_waker (1 samples, 0.62%)</title><rect x="17.3913%" y="101" width="0.6211%" height="15" fill="rgb(215,124,7)" fg:x="28" fg:w="1"/><text x="17.6413%" y="111.50"></text></g><g><title>__rdl_alloc (1 samples, 0.62%)</title><rect x="18.0124%" y="85" width="0.6211%" height="15" fill="rgb(241,82,39)" fg:x="29" fg:w="1"/><text x="18.2624%" y="95.50"></text></g><g><title>std::sys::unix::alloc::&lt;impl core::alloc::global::GlobalAlloc for std::alloc::System&gt;::alloc (1 samples, 0.62%)</title><rect x="18.0124%" y="69" width="0.6211%" height="15" fill="rgb(229,3,12)" fg:x="29" fg:w="1"/><text x="18.2624%" y="79.50"></text></g><g><title>std::sys::unix::alloc::aligned_malloc (1 samples, 0.62%)</title><rect x="18.0124%" y="53" width="0.6211%" height="15" fill="rgb(250,177,43)" fg:x="29" fg:w="1"/><text x="18.2624%" y="63.50"></text></g><g><title>posix_memalign (1 samples, 0.62%)</title><rect x="18.0124%" y="37" width="0.6211%" height="15" fill="rgb(225,60,50)" fg:x="29" fg:w="1"/><text x="18.2624%" y="47.50"></text></g><g><title>std::thread::Builder::spawn_unchecked (1 samples, 0.62%)</title><rect x="18.6335%" y="69" width="0.6211%" height="15" fill="rgb(241,65,43)" fg:x="30" fg:w="1"/><text x="18.8835%" y="79.50"></text></g><g><title>std::sys::unix::thread::Thread::new (1 samples, 0.62%)</title><rect x="18.6335%" y="53" width="0.6211%" height="15" fill="rgb(236,190,45)" fg:x="30" fg:w="1"/><text x="18.8835%" y="63.50"></text></g><g><title>pthread_create (1 samples, 0.62%)</title><rect x="18.6335%" y="37" width="0.6211%" height="15" fill="rgb(253,171,8)" fg:x="30" fg:w="1"/><text x="18.8835%" y="47.50"></text></g><g><title>&lt;&amp;mut T as tokio::io::async_seek::AsyncSeek&gt;::poll_complete (8 samples, 4.97%)</title><rect x="15.5280%" y="149" width="4.9689%" height="15" fill="rgb(218,69,30)" fg:x="25" fg:w="8"/><text x="15.7780%" y="159.50">&lt;&amp;mut ..</text></g><g><title>&lt;tokio::fs::file::File as tokio::io::async_seek::AsyncSeek&gt;::start_seek (4 samples, 2.48%)</title><rect x="18.0124%" y="133" width="2.4845%" height="15" fill="rgb(248,214,1)" fg:x="29" fg:w="4"/><text x="18.2624%" y="143.50">&lt;t..</text></g><g><title>tokio::runtime::blocking::pool::spawn_blocking (4 samples, 2.48%)</title><rect x="18.0124%" y="117" width="2.4845%" height="15" fill="rgb(238,97,5)" fg:x="29" fg:w="4"/><text x="18.2624%" y="127.50">to..</text></g><g><title>tokio::runtime::blocking::pool::Spawner::spawn_blocking (4 samples, 2.48%)</title><rect x="18.0124%" y="101" width="2.4845%" height="15" fill="rgb(222,70,22)" fg:x="29" fg:w="4"/><text x="18.2624%" y="111.50">to..</text></g><g><title>tokio::runtime::blocking::pool::Spawner::spawn_task (3 samples, 1.86%)</title><rect x="18.6335%" y="85" width="1.8634%" height="15" fill="rgb(209,24,29)" fg:x="30" fg:w="3"/><text x="18.8835%" y="95.50">t..</text></g><g><title>syscall (2 samples, 1.24%)</title><rect x="19.2547%" y="69" width="1.2422%" height="15" fill="rgb(228,68,4)" fg:x="31" fg:w="2"/><text x="19.5047%" y="79.50"></text></g><g><title>__rdl_alloc (1 samples, 0.62%)</title><rect x="21.1180%" y="101" width="0.6211%" height="15" fill="rgb(225,218,0)" fg:x="34" fg:w="1"/><text x="21.3680%" y="111.50"></text></g><g><title>std::sys::unix::alloc::&lt;impl core::alloc::global::GlobalAlloc for std::alloc::System&gt;::alloc (1 samples, 0.62%)</title><rect x="21.1180%" y="85" width="0.6211%" height="15" fill="rgb(225,161,1)" fg:x="34" fg:w="1"/><text x="21.3680%" y="95.50"></text></g><g><title>std::sys::unix::alloc::aligned_malloc (1 samples, 0.62%)</title><rect x="21.1180%" y="69" width="0.6211%" height="15" fill="rgb(238,159,45)" fg:x="34" fg:w="1"/><text x="21.3680%" y="79.50"></text></g><g><title>posix_memalign (1 samples, 0.62%)</title><rect x="21.1180%" y="53" width="0.6211%" height="15" fill="rgb(249,192,16)" fg:x="34" fg:w="1"/><text x="21.3680%" y="63.50"></text></g><g><title>&lt;futures_lite::stream::CountFuture&lt;S&gt; as core::future::future::Future&gt;::poll (15 samples, 9.32%)</title><rect x="14.9068%" y="213" width="9.3168%" height="15" fill="rgb(207,151,2)" fg:x="24" fg:w="15"/><text x="15.1568%" y="223.50">&lt;futures_lite..</text></g><g><title>&lt;async_stream::async_stream::AsyncStream&lt;T,U&gt; as futures_core::stream::Stream&gt;::poll_next (15 samples, 9.32%)</title><rect x="14.9068%" y="197" width="9.3168%" height="15" fill="rgb(205,212,4)" fg:x="24" fg:w="15"/><text x="15.1568%" y="207.50">&lt;async_stream..</text></g><g><title>&lt;laminarmq::storage::commit_log::segmented_log::segment::Segment&lt;S,M,H,Idx,&lt;S as laminarmq::storage::Sizable&gt;::Size,SERP&gt; as laminarmq::storage::AsyncIndexedRead&gt;::read::{{closure}} (15 samples, 9.32%)</title><rect x="14.9068%" y="181" width="9.3168%" height="15" fill="rgb(232,6,12)" fg:x="24" fg:w="15"/><text x="15.1568%" y="191.50">&lt;laminarmq::s..</text></g><g><title>&lt;laminarmq::storage::impls::tokio::storage::std_seek_read::StdSeekReadFileStorage as laminarmq::storage::Storage&gt;::read::{{closure}} (14 samples, 8.70%)</title><rect x="15.5280%" y="165" width="8.6957%" height="15" fill="rgb(215,102,7)" fg:x="25" fg:w="14"/><text x="15.7780%" y="175.50">&lt;laminarmq::..</text></g><g><title>&lt;tokio::fs::file::File as tokio::io::async_read::AsyncRead&gt;::poll_read (6 samples, 3.73%)</title><rect x="20.4969%" y="149" width="3.7267%" height="15" fill="rgb(228,80,43)" fg:x="33" fg:w="6"/><text x="20.7469%" y="159.50">&lt;tok..</text></g><g><title>tokio::runtime::blocking::pool::spawn_blocking (5 samples, 3.11%)</title><rect x="21.1180%" y="133" width="3.1056%" height="15" fill="rgb(242,114,49)" fg:x="34" fg:w="5"/><text x="21.3680%" y="143.50">tok..</text></g><g><title>tokio::runtime::blocking::pool::Spawner::spawn_blocking (5 samples, 3.11%)</title><rect x="21.1180%" y="117" width="3.1056%" height="15" fill="rgb(252,182,10)" fg:x="34" fg:w="5"/><text x="21.3680%" y="127.50">tok..</text></g><g><title>tokio::runtime::blocking::pool::Spawner::spawn_task (4 samples, 2.48%)</title><rect x="21.7391%" y="101" width="2.4845%" height="15" fill="rgb(233,2,35)" fg:x="35" fg:w="4"/><text x="21.9891%" y="111.50">to..</text></g><g><title>syscall (4 samples, 2.48%)</title><rect x="21.7391%" y="85" width="2.4845%" height="15" fill="rgb(205,49,46)" fg:x="35" fg:w="4"/><text x="21.9891%" y="95.50">sy..</text></g><g><title>&lt;futures_lite::stream::NextFuture&lt;S&gt; as core::future::future::Future&gt;::poll (14 samples, 8.70%)</title><rect x="31.6770%" y="181" width="8.6957%" height="15" fill="rgb(208,196,9)" fg:x="51" fg:w="14"/><text x="31.9270%" y="191.50">&lt;futures_lit..</text></g><g><title>&lt;crc32fast::Hasher as core::hash::Hasher&gt;::write (13 samples, 8.07%)</title><rect x="32.2981%" y="165" width="8.0745%" height="15" fill="rgb(207,209,37)" fg:x="52" fg:w="13"/><text x="32.5481%" y="175.50">&lt;crc32fast:..</text></g><g><title>crc32fast::baseline::update_fast_16 (13 samples, 8.07%)</title><rect x="32.2981%" y="149" width="8.0745%" height="15" fill="rgb(209,72,31)" fg:x="52" fg:w="13"/><text x="32.5481%" y="159.50">crc32fast::..</text></g><g><title>&lt;tokio::io::util::write_all::WriteAll&lt;W&gt; as core::future::future::Future&gt;::poll (7 samples, 4.35%)</title><rect x="43.4783%" y="165" width="4.3478%" height="15" fill="rgb(237,206,30)" fg:x="70" fg:w="7"/><text x="43.7283%" y="175.50">&lt;toki..</text></g><g><title>tokio::io::util::buf_writer::BufWriter&lt;W&gt;::flush_buf (2 samples, 1.24%)</title><rect x="46.5839%" y="149" width="1.2422%" height="15" fill="rgb(219,130,2)" fg:x="75" fg:w="2"/><text x="46.8339%" y="159.50"></text></g><g><title>&lt;tokio::fs::file::File as tokio::io::async_write::AsyncWrite&gt;::poll_write (2 samples, 1.24%)</title><rect x="46.5839%" y="133" width="1.2422%" height="15" fill="rgb(242,36,6)" fg:x="75" fg:w="2"/><text x="46.8339%" y="143.50"></text></g><g><title>tokio::runtime::blocking::pool::spawn_mandatory_blocking (2 samples, 1.24%)</title><rect x="46.5839%" y="117" width="1.2422%" height="15" fill="rgb(236,174,22)" fg:x="75" fg:w="2"/><text x="46.8339%" y="127.50"></text></g><g><title>tokio::runtime::blocking::pool::Spawner::spawn_task (1 samples, 0.62%)</title><rect x="47.2050%" y="101" width="0.6211%" height="15" fill="rgb(205,140,27)" fg:x="76" fg:w="1"/><text x="47.4550%" y="111.50"></text></g><g><title>syscall (1 samples, 0.62%)</title><rect x="47.2050%" y="85" width="0.6211%" height="15" fill="rgb(206,15,45)" fg:x="76" fg:w="1"/><text x="47.4550%" y="95.50"></text></g><g><title>tokio::sync::batch_semaphore::Semaphore::add_permits_locked (2 samples, 1.24%)</title><rect x="47.8261%" y="165" width="1.2422%" height="15" fill="rgb(211,139,25)" fg:x="77" fg:w="2"/><text x="48.0761%" y="175.50"></text></g><g><title>tokio::sync::batch_semaphore::Semaphore::release (2 samples, 1.24%)</title><rect x="49.0683%" y="165" width="1.2422%" height="15" fill="rgb(220,163,52)" fg:x="79" fg:w="2"/><text x="49.3183%" y="175.50"></text></g><g><title>&lt;laminarmq::storage::impls::tokio::storage::std_seek_read::StdSeekReadFileStorage as laminarmq::storage::Storage&gt;::append_slice::{{closure}} (22 samples, 13.66%)</title><rect x="40.3727%" y="181" width="13.6646%" height="15" fill="rgb(252,70,25)" fg:x="65" fg:w="22"/><text x="40.6227%" y="191.50">&lt;laminarmq::storage::..</text></g><g><title>tokio::sync::rwlock::RwLock&lt;T&gt;::write::{{closure}} (6 samples, 3.73%)</title><rect x="50.3106%" y="165" width="3.7267%" height="15" fill="rgb(250,138,46)" fg:x="81" fg:w="6"/><text x="50.5606%" y="175.50">toki..</text></g><g><title>&lt;tokio::sync::batch_semaphore::Acquire as core::future::future::Future&gt;::poll (2 samples, 1.24%)</title><rect x="52.7950%" y="149" width="1.2422%" height="15" fill="rgb(221,80,50)" fg:x="85" fg:w="2"/><text x="53.0450%" y="159.50"></text></g><g><title>&lt;laminarmq::storage::impls::tokio::storage::std_seek_read::StdSeekReadFileStorage as laminarmq::storage::Storage&gt;::append_slice (1 samples, 0.62%)</title><rect x="54.0373%" y="181" width="0.6211%" height="15" fill="rgb(227,97,0)" fg:x="87" fg:w="1"/><text x="54.2873%" y="191.50"></text></g><g><title>malloc (1 samples, 0.62%)</title><rect x="54.0373%" y="165" width="0.6211%" height="15" fill="rgb(214,184,26)" fg:x="87" fg:w="1"/><text x="54.2873%" y="175.50"></text></g><g><title>segmented_log_read_stream::time_tokio_std_seek_read_segmented_log::{{closure}} (69 samples, 42.86%)</title><rect x="14.2857%" y="229" width="42.8571%" height="15" fill="rgb(232,226,46)" fg:x="23" fg:w="69"/><text x="14.5357%" y="239.50">segmented_log_read_stream::time_tokio_std_seek_read_segmented_log::{{c..</text></g><g><title>&lt;laminarmq::storage::commit_log::segmented_log::SegmentedLog&lt;S,M,H,Idx,&lt;S as laminarmq::storage::Sizable&gt;::Size,SERP,SSP,C&gt; as laminarmq::storage::commit_log::CommitLog&lt;laminarmq::storage::commit_log::segmented_log::MetaWithIdx&lt;M,Idx&gt;,&lt;S as laminarmq::storage::Storage&gt;::Content&gt;&gt;::append::{{closure}} (53 samples, 32.92%)</title><rect x="24.2236%" y="213" width="32.9193%" height="15" fill="rgb(243,58,50)" fg:x="39" fg:w="53"/><text x="24.4736%" y="223.50">&lt;laminarmq::storage::commit_log::segmented_log::Segme..</text></g><g><title>laminarmq::storage::Storage::append::{{closure}} (53 samples, 32.92%)</title><rect x="24.2236%" y="197" width="32.9193%" height="15" fill="rgb(228,142,41)" fg:x="39" fg:w="53"/><text x="24.4736%" y="207.50">laminarmq::storage::Storage::append::{{closure}}</text></g><g><title>__libc_free (4 samples, 2.48%)</title><rect x="54.6584%" y="181" width="2.4845%" height="15" fill="rgb(238,145,41)" fg:x="88" fg:w="4"/><text x="54.9084%" y="191.50">__..</text></g><g><title>std::sys::unix::futex::futex_wait (11 samples, 6.83%)</title><rect x="57.7640%" y="181" width="6.8323%" height="15" fill="rgb(244,74,4)" fg:x="93" fg:w="11"/><text x="58.0140%" y="191.50">std::sys:..</text></g><g><title>syscall (11 samples, 6.83%)</title><rect x="57.7640%" y="165" width="6.8323%" height="15" fill="rgb(248,161,46)" fg:x="93" fg:w="11"/><text x="58.0140%" y="175.50">syscall</text></g><g><title>criterion::bencher::AsyncBencher&lt;A,M&gt;::iter_custom (82 samples, 50.93%)</title><rect x="14.2857%" y="277" width="50.9317%" height="15" fill="rgb(244,148,42)" fg:x="23" fg:w="82"/><text x="14.5357%" y="287.50">criterion::bencher::AsyncBencher&lt;A,M&gt;::iter_custom</text></g><g><title>&lt;tokio::runtime::runtime::Runtime as criterion::async_executor::AsyncExecutor&gt;::block_on (82 samples, 50.93%)</title><rect x="14.2857%" y="261" width="50.9317%" height="15" fill="rgb(226,181,12)" fg:x="23" fg:w="82"/><text x="14.5357%" y="271.50">&lt;tokio::runtime::runtime::Runtime as criterion::async_executor::AsyncExecutor&gt;::bloc..</text></g><g><title>tokio::runtime::park::CachedParkThread::block_on (82 samples, 50.93%)</title><rect x="14.2857%" y="245" width="50.9317%" height="15" fill="rgb(223,144,21)" fg:x="23" fg:w="82"/><text x="14.5357%" y="255.50">tokio::runtime::park::CachedParkThread::block_on</text></g><g><title>tokio::runtime::park::Inner::park (13 samples, 8.07%)</title><rect x="57.1429%" y="229" width="8.0745%" height="15" fill="rgb(227,194,34)" fg:x="92" fg:w="13"/><text x="57.3929%" y="239.50">tokio::runt..</text></g><g><title>std::sys::unix::locks::futex_condvar::Condvar::wait (12 samples, 7.45%)</title><rect x="57.7640%" y="213" width="7.4534%" height="15" fill="rgb(231,27,0)" fg:x="93" fg:w="12"/><text x="58.0140%" y="223.50">std::sys::..</text></g><g><title>std::sys::unix::locks::futex_condvar::Condvar::wait_optional_timeout (12 samples, 7.45%)</title><rect x="57.7640%" y="197" width="7.4534%" height="15" fill="rgb(222,221,18)" fg:x="93" fg:w="12"/><text x="58.0140%" y="207.50">std::sys::..</text></g><g><title>std::sys::unix::locks::futex_mutex::Mutex::lock (1 samples, 0.62%)</title><rect x="64.5963%" y="181" width="0.6211%" height="15" fill="rgb(238,29,46)" fg:x="104" fg:w="1"/><text x="64.8463%" y="191.50"></text></g><g><title>core::sync::atomic::AtomicU32::compare_exchange (1 samples, 0.62%)</title><rect x="64.5963%" y="165" width="0.6211%" height="15" fill="rgb(222,35,16)" fg:x="104" fg:w="1"/><text x="64.8463%" y="175.50"></text></g><g><title>core::sync::atomic::atomic_compare_exchange (1 samples, 0.62%)</title><rect x="64.5963%" y="149" width="0.6211%" height="15" fill="rgb(236,150,41)" fg:x="104" fg:w="1"/><text x="64.8463%" y="159.50"></text></g><g><title>segmented_log_r (106 samples, 65.84%)</title><rect x="0.0000%" y="581" width="65.8385%" height="15" fill="rgb(240,93,16)" fg:x="0" fg:w="106"/><text x="0.2500%" y="591.50">segmented_log_r</text></g><g><title>_start (106 samples, 65.84%)</title><rect x="0.0000%" y="565" width="65.8385%" height="15" fill="rgb(233,61,52)" fg:x="0" fg:w="106"/><text x="0.2500%" y="575.50">_start</text></g><g><title>__libc_start_main (106 samples, 65.84%)</title><rect x="0.0000%" y="549" width="65.8385%" height="15" fill="rgb(248,53,25)" fg:x="0" fg:w="106"/><text x="0.2500%" y="559.50">__libc_start_main</text></g><g><title>main (106 samples, 65.84%)</title><rect x="0.0000%" y="533" width="65.8385%" height="15" fill="rgb(228,87,42)" fg:x="0" fg:w="106"/><text x="0.2500%" y="543.50">main</text></g><g><title>std::rt::lang_start_internal (106 samples, 65.84%)</title><rect x="0.0000%" y="517" width="65.8385%" height="15" fill="rgb(214,211,0)" fg:x="0" fg:w="106"/><text x="0.2500%" y="527.50">std::rt::lang_start_internal</text></g><g><title>std::panic::catch_unwind (106 samples, 65.84%)</title><rect x="0.0000%" y="501" width="65.8385%" height="15" fill="rgb(251,30,18)" fg:x="0" fg:w="106"/><text x="0.2500%" y="511.50">std::panic::catch_unwind</text></g><g><title>std::panicking::try (106 samples, 65.84%)</title><rect x="0.0000%" y="485" width="65.8385%" height="15" fill="rgb(218,20,51)" fg:x="0" fg:w="106"/><text x="0.2500%" y="495.50">std::panicking::try</text></g><g><title>std::panicking::try::do_call (106 samples, 65.84%)</title><rect x="0.0000%" y="469" width="65.8385%" height="15" fill="rgb(237,98,3)" fg:x="0" fg:w="106"/><text x="0.2500%" y="479.50">std::panicking::try::do_call</text></g><g><title>std::rt::lang_start_internal::{{closure}} (106 samples, 65.84%)</title><rect x="0.0000%" y="453" width="65.8385%" height="15" fill="rgb(216,113,2)" fg:x="0" fg:w="106"/><text x="0.2500%" y="463.50">std::rt::lang_start_internal::{{closure}}</text></g><g><title>std::panic::catch_unwind (106 samples, 65.84%)</title><rect x="0.0000%" y="437" width="65.8385%" height="15" fill="rgb(247,149,52)" fg:x="0" fg:w="106"/><text x="0.2500%" y="447.50">std::panic::catch_unwind</text></g><g><title>std::panicking::try (106 samples, 65.84%)</title><rect x="0.0000%" y="421" width="65.8385%" height="15" fill="rgb(243,227,25)" fg:x="0" fg:w="106"/><text x="0.2500%" y="431.50">std::panicking::try</text></g><g><title>std::panicking::try::do_call (106 samples, 65.84%)</title><rect x="0.0000%" y="405" width="65.8385%" height="15" fill="rgb(251,6,22)" fg:x="0" fg:w="106"/><text x="0.2500%" y="415.50">std::panicking::try::do_call</text></g><g><title>core::ops::function::impls::&lt;impl core::ops::function::FnOnce&lt;A&gt; for &amp;F&gt;::call_once (106 samples, 65.84%)</title><rect x="0.0000%" y="389" width="65.8385%" height="15" fill="rgb(249,63,20)" fg:x="0" fg:w="106"/><text x="0.2500%" y="399.50">core::ops::function::impls::&lt;impl core::ops::function::FnOnce&lt;A&gt; for &amp;F&gt;::call_once</text></g><g><title>std::rt::lang_start::{{closure}} (106 samples, 65.84%)</title><rect x="0.0000%" y="373" width="65.8385%" height="15" fill="rgb(232,95,52)" fg:x="0" fg:w="106"/><text x="0.2500%" y="383.50">std::rt::lang_start::{{closure}}</text></g><g><title>std::sys_common::backtrace::__rust_begin_short_backtrace (106 samples, 65.84%)</title><rect x="0.0000%" y="357" width="65.8385%" height="15" fill="rgb(233,100,14)" fg:x="0" fg:w="106"/><text x="0.2500%" y="367.50">std::sys_common::backtrace::__rust_begin_short_backtrace</text></g><g><title>segmented_log_read_stream::main (106 samples, 65.84%)</title><rect x="0.0000%" y="341" width="65.8385%" height="15" fill="rgb(246,124,2)" fg:x="0" fg:w="106"/><text x="0.2500%" y="351.50">segmented_log_read_stream::main</text></g><g><title>criterion::benchmark_group::BenchmarkGroup&lt;M&gt;::bench_with_input (106 samples, 65.84%)</title><rect x="0.0000%" y="325" width="65.8385%" height="15" fill="rgb(215,13,5)" fg:x="0" fg:w="106"/><text x="0.2500%" y="335.50">criterion::benchmark_group::BenchmarkGroup&lt;M&gt;::bench_with_input</text></g><g><title>criterion::routine::Routine::profile (106 samples, 65.84%)</title><rect x="0.0000%" y="309" width="65.8385%" height="15" fill="rgb(221,7,24)" fg:x="0" fg:w="106"/><text x="0.2500%" y="319.50">criterion::routine::Routine::profile</text></g><g><title>&lt;criterion::routine::Function&lt;M,F,T&gt; as criterion::routine::Routine&lt;M,T&gt;&gt;::warm_up (83 samples, 51.55%)</title><rect x="14.2857%" y="293" width="51.5528%" height="15" fill="rgb(234,14,49)" fg:x="23" fg:w="83"/><text x="14.5357%" y="303.50">&lt;criterion::routine::Function&lt;M,F,T&gt; as criterion::routine::Routine&lt;M,T&gt;&gt;::warm_up</text></g><g><title>tokio::runtime::blocking::pool::BlockingPool::shutdown (1 samples, 0.62%)</title><rect x="65.2174%" y="277" width="0.6211%" height="15" fill="rgb(211,46,35)" fg:x="105" fg:w="1"/><text x="65.4674%" y="287.50"></text></g><g><title>std::thread::JoinInner&lt;T&gt;::join (1 samples, 0.62%)</title><rect x="65.2174%" y="261" width="0.6211%" height="15" fill="rgb(250,18,47)" fg:x="105" fg:w="1"/><text x="65.4674%" y="271.50"></text></g><g><title>std::sys::unix::thread::Thread::join (1 samples, 0.62%)</title><rect x="65.2174%" y="245" width="0.6211%" height="15" fill="rgb(220,150,30)" fg:x="105" fg:w="1"/><text x="65.4674%" y="255.50"></text></g><g><title>__munmap (1 samples, 0.62%)</title><rect x="65.2174%" y="229" width="0.6211%" height="15" fill="rgb(242,162,5)" fg:x="105" fg:w="1"/><text x="65.4674%" y="239.50"></text></g><g><title>core::option::Option&lt;T&gt;::and_then (1 samples, 0.62%)</title><rect x="68.3230%" y="421" width="0.6211%" height="15" fill="rgb(219,11,14)" fg:x="110" fg:w="1"/><text x="68.5730%" y="431.50"></text></g><g><title>std::sys::unix::futex::futex_wait::{{closure}} (1 samples, 0.62%)</title><rect x="68.3230%" y="405" width="0.6211%" height="15" fill="rgb(209,179,22)" fg:x="110" fg:w="1"/><text x="68.5730%" y="415.50"></text></g><g><title>std::sys::unix::time::inner::&lt;impl std::sys::unix::time::Timespec&gt;::now (1 samples, 0.62%)</title><rect x="68.3230%" y="389" width="0.6211%" height="15" fill="rgb(230,129,14)" fg:x="110" fg:w="1"/><text x="68.5730%" y="399.50"></text></g><g><title>std::sys::unix::cvt (1 samples, 0.62%)</title><rect x="68.3230%" y="373" width="0.6211%" height="15" fill="rgb(253,113,36)" fg:x="110" fg:w="1"/><text x="68.5730%" y="383.50"></text></g><g><title>std::sys::unix::futex::futex_wait (26 samples, 16.15%)</title><rect x="68.3230%" y="437" width="16.1491%" height="15" fill="rgb(248,130,36)" fg:x="110" fg:w="26"/><text x="68.5730%" y="447.50">std::sys::unix::futex::fu..</text></g><g><title>syscall (25 samples, 15.53%)</title><rect x="68.9441%" y="421" width="15.5280%" height="15" fill="rgb(220,85,23)" fg:x="111" fg:w="25"/><text x="69.1941%" y="431.50">syscall</text></g><g><title>core::sync::atomic::AtomicU32::compare_exchange (1 samples, 0.62%)</title><rect x="84.4720%" y="421" width="0.6211%" height="15" fill="rgb(254,172,50)" fg:x="136" fg:w="1"/><text x="84.7220%" y="431.50"></text></g><g><title>core::sync::atomic::atomic_compare_exchange (1 samples, 0.62%)</title><rect x="84.4720%" y="405" width="0.6211%" height="15" fill="rgb(220,129,4)" fg:x="136" fg:w="1"/><text x="84.7220%" y="415.50"></text></g><g><title>std::sys::unix::locks::futex_condvar::Condvar::wait_timeout (29 samples, 18.01%)</title><rect x="67.7019%" y="469" width="18.0124%" height="15" fill="rgb(254,97,54)" fg:x="109" fg:w="29"/><text x="67.9519%" y="479.50">std::sys::unix::locks::futex..</text></g><g><title>std::sys::unix::locks::futex_condvar::Condvar::wait_optional_timeout (29 samples, 18.01%)</title><rect x="67.7019%" y="453" width="18.0124%" height="15" fill="rgb(228,38,32)" fg:x="109" fg:w="29"/><text x="67.9519%" y="463.50">std::sys::unix::locks::futex..</text></g><g><title>std::sys::unix::locks::futex_mutex::Mutex::lock (2 samples, 1.24%)</title><rect x="84.4720%" y="437" width="1.2422%" height="15" fill="rgb(212,155,51)" fg:x="136" fg:w="2"/><text x="84.7220%" y="447.50"></text></g><g><title>std::sys::unix::locks::futex_mutex::Mutex::lock_contended (1 samples, 0.62%)</title><rect x="85.0932%" y="421" width="0.6211%" height="15" fill="rgb(252,127,22)" fg:x="137" fg:w="1"/><text x="85.3432%" y="431.50"></text></g><g><title>std::sys::unix::locks::futex_mutex::Mutex::spin (1 samples, 0.62%)</title><rect x="85.0932%" y="405" width="0.6211%" height="15" fill="rgb(254,157,49)" fg:x="137" fg:w="1"/><text x="85.3432%" y="415.50"></text></g><g><title>core::hint::spin_loop (1 samples, 0.62%)</title><rect x="85.0932%" y="389" width="0.6211%" height="15" fill="rgb(216,229,52)" fg:x="137" fg:w="1"/><text x="85.3432%" y="399.50"></text></g><g><title>core::core_arch::x86::sse2::_mm_pause (1 samples, 0.62%)</title><rect x="85.0932%" y="373" width="0.6211%" height="15" fill="rgb(225,67,7)" fg:x="137" fg:w="1"/><text x="85.3432%" y="383.50"></text></g><g><title>syscall (1 samples, 0.62%)</title><rect x="85.7143%" y="469" width="0.6211%" height="15" fill="rgb(236,215,31)" fg:x="138" fg:w="1"/><text x="85.9643%" y="479.50"></text></g><g><title>&lt;&amp;std::fs::File as std::io::Seek&gt;::seek (3 samples, 1.86%)</title><rect x="88.1988%" y="405" width="1.8634%" height="15" fill="rgb(249,167,47)" fg:x="142" fg:w="3"/><text x="88.4488%" y="415.50">&lt;..</text></g><g><title>std::sys::unix::fs::File::seek (3 samples, 1.86%)</title><rect x="88.1988%" y="389" width="1.8634%" height="15" fill="rgb(217,135,45)" fg:x="142" fg:w="3"/><text x="88.4488%" y="399.50">s..</text></g><g><title>llseek (3 samples, 1.86%)</title><rect x="88.1988%" y="373" width="1.8634%" height="15" fill="rgb(206,65,23)" fg:x="142" fg:w="3"/><text x="88.4488%" y="383.50">l..</text></g><g><title>&lt;core::panic::unwind_safe::AssertUnwindSafe&lt;F&gt; as core::ops::function::FnOnce&lt;()&gt;&gt;::call_once (11 samples, 6.83%)</title><rect x="86.3354%" y="453" width="6.8323%" height="15" fill="rgb(254,130,8)" fg:x="139" fg:w="11"/><text x="86.5854%" y="463.50">&lt;core::pa..</text></g><g><title>tokio::loom::std::unsafe_cell::UnsafeCell&lt;T&gt;::with_mut (11 samples, 6.83%)</title><rect x="86.3354%" y="437" width="6.8323%" height="15" fill="rgb(234,207,14)" fg:x="139" fg:w="11"/><text x="86.5854%" y="447.50">tokio::lo..</text></g><g><title>&lt;tokio::runtime::blocking::task::BlockingTask&lt;T&gt; as core::future::future::Future&gt;::poll (10 samples, 6.21%)</title><rect x="86.9565%" y="421" width="6.2112%" height="15" fill="rgb(223,112,21)" fg:x="140" fg:w="10"/><text x="87.2065%" y="431.50">&lt;tokio::..</text></g><g><title>tokio::io::blocking::Buf::read_from (5 samples, 3.11%)</title><rect x="90.0621%" y="405" width="3.1056%" height="15" fill="rgb(235,74,19)" fg:x="145" fg:w="5"/><text x="90.3121%" y="415.50">tok..</text></g><g><title>&lt;&amp;std::fs::File as std::io::Read&gt;::read (5 samples, 3.11%)</title><rect x="90.0621%" y="389" width="3.1056%" height="15" fill="rgb(234,56,54)" fg:x="145" fg:w="5"/><text x="90.3121%" y="399.50">&lt;&amp;s..</text></g><g><title>std::sys::unix::fs::File::read (5 samples, 3.11%)</title><rect x="90.0621%" y="373" width="3.1056%" height="15" fill="rgb(248,4,6)" fg:x="145" fg:w="5"/><text x="90.3121%" y="383.50">std..</text></g><g><title>std::sys::unix::fd::FileDesc::read (5 samples, 3.11%)</title><rect x="90.0621%" y="357" width="3.1056%" height="15" fill="rgb(207,34,41)" fg:x="145" fg:w="5"/><text x="90.3121%" y="367.50">std..</text></g><g><title>__read (5 samples, 3.11%)</title><rect x="90.0621%" y="341" width="3.1056%" height="15" fill="rgb(217,187,48)" fg:x="145" fg:w="5"/><text x="90.3121%" y="351.50">__r..</text></g><g><title>tokio::runtime::task::core::Core&lt;T,S&gt;::poll (1 samples, 0.62%)</title><rect x="93.1677%" y="453" width="0.6211%" height="15" fill="rgb(241,59,14)" fg:x="150" fg:w="1"/><text x="93.4177%" y="463.50"></text></g><g><title>tokio::loom::std::unsafe_cell::UnsafeCell&lt;T&gt;::with_mut (1 samples, 0.62%)</title><rect x="93.1677%" y="437" width="0.6211%" height="15" fill="rgb(226,75,26)" fg:x="150" fg:w="1"/><text x="93.4177%" y="447.50"></text></g><g><title>&lt;tokio::runtime::blocking::task::BlockingTask&lt;T&gt; as core::future::future::Future&gt;::poll (1 samples, 0.62%)</title><rect x="93.1677%" y="421" width="0.6211%" height="15" fill="rgb(223,29,29)" fg:x="150" fg:w="1"/><text x="93.4177%" y="431.50"></text></g><g><title>std::sys::unix::fs::remove_dir_impl::remove_dir_all (1 samples, 0.62%)</title><rect x="93.1677%" y="405" width="0.6211%" height="15" fill="rgb(205,97,21)" fg:x="150" fg:w="1"/><text x="93.4177%" y="415.50"></text></g><g><title>std::sys::unix::fs::remove_dir_impl::remove_dir_all_modern (1 samples, 0.62%)</title><rect x="93.1677%" y="389" width="0.6211%" height="15" fill="rgb(243,92,37)" fg:x="150" fg:w="1"/><text x="93.4177%" y="399.50"></text></g><g><title>std::sys::common::small_c_string::run_path_with_cstr (1 samples, 0.62%)</title><rect x="93.1677%" y="373" width="0.6211%" height="15" fill="rgb(241,151,17)" fg:x="150" fg:w="1"/><text x="93.4177%" y="383.50"></text></g><g><title>std::sys::common::small_c_string::run_with_cstr (1 samples, 0.62%)</title><rect x="93.1677%" y="357" width="0.6211%" height="15" fill="rgb(218,125,5)" fg:x="150" fg:w="1"/><text x="93.4177%" y="367.50"></text></g><g><title>std::sys::unix::fs::remove_dir_impl::remove_dir_all_modern::{{closure}} (1 samples, 0.62%)</title><rect x="93.1677%" y="341" width="0.6211%" height="15" fill="rgb(228,212,22)" fg:x="150" fg:w="1"/><text x="93.4177%" y="351.50"></text></g><g><title>std::sys::unix::fs::remove_dir_impl::remove_dir_all_recursive (1 samples, 0.62%)</title><rect x="93.1677%" y="325" width="0.6211%" height="15" fill="rgb(246,224,32)" fg:x="150" fg:w="1"/><text x="93.4177%" y="335.50"></text></g><g><title>unlinkat (1 samples, 0.62%)</title><rect x="93.1677%" y="309" width="0.6211%" height="15" fill="rgb(219,106,10)" fg:x="150" fg:w="1"/><text x="93.4177%" y="319.50"></text></g><g><title>syscall (9 samples, 5.59%)</title><rect x="93.7888%" y="421" width="5.5901%" height="15" fill="rgb(233,22,37)" fg:x="151" fg:w="9"/><text x="94.0388%" y="431.50">syscall</text></g><g><title>all (161 samples, 100%)</title><rect x="0.0000%" y="597" width="100.0000%" height="15" fill="rgb(237,118,10)" fg:x="0" fg:w="161"/><text x="0.2500%" y="607.50"></text></g><g><title>tokio-runtime-w (55 samples, 34.16%)</title><rect x="65.8385%" y="581" width="34.1615%" height="15" fill="rgb(253,71,38)" fg:x="106" fg:w="55"/><text x="66.0885%" y="591.50">tokio-runtime-w</text></g><g><title>std::sys::unix::thread::Thread::new::thread_start (55 samples, 34.16%)</title><rect x="65.8385%" y="565" width="34.1615%" height="15" fill="rgb(228,88,12)" fg:x="106" fg:w="55"/><text x="66.0885%" y="575.50">std::sys::unix::thread::Thread::new::thread_start</text></g><g><title>&lt;alloc::boxed::Box&lt;F,A&gt; as core::ops::function::FnOnce&lt;Args&gt;&gt;::call_once (55 samples, 34.16%)</title><rect x="65.8385%" y="549" width="34.1615%" height="15" fill="rgb(210,209,47)" fg:x="106" fg:w="55"/><text x="66.0885%" y="559.50">&lt;alloc::boxed::Box&lt;F,A&gt; as core::ops::function::FnOnce&lt;..</text></g><g><title>&lt;alloc::boxed::Box&lt;F,A&gt; as core::ops::function::FnOnce&lt;Args&gt;&gt;::call_once (55 samples, 34.16%)</title><rect x="65.8385%" y="533" width="34.1615%" height="15" fill="rgb(250,48,41)" fg:x="106" fg:w="55"/><text x="66.0885%" y="543.50">&lt;alloc::boxed::Box&lt;F,A&gt; as core::ops::function::FnOnce&lt;..</text></g><g><title>core::ops::function::FnOnce::call_once{{vtable.shim}} (55 samples, 34.16%)</title><rect x="65.8385%" y="517" width="34.1615%" height="15" fill="rgb(253,147,12)" fg:x="106" fg:w="55"/><text x="66.0885%" y="527.50">core::ops::function::FnOnce::call_once{{vtable.shim}}</text></g><g><title>std::sys_common::backtrace::__rust_begin_short_backtrace (55 samples, 34.16%)</title><rect x="65.8385%" y="501" width="34.1615%" height="15" fill="rgb(245,48,38)" fg:x="106" fg:w="55"/><text x="66.0885%" y="511.50">std::sys_common::backtrace::__rust_begin_short_backtrace</text></g><g><title>tokio::runtime::blocking::pool::Inner::run (55 samples, 34.16%)</title><rect x="65.8385%" y="485" width="34.1615%" height="15" fill="rgb(228,88,6)" fg:x="106" fg:w="55"/><text x="66.0885%" y="495.50">tokio::runtime::blocking::pool::Inner::run</text></g><g><title>tokio::runtime::task::harness::Harness&lt;T,S&gt;::poll (22 samples, 13.66%)</title><rect x="86.3354%" y="469" width="13.6646%" height="15" fill="rgb(246,5,54)" fg:x="139" fg:w="22"/><text x="86.5854%" y="479.50">tokio::runtime::task:..</text></g><g><title>tokio::runtime::task::harness::Harness&lt;T,S&gt;::complete (10 samples, 6.21%)</title><rect x="93.7888%" y="453" width="6.2112%" height="15" fill="rgb(219,143,47)" fg:x="151" fg:w="10"/><text x="94.0388%" y="463.50">tokio::r..</text></g><g><title>tokio::runtime::park::wake_by_ref (10 samples, 6.21%)</title><rect x="93.7888%" y="437" width="6.2112%" height="15" fill="rgb(214,35,12)" fg:x="151" fg:w="10"/><text x="94.0388%" y="447.50">tokio::r..</text></g><g><title>tokio::runtime::park::Inner::unpark (1 samples, 0.62%)</title><rect x="99.3789%" y="421" width="0.6211%" height="15" fill="rgb(218,98,44)" fg:x="160" fg:w="1"/><text x="99.6289%" y="431.50"></text></g></svg></svg>

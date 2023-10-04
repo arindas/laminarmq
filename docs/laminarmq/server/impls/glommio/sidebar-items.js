@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["hyper_compat"]};

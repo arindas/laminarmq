@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["segmented_log"],"struct":["Record"],"trait":["CommitLog"]};

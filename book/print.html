@@ -1,0 +1,681 @@
+<!DOCTYPE HTML>
+<html lang="en" class="sidebar-visible no-js light">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>laminarmq</title>
+        <meta name="robots" content="noindex" />
+
+
+        <!-- Custom HTML head -->
+        
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff" />
+
+        <meta prefix="og: http://ogp.me/ns#" property="og:title" content="laminarmq" />
+        <meta prefix="og: http://ogp.me/ns#" property="og:description" content="A distributed message queue powered by a segmented log." />
+        <meta prefix="og: http://ogp.me/ns#" property="og:type" content="book" />
+        <meta prefix="og: http://ogp.me/ns#" property="og:url" content="https://arindas.github.io/laminarmq/book/" />
+        <meta prefix="og: http://ogp.me/ns#" property="og:image" content="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/logo.png" />
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" href="highlight.css">
+        <link rel="stylesheet" href="tomorrow-night.css">
+        <link rel="stylesheet" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+    </head>
+    <body>
+        <!-- Provide site root to javascript -->
+        <script>
+            var path_to_root = "";
+            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
+        </script>
+
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                var theme = localStorage.getItem('mdbook-theme');
+                var sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            var theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            var html = document.querySelector('html');
+            html.classList.remove('no-js')
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add('js');
+        </script>
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            var html = document.querySelector('html');
+            var sidebar = 'hidden';
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            }
+            html.classList.remove('sidebar-visible');
+            html.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <div class="sidebar-scrollbox">
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="intro.html">Introduction</a></li><li class="chapter-item expanded affix "><li class="part-title">Design</li><li class="chapter-item expanded "><a href="cluster.html"><strong aria-hidden="true">1.</strong> Cluster Hierarchy</a></li><li class="chapter-item expanded "><a href="service_discovery.html"><strong aria-hidden="true">2.</strong> Service Discovery</a></li><li class="chapter-item expanded "><a href="supported_exec_model.html"><strong aria-hidden="true">3.</strong> Supported Execution Models</a></li><li class="chapter-item expanded "><a href="request_routing.html"><strong aria-hidden="true">4.</strong> Request routing</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="request_routing_general.html"><strong aria-hidden="true">4.1.</strong> General Design</a></li><li class="chapter-item expanded "><a href="request_routing_tpc.html"><strong aria-hidden="true">4.2.</strong> TPC compatible design</a></li></ol></li><li class="chapter-item expanded "><a href="partition_management.html"><strong aria-hidden="true">5.</strong> Partition management</a></li><li class="chapter-item expanded "><a href="persistence_mechanism.html"><strong aria-hidden="true">6.</strong> Persistence mechanism</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="segmented_log.html"><strong aria-hidden="true">6.1.</strong> segmented_log</a></li><li class="chapter-item expanded "><a href="indexed_segmented_log.html"><strong aria-hidden="true">6.2.</strong> indexed_segmented_log</a></li></ol></li><li class="chapter-item expanded "><a href="execution_model.html"><strong aria-hidden="true">7.</strong> Execution Model</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="general_async.html"><strong aria-hidden="true">7.1.</strong> General async runtime</a></li><li class="chapter-item expanded "><a href="thread_per_core.html"><strong aria-hidden="true">7.2.</strong> Thread Per Core</a></li></ol></li><li class="chapter-item expanded "><a href="testing.html">Testing</a></li></ol>
+            </div>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky bordered">
+                    <div class="left-buttons">
+                        <button id="sidebar-toggle" class="icon-button" type="button" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </button>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">laminarmq</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+                        <a href="https://github.com/arindas/laminarmq" title="Git repository" aria-label="Git repository">
+                            <i id="git-repository-button" class="fa fa-github"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="introduction"><a class="header" href="#introduction">Introduction</a></h1>
+<p align="center">
+  <img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/logo.png" alt="laminarmq">
+</p>
+<p align="center">
+  <a href="https://github.com/arindas/laminarmq/actions/workflows/book.yml">
+  <img src="https://github.com/arindas/laminarmq/actions/workflows/book.yml/badge.svg" alt=""/>
+  </a>
+</p>
+<p align="center">
+A scalable, distributed message queue powered by a segmented,<br/>
+partitioned, replicated and immutable log.
+</p>
+<p><code>laminarmq</code> presents an elementary commit-log abstraction (a series of records ordered by offsets),
+on top of which several message queue semantics such as publish subscribe or even full blown
+protocols like MQTT could be implemented. Users are free to read the messages with offsets in any
+order they need.</p>
+<p>Refer to <a href="https://docs.rs/laminarmq">API Documentation</a> for library documentation.</p>
+<h2 id="license"><a class="header" href="#license">License</a></h2>
+<p><code>laminarmq</code> is licensed under the MIT License. See
+<a href="https://raw.githubusercontent.com/arindas/laminarmq/main/LICENSE">License</a> for more details.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="cluster-hierarchy"><a class="header" href="#cluster-hierarchy">Cluster Hierarchy</a></h1>
+<p><img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-cluster-hierarchy.svg" alt="cluster-hierarchy" /></p>
+<pre><code>partition_id_x is of the form (topic_id, partition_idx)
+
+In this example, consider:
+
+partition_id_0 = (topic_id_0, partition_idx_0)
+partition_id_1 = (topic_id_0, partition_idx_1)
+
+partition_id_2 = (topic_id_1, partition_idx_0)
+
+</code></pre>
+<blockquote>
+<p>The exact numerical ids don't have any pattern with respect to partition_id and topic_id; there can
+be multiple topics, each of which can have multiple partitions (identified by partition_idx).</p>
+</blockquote>
+<p>… alternatively:</p>
+<pre><code class="language-text">[cluster]
+├── node#001
+│   ├── (topic#001, partition#001) [L]
+│   │   └── segmented_log{[segment#001, segment#002, ...]}
+│   ├── (topic#001, partition#002) [L]
+│   │   └── segmented_log{[segment#001, segment#002, ...]}
+│   └── (topic#002, partition#001) [F]
+│       └── segmented_log{[segment#001, segment#002, ...]}
+├── node#002
+│   ├── (topic#001, partition#002) [F]
+│   │   └── segmented_log{[segment#001, segment#002, ...]}
+│   └── (topic#002, partition#001) [L]
+│       └── segmented_log{[segment#001, segment#002, ...]}
+└── ...other nodes
+
+</code></pre>
+<pre><code>[L] := leader; [F] := follower
+</code></pre>
+<p align="center">
+<b>Fig:</b> <code>laminarmq</code> cluster hierarchy depicting partitioning and replication.
+</p>
+<p>A &quot;topic&quot; is a collection of records. A topic is divided into multiple &quot;partition&quot;(s). Each
+&quot;partition&quot; is then further replicated across multiple &quot;node&quot;(s). A &quot;node&quot; may contain some or all
+&quot;partition&quot;(s) of a &quot;topic&quot;. In this way a topic is both partitioned and replicated across the
+nodes in the cluster.</p>
+<p>There is no ordering of messages at the &quot;topic&quot; level. However, a &quot;partition&quot; is an ordered
+collection of records, ordered by record indices.</p>
+<p>Although we conceptually maintain a hierarchy of partitions and topics, at the cluster level, we
+have chosen to maintain a flat representation of topic partitions. We present an elementary
+commit-log API at the partition level.</p>
+<p>Users may hence do the following:</p>
+<ul>
+<li>Directly interact with our message queue at the partition level</li>
+<li>Use client side load balancing between topic partitions</li>
+</ul>
+<p>This alleviates the burden of load balancing messages among partitions and message stream ownership
+record keeping from the cluster. Higher level constructs can be built on top of the partition
+commit-log based API as necessary.</p>
+<p>Each partition replica group has a leader where writes go, and a set of followers which follow the
+leader and may be read from. Users may again use client side load balancing to balance reads across
+the leader and all the followers.</p>
+<p>Each partition replica is backed by a segmented log for storage.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="service-discovery-and-partition-distribution"><a class="header" href="#service-discovery-and-partition-distribution">Service discovery and partition distribution</a></h1>
+<p><img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-service-discovery-and-partition-distribution.svg" alt="service-discovery-and-partition-distribution-to-nodes" /></p>
+<p align="center">
+<b>Fig:</b> Rendezvous hashing based partition distribution and gossip style service discovery
+mechanism used by <code>laminarmq</code>
+</p>
+<p>In our cluster, nodes discover each other using gossip style peer to peer mechanisms. One such
+mechanism is <a href="https://www.cs.cornell.edu/projects/Quicksilver/public_pdfs/SWIM.pdf">SWIM</a> (Scalable
+Weakly Consistent Infection-style Process Group Memberhsip).</p>
+<p>In this mechanism, each member node notifies other members in the group whether a node is joining or
+leaving the cluster by using a gossip style information dissemination mechanism (A node gossips to
+neighbouring nodes, they in-turn gossip to their neighbours and so on).</p>
+<p>In order to see whether a node has failed, the nodes randomly probes individual nodes in the
+cluster. For instance, node A probes node B directly. If node B responds, it has not failed. If node
+B does not respond, A attempts to probe node B indirectly through other nodes in the cluster, e.g.
+node A might ask node C to probe node B. Node A continues to indirectly probe node B with all the
+other nodes in the cluster. If node B responds to any of the indirect probes, it is still considered
+to not have failed. It is otherwise declared failed and removed from the cluster.</p>
+<p>There are mechanisms in place to reduce false failures caused due to temporary hiccups. The paper
+goes into detail about those mechanisms.</p>
+<p>This is also the core technology used in <a href="https://www.serf.io/">Hashicorp Serf</a>, where there are
+further enhancements to improve failure detection and convergence speed.</p>
+<p>Using this mechanism we can obtain a list of all the members in our cluster, along with their unique
+ids and capacity weights. We then use their ids and weights to determine where to place a partition
+using Rendezvous hashing.</p>
+<p>From the Wikipedia <a href="https://en.wikipedia.org/wiki/Rendezvous_hashing">article</a>:</p>
+<blockquote>
+<p>Rendezvous or highest random weight (HRW) hashing is an algorithm that allows clients to achieve
+distributed agreement on a set of <em>k</em> options out of a possible set of <em>n</em> options. A typical
+application is when clients need to agree on which sites (or proxies) objects are assigned to.</p>
+</blockquote>
+<p>In our case, we use rendezvous hashing to determine the subset of nodes to use for placing the
+replicas of a partition.</p>
+<p>For some hashing function <code>H</code>, some weight function <code>f(w, hash)</code> and partition id <code>P_x</code>, we proceed
+as follows:</p>
+<ul>
+<li>For every node <code>N_i</code> in the cluster with a weight <code>w_i</code>, we compute <code>R_i = f(w_i, H(concat(P_x, N_i)))</code></li>
+<li>We rank all nodes <code>N_i</code> belonging to the set of nodes <code>N</code> with respect to their rank value <code>R_i</code>.</li>
+<li>For some replication factor <code>k</code>, we select the top <code>k</code> nodes to place the <code>k</code> replicas of the
+partition with id <code>P_x</code></li>
+</ul>
+<p>(We assume <code>k &lt;= |N|</code>; where <code>|N|</code> is the number of nodes and <code>k</code> is the number of replicas)</p>
+<p>With this mechanism, anyone with the ids and weights of all the members in the cluster can compute
+the destination nodes for the replicas of a partition. This knowledge can also be used to route
+partition request to the appropriate nodes at both the client side and the server side.</p>
+<p>In our case, we use client side load balancing to load balance all idempotent partition requests
+across all the possible nodes where a replica of the request's partition can be present. For
+non-idempotent request, if we send it to any one of the candidate nodes, they redirect it to the
+current leader of the replica set.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="supported-execution-models"><a class="header" href="#supported-execution-models">Supported execution models</a></h1>
+<p><code>laminarmq</code> supports two execution models:</p>
+<ul>
+<li>General async execution model used by various async runtimes in the Rust ecosystem (e.g. <code>tokio</code>,
+<code>async-std</code> etc.)</li>
+<li>Thread per core execution model (hereafter referred to as TPC sometimes)</li>
+</ul>
+<p>In the thread-per-core execution model individual processor cores are limited to single threads.
+This model encourages design that minimizes inter-thread contention and locks, thereby improving
+tail latencies in software services. Read: <a href="https://helda.helsinki.fi//bitstream/handle/10138/313642/tpc_ancs19.pdf?sequence=1">The Impact of Thread per Core Architecture on
+Application Tail Latency.</a></p>
+<p>In the thread per core execution model, we have to leverage application level partitioning such that
+each individual thread is responsible for a subset of requests and/or responsibilities. We also have
+to complement this model with proper routing of requests to the threads to ensure locality of
+requests. In our case this translates to having each thread be responsible for only a subset of the
+partition replicas in a node. Requests pertaining to a partition replica are always routed to the
+same thread. The following sections will go into more detail as to how this is achieved.</p>
+<p>We realize that although the thread per core execution model has some inherent advantages, being
+compatible with the existing Rust ecosystem will significantly increase adoption. Therefore, we have
+designed our system with reusable components which can be organized to suit both execution models.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="request-routing-in-nodes"><a class="header" href="#request-routing-in-nodes">Request routing in nodes</a></h1>
+<p>This section goes into detail about the route taken by a particular request through the various
+components of a node.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="general-design"><a class="header" href="#general-design">General design</a></h1>
+<p><img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-node-request-routing-general.svg" alt="request-rouing-general" /></p>
+<p align="center">
+<b>Fig:</b> Request routing mechanism in <code>laminarmq</code> nodes using the general execution
+model.
+</p>
+<p>In our cluster, we have two kinds of requests:</p>
+<ul>
+<li><strong>membership requests</strong>: used by the gossip style service discovery system for maintaining cluster
+membership.</li>
+<li><strong>partition requests</strong>: used to interact with <code>laminarmq</code> topic partitions.</li>
+</ul>
+<p>We use an <a href="https://ebpf.io/what-is-ebpf/">eBPF</a> XDP filter to classify request packets at the socket
+layer into membership request packets and partition request packets. Next we use eBPF to route
+membership packets to a different socket which is exclusively used by the membership management
+subsystem in that node. The partition request packets are left to flow as is.</p>
+<p>Next we have an &quot;HTTP server&quot;, which parses the incoming partition request packets from the original
+socket into valid <code>partition::*</code> requests. For every <code>partition::*</code> request, the HTTP server spawns
+a future to handle it. This request handler future does the following:</p>
+<ul>
+<li>Create a new channel <code>(tx, rx)</code> for the request.</li>
+<li>Send the parsed partition request along with send end of the channel <code>(partition::*, tx)</code> to the
+&quot;Request Router&quot; over the request router's receiving channel.</li>
+<li>Await on the recv. end of the channel created by this future for the response. <code>res = rx.await</code></li>
+<li>When we receive the response from this future's channel, we serialize it and respond back to the
+socket we had received the packets from.</li>
+</ul>
+<p>Next we have a &quot;Request Router / Partition manager&quot; responsible for routing various requests to the
+partition serving futures. The request router unit receives both <code>membership::*</code> requests from the
+membership subsystem and <code>partition::*</code> requests received from the &quot;HTTP server&quot; request handler
+futures (also called request poller futures from here on since they poll for the response from the
+channel recv. <code>rx</code> end). The request router unit routes requests as follows:</p>
+<ul>
+<li><code>membership::*</code> requests are broadcast to all the partition serving futures</li>
+<li><code>(partition::*_request(partition_id_x, …), tx)</code> tuples are routed to their destination partitions
+using the <code>partition_id</code>.</li>
+<li><code>(partition::create(partition_id_x, …), tx)</code> tuples are handled by the request router/ partition
+manager itself. For this, the request router / partition manager creates a new partition serving
+future, allocates the required storage units or it and sends and appropriate response on <code>tx</code>.</li>
+</ul>
+<p>Finally, the individual partition server futures receive both <code>membership::*</code> and <code>(partition::*, tx)</code> requests as they come to our node and routed. They handle the requests as necessary and send a
+response back to <code>tx</code> where applicable.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="tpc-execution-model-compatible-design"><a class="header" href="#tpc-execution-model-compatible-design">TPC execution model compatible design</a></h1>
+<p><img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-node-request-routing-thread-per-core.svg" alt="request-routing-thread-per-core" /></p>
+<p align="center">
+<b>Fig:</b> Request routing mechanism in <code>laminarmq</code> nodes using the thred per core
+execution model.
+</p>
+<p>In the thread per core execution model each thread is responsible for a subset of the partitions.
+Hence each thread has it's own &quot;Request Router / Partition Manager&quot;, &quot;HTTP Server&quot; and a set of
+partition serving futures. We run multiple such threads on different processor cores.</p>
+<p>Now, as discussed before we need to route individual requests to the correct destination thread to
+ensure request locality. We use a dedicated &quot;Thread Router&quot; eBPF XDP filter to route partition
+request packets to their destination threads.</p>
+<p>The &quot;Thread Router&quot; eBPF XDP filter keeps a eBPF <code>sockmap</code> which contains the sockets where each of
+the threads listen to for requests. For every incoming request, we route it to its destination
+thread using this <code>sockmap</code>. Now we can again leverage rendezvous hashing here to determine the
+thread to be used for a request. We use the <code>partition_id</code> and <code>thread_id</code> for rendezvous hashing.
+Since all the threads run on different processor cores, they will have similar request handling
+capacity and hence will have equal weights. Using this, requests belonging to a particular partition
+will always be routed to the same thread on a particular node. This ensures a high level of request
+locality.</p>
+<p>The remaining components behave as discussed above. Notice how we are able to reuse the same
+components in a drastically different execution model, as promised before.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="partition-control-flow-and-replication"><a class="header" href="#partition-control-flow-and-replication">Partition control flow and replication</a></h1>
+<p><img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-partition-control-flow-and-replication.svg" alt="partition-control-flow-replication" /></p>
+<p align="center">
+<b>Fig:</b> Partition serving future control flow and partition replication mechanism in
+<code>laminarmq</code>
+</p>
+<p>The partition controller future receives membership event requests <code>membership::{join, leave, update_weight}</code> or <code>(paritition::*, tx)</code> requests from the request router future.</p>
+<p>The partition request handler handles the different requests as follows:</p>
+<ul>
+<li>
+<p>Idempotent <code>partition::*_request</code>: performs the necessary idempotent operation on the underlying
+segmented log and responds with the result on the response channel.</p>
+</li>
+<li>
+<p>Non-idempotent <code>partition::*_request</code>: Leader and follower replicas handle non-idempotent replicas
+differently:</p>
+<ul>
+<li>Leader replicas: Replicates non-idempotent operations on all follower partitions in the Raft
+group if this partition is a leader, and then applies the operation locally. This might involve
+first sending an Raft append request, locally writing once majority of replicas respond back,
+then commit-ing it locally and finally relay the commit to all other replicas. Leader replicas
+respond to requests only from clients. Non-idempotent requests from follower replicas are
+ignored.</li>
+<li>Follower replicas: Follower replicas respond to non-idempotent requests only from leaders.
+Non-idempotent from clients are redirected to the leader. A follower replica handles
+non-idempotent requests by applying the changes locally in accordance with Raft.</li>
+</ul>
+<p>Once the replicas are done handling the request, they send back an appropriate response to the
+response channel, if present. (A redirect response is also encoded properly and sent back to the
+response channel).</p>
+</li>
+<li>
+<p><code>membership::join(i)</code>: add {node #i} to local priority queue. If the required number of replicas
+is more than the current number, pop() one member from the priority queue and add it to the Raft
+group (making it an eligible candidate in the Raft leader election process). If the current
+replica is a leader, we send a <code>partition::create(...)</code> request. If there is no leader among the
+replicas, we initial the leadership election process with each replica as a candidate.</p>
+</li>
+<li>
+<p><code>membership::leave(j)</code>: remove {node #j} from priority queue and Raft group if present. If <code>{node #j}</code> was not present in the Raft group no further action is necessary. If it was present in the
+Raft group, <code>pop()</code> another member from the priority queue, add it to the Raft group and proceed
+similarly as in the case of <code>membership::join(j)</code></p>
+</li>
+<li>
+<p><code>membership::update_weight(k)</code>: updates priority for <code>{node #k}</code> by recomputing rendezvous_hash
+for {node #k} with this partition replicas partition_id. Next, if any node in the priority queue
+has a higher priority than any of the nodes in the Raft group, the node with the least priority
+is replaced by the highest priority element from the queue. We send a
+<code>partition::remove(partition_id, ...)</code> request to <code>{node #k}</code>. Afterwards we proceed similarly
+to <code>membership::{leave, join}</code> requests.</p>
+</li>
+</ul>
+<p>When a node goes down the appropriate <code>membership::leave(i)</code> message (where <code>i</code> is the node that
+went down) is sent to all the nodes in the cluster. The partition replica controllers in each node
+handle the membership request accordingly. In effect:</p>
+<ul>
+<li>For every leader partition in that node:
+<ul>
+<li>if there are no other follower replicas in other nodes in it's Raft group, that partition goes
+down.</li>
+<li>if there are other follower replicas in other nodes, there are leader elections among them and
+after a leader is elected, reads and writes for that partition proceed normally</li>
+</ul>
+</li>
+<li>For every follower partition in that node:
+<ul>
+<li>the remaining replicas in the same raft group continue to function in accordance with Raft's
+mechanisms.</li>
+</ul>
+</li>
+</ul>
+<p>For each of the partition replicas on the node that went down, new host nodes are selected using
+rendezvous hash priority.</p>
+<p>In our system, we use different Raft groups for different data buckets (replica groups).
+<a href="https://www.cockroachlabs.com/">CockroachDB</a> and <a href="https://tikv.org">Tikv</a> call this manner of using
+different Raft groups for different data buckets on the same node as MultiRaft.</p>
+<p>Read more here:</p>
+<ul>
+<li><a href="https://tikv.org/deep-dive/scalability/multi-raft/">https://tikv.org/deep-dive/scalability/multi-raft/</a></li>
+<li><a href="https://www.cockroachlabs.com/blog/scaling-raft/">https://www.cockroachlabs.com/blog/scaling-raft/</a></li>
+</ul>
+<p>Every partition controller is backed by a <code>segmented_log</code> for persisting records.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="persistence-mechanism"><a class="header" href="#persistence-mechanism">Persistence mechanism</a></h1>
+<p>This section goes into detail about the various data structures and mechanisms involved for
+persisting data.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="segmented_log"><a class="header" href="#segmented_log"><code>segmented_log</code></a></h1>
+<p>The segmented-log data structure for storing records was originally described in the <a href="https://www.microsoft.com/en-us/research/wp-content/uploads/2017/09/Kafka.pdf">Apache
+Kafka</a> paper.</p>
+<p><img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-segmented-log.svg" alt="segmented_log" /></p>
+<p align="center">
+<b>Fig:</b> File organisation for persisting the <code>segmented_log</code> data structure on a
+<code>*nix</code> file system.
+</p>
+<p>A segmented log is a collection of read segments and a single write segment. Each &quot;segment&quot; is
+backed by a storage file on disk called &quot;store&quot;.</p>
+<p>The log is:</p>
+<ul>
+<li>&quot;immutable&quot;, since only &quot;append&quot;, &quot;read&quot; and &quot;truncate&quot; operations are allowed. It is not possible
+to update or delete records from the middle of the log.</li>
+<li>&quot;segmented&quot;, since it is composed of segments, where each segment services records from a
+particular range of offsets.</li>
+</ul>
+<p>All writes go to the write segment. A new record is written at <code>offset = write_segment.next_offset</code>
+in the write segment. When we max out the capacity of the write segment, we close the write segment
+and reopen it as a read segment. The re-opened segment is added to the list of read segments. A new
+write segment is then created with <code>base_offset</code> equal to the <code>next_offset</code> of the previous write
+segment.</p>
+<p>When reading from a particular offset, we linearly check which segment contains the given read
+segment. If a segment capable of servicing a read from the given offset is found, we read from that
+segment. If no such segment is found among the read segments, we default to the write segment. The
+following scenarios may occur when reading from the write segment in this case:</p>
+<ul>
+<li>The write segment has synced the messages including the message at the given offset. In this case
+the record is read successfully and returned.</li>
+<li>The write segment hasn't synced the data at the given offset. In this case the read fails with a
+segment I/O error.</li>
+<li>If the offset is out of bounds of even the write segment, we return an &quot;out of bounds&quot; error.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="indexed_segmented_log"><a class="header" href="#indexed_segmented_log"><code>indexed_segmented_log</code></a></h1>
+<p>While the conventional <code>segmented_log</code> data structure is quite performant for a <code>commit_log</code>
+implementation, it still requires the following properties to hold true for the record being
+appended:</p>
+<ul>
+<li>We have the entire record in memory</li>
+<li>We know the record bytes' length and record bytes' checksum before the record is appended</li>
+</ul>
+<p>It's not possible to know this information when the record bytes are read from an asynchronous
+stream of bytes. Without the enhancements, we would have to concatenate intermediate byte buffers to
+a vector. This would not only incur more allocations, but also slow down our system.</p>
+<p>Hence, to accommodate this use case, we introduced an intermediate indexing layer to our design.</p>
+<p><img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-indexed-segmented-log-landscape.svg" alt="segmented_log" /></p>
+<pre><code>//! Index and position invariants across segmented_log
+
+// segmented_log index invariants
+segmented_log.lowest_index  = segmented_log.read_segments[0].lowest_index
+segmented_log.highest_index = segmented_log.write_segment.highest_index
+
+// record position invariants in store
+records[i+1].position = records[i].position + records[i].record_header.length
+
+// segment index invariants in segmented_log
+segments[i + 1].base_index 
+  = segments[i].highest_index 
+  = segments[i].index[index.len - 1].index + 1
+</code></pre>
+<p align="center">
+<b>Fig:</b> Data organisation for persisting the <code>segmented_log</code> data structure on a
+<code>*nix</code> file system.
+</p>
+<p>In the new design, instead of referring to records with a raw offset, we refer to them with indices.
+The index in each segment translates the record indices to raw file position in the segment store
+file.</p>
+<p>Now, the store append operation accepts an asynchronous stream of bytes instead of a contiguously
+laid out slice of bytes. We use this operation to write the record bytes, and at the time of writing
+the record bytes, we calculate the record bytes' length and checksum. Once we are done writing the
+record bytes to the store, we write it's corresponding <code>record_header</code> (containing the checksum and
+length), position and index as an <code>index_record</code> in the segment index.</p>
+<p>This provides two quality of life enhancements:</p>
+<ul>
+<li>Allow asynchronous streaming writes, without having to concatenate intermediate byte buffers</li>
+<li>Records are accessed much more easily with easy to use indices</li>
+</ul>
+<p>Now, to prevent a malicious user from overloading our storage capacity and memory with a maliciously
+crafted request which infinitely loops over some data and sends it to our server, we have provided
+an optional <code>append_threshold</code> parameter to all append operations. When provided, it prevents
+streaming append writes to write more bytes than the provided <code>append_threshold</code>.</p>
+<p>At the segment level, this requires us to keep a segment overflow capacity. All segment append
+operations now use <code>segment_capacity - segment.size + segment_overflow_capacity</code> as the
+<code>append_threshold</code> value. A good <code>segment_overflow_capacity</code> value for segments could be
+<code>segment_capacity / 2</code>.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="execution-model"><a class="header" href="#execution-model">Execution Model</a></h1>
+<p>This section goes into detail about the various execution models supported by <code>laminarmq</code></p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="general-async-runtime"><a class="header" href="#general-async-runtime">General async runtime</a></h1>
+<p><img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-async-execution-model-general.svg" alt="async-execution-model-general" /></p>
+<p align="center">
+<b>Fig:</b> General async runtime based execution model for <code>laminarmq</code>
+</p>
+<p>This execution model is based on the executor, reactor, waker abstractions used by all rust async
+runtimes. We don't have to specifically care about how and where a particular future is executed.</p>
+<p>The data flow in this execution model is as follows:</p>
+<ul>
+<li>A HTTP server future parses HTTP requests from the request socket</li>
+<li>For every HTTP request it creates a new future to handle it</li>
+<li>The HTTP handler future sends the request and a response channel tx to the request router via a channel.
+It also awaits on the response rx end.</li>
+<li>The request router future maintains a map of partition_id to designated request channel tx for each
+partition controller future.</li>
+<li>For every partition request received it forwards the request on the appropriate partition request
+channel tx. If a <code>partition::create(...)</code> request is received it creates a new partition controller
+future.</li>
+<li>The partition controller future send back the response to the provided response channel tx.</li>
+<li>The response poller future received it and responds back with a serialized response to the socket.</li>
+</ul>
+<p>All futures are spawned using the async runtime's designated <code>{…}::spawn(…)</code> method. We don't have
+to specify any details as to how and where the future's corresponding task will be executed.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="thread-per-core"><a class="header" href="#thread-per-core">Thread Per Core</a></h1>
+<p><img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-async-execution-model-thread-per-core.svg" alt="async-execution-model-thread-per-core" /></p>
+<p align="center">
+<b>Fig:</b> Thread per core async runtime based execution model for <code>laminarmq</code>
+</p>
+<p>In the thread per core model since each processor core is limited to a single thread, tasks in a
+thread need to be scheduled efficiently. Hence each worker thread runs their own task scheduler.</p>
+<p>We currently use <a href="https://docs.rs/glommio"><code>glommio</code></a> as our thread-per-core runtime.</p>
+<p>Here, tasks can be scheduled on different task queues and different task queues can be provisioned
+with specific fractions of CPU time shares. Generally tasks with similar latency profiles are
+executed on the same task queue. For instance web server tasks will be executed on a different queue
+than the one that runs tasks for persisting data to the disk.</p>
+<p>We re-use the same constructs that we use in the general async runtime execution model. The only
+difference being, we explicitly care about in which task queue a class of future's tasks are
+executed. In our case, we have the following 4 task queues:</p>
+<ul>
+<li>Request router task queue</li>
+<li>HTTP server request parser task queue</li>
+<li>Partition replica controller task queue</li>
+<li>Response poller task queue</li>
+</ul>
+<p>Each of these task queue can be assigned specific fractions of CPU time shares. <code>glommio</code> also
+provides utilities for automatically deducing these CPU time shares based on their runtime latency
+profiles.</p>
+<p>Apart from this <code>glommio</code> leverages the new linux 5.x <a href="https://kernel.dk/io_uring.pdf"><code>io_uring</code></a>
+API which facilitates true asynchronous IO for both networking and disk interfaces. (Other <code>async</code>
+runtimes such as <a href="https://docs.rs/tokio"><code>tokio</code></a> make blocking system calls for disk IO operations
+in a thread-pool.)</p>
+<p><code>io_uring</code> also has the advantage of being able to queue together multiple system calls together and
+then asynchronously wait for their completion by making a maximum of one context switch. It is also
+possible to avoid context switches altogether. This is achieved with a pair of ring buffers called
+the submission-queue and the completion-queue. Once the queues are set up, user can queue multiple
+system calls on the submission queue. The linux kernel processes the system calls and places the
+results in the completion queue. The user can then freely read the results from the
+completion-queue. This entire process after setting up the queues doesn't require any additional
+context switch.</p>
+<p>Read more: <a href="https://man.archlinux.org/man/io_uring.7.en">https://man.archlinux.org/man/io_uring.7.en</a></p>
+<p><code>glommio</code> presents additional abstractions on top of <code>io_uring</code> in the form of an async runtime,
+with support for networking, disk IO, channels, single threaded locks and more.</p>
+<p>Read more: <a href="https://www.datadoghq.com/blog/engineering/introducing-glommio/">https://www.datadoghq.com/blog/engineering/introducing-glommio/</a></p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="testing"><a class="header" href="#testing">Testing</a></h1>
+<p>You may run tests with <code>cargo</code> as you would for any other crate. However, since <code>laminarmq</code> is
+poised to support multiple runtimes, some of them might require some additional setup before running
+the steps.</p>
+<p>For instance, the <code>glommio</code> async runtime which requires an updated linux kernel (at least 5.8) with
+<code>io_uring</code> support. <code>glommio</code> also requires at least 512 KiB of locked memory for <code>io_uring</code> to
+work. (Note: 512 KiB is the minimum needed to spawn a single executor. Spawning multiple executors
+may require you to raise the limit accordingly. I recommend 8192 KiB on a 8 GiB RAM machine.)</p>
+<p>First, check the current <code>memlock</code> limit:</p>
+<pre><code class="language-sh">ulimit -l
+
+# 512 ## sample output
+</code></pre>
+<p>If the <code>memlock</code> resource limit (rlimit) is lesser than 512 KiB, you can increase it as follows:</p>
+<pre><code class="language-sh">sudo vi /etc/security/limits.conf
+*    hard    memlock        512
+*    soft    memlock        512
+</code></pre>
+<p>To make the new limits effective, you need to log in to the machine again. Verify whether the limits
+have been reflected with <code>ulimit</code> as described above.</p>
+<blockquote>
+<p>(On old WSL versions, you might need to spawn a login shell every time for the limits to be
+reflected:</p>
+<pre><code class="language-sh">su ${USER} -l
+</code></pre>
+<p>The limits persist once inside the login shell. This is not necessary on the latest WSL2 version as
+of 22.12.2022)</p>
+</blockquote>
+<p>Finally, clone the repository and run the tests:</p>
+<pre><code class="language-sh">git clone https://github.com/arindas/laminarmq.git
+cd laminarmq/
+cargo test
+</code></pre>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+        <script>
+        window.addEventListener('load', function() {
+            window.setTimeout(window.print, 100);
+        });
+        </script>
+
+    </body>
+</html>
