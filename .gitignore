@@ -1,2 +1,4 @@
-book
 /target
+book/
+*.bak
+.storage/
