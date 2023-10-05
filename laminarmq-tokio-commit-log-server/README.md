@@ -66,5 +66,5 @@ Here's what's happening above:
   removed. After this operation the bounds are [0, 1)
 - We lookup the current index_bounds after truncating the commit_log
 
->Note: The `-w \n` flag is for appending a "\n" to the output of curl. This way
+>Note: The `-w "\n"` flag is for appending a "\n" to the output of curl. This way
 >the output is more readable.
