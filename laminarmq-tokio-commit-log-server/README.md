@@ -4,7 +4,7 @@ A simple persistent commit log server using the tokio runtime.
 
 ## Endpoints
 
-This server exposes the following endpoints:
+This server exposes the following HTTP endpoints:
 
 ```rust
 .route("/index_bounds", get(index_bounds))  // obtain the index bounds
