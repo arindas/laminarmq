@@ -539,7 +539,7 @@ pub(crate) mod test {
     };
     use futures_lite::StreamExt;
     use num::{CheckedSub, FromPrimitive, ToPrimitive, Unsigned, Zero};
-    use std::{future::Future, hash::Hasher, marker::PhantomData, ops::Deref};
+    use std::{future::Future, hash::Hasher, marker::PhantomData};
 
     fn _test_records_provider<'a, const N: usize>(
         record_source: &'a [&'a [u8; N]],
@@ -557,7 +557,7 @@ pub(crate) mod test {
         H: Hasher + Default,
     {
         record_source
-            .map(|x| RecordHeader::compute::<H>(x.deref()))
+            .map(|x| RecordHeader::compute::<H>(x))
             .scan((0, 0), |(index, position), record_header| {
                 let index_record =
                     IndexRecord::with_position_and_record_header::<u32>(*position, record_header)

@@ -1011,7 +1011,7 @@ pub(crate) mod test {
             let record_count = segmented_log_stream
                 .zip(futures_lite::stream::iter(expected_records))
                 .map(|(record, expected_record_value)| {
-                    assert_eq!(record.value.deref(), expected_record_value.deref());
+                    assert_eq!(record.value.deref(), expected_record_value);
                     Some(())
                 })
                 .count()
@@ -1030,8 +1030,8 @@ pub(crate) mod test {
                 .zip(segmented_log_stream_bounded)
                 .zip(futures_lite::stream::iter(expected_records))
                 .map(|((record_x, record_y), expected_record_value)| {
-                    assert_eq!(record_x.value.deref(), expected_record_value.deref());
-                    assert_eq!(record_y.value.deref(), expected_record_value.deref());
+                    assert_eq!(record_x.value.deref(), expected_record_value);
+                    assert_eq!(record_y.value.deref(), expected_record_value);
                     Some(())
                 })
                 .count()
