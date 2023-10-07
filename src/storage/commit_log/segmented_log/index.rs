@@ -70,7 +70,7 @@ impl<SR: SizedRecord, const REPR_SIZE: usize> PersistentSizedRecord<SR, REPR_SIZ
     where
         S: Storage,
     {
-        let index_record_bytes = source
+        let record_bytes = source
             .read(
                 position,
                 &<S::Size as FromPrimitive>::from_usize(REPR_SIZE)
@@ -79,7 +79,7 @@ impl<SR: SizedRecord, const REPR_SIZE: usize> PersistentSizedRecord<SR, REPR_SIZ
             .await
             .map_err(IndexError::StorageError)?;
 
-        let mut cursor = Cursor::new(index_record_bytes.deref());
+        let mut cursor = Cursor::new(record_bytes.deref());
 
         SR::read(&mut cursor).map(Self).map_err(IndexError::IoError)
     }
@@ -556,9 +556,9 @@ pub(crate) mod test {
     where
         H: Hasher + Default,
     {
-        record_source
-            .map(|x| RecordHeader::compute::<H>(x))
-            .scan((0, 0), |(index, position), record_header| {
+        record_source.map(|x| RecordHeader::compute::<H>(x)).scan(
+            (0, 0),
+            |(index, position), record_header| {
                 let index_record =
                     IndexRecord::with_position_and_record_header::<u32>(*position, record_header)
                         .unwrap();
@@ -567,7 +567,8 @@ pub(crate) mod test {
                 *position += record_header.length as u32;
 
                 Some(index_record)
-            })
+            },
+        )
     }
 
     async fn _test_index_contains_records<S, Idx, I>(
