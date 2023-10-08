@@ -228,13 +228,13 @@ where
     pub fn estimated_index_records_len_in_storage(
         storage: &S,
     ) -> Result<usize, IndexError<S::Error>> {
-        let index_record_storage_size = storage
+        let index_storage_size = storage
             .size()
             .to_usize()
             .ok_or(IndexError::IncompatibleSizeType)?;
-        let estimated_index_records_len = index_record_storage_size
-            .saturating_sub(INDEX_BASE_MARKER_LENGTH)
-            / INDEX_RECORD_LENGTH;
+
+        let estimated_index_records_len =
+            index_storage_size.saturating_sub(INDEX_BASE_MARKER_LENGTH) / INDEX_RECORD_LENGTH;
 
         Ok(estimated_index_records_len)
     }
