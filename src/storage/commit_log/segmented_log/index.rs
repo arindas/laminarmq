@@ -390,12 +390,9 @@ impl<S: Storage, Idx> Sizable for Index<S, Idx> {
 
 impl<S: Storage, Idx> Index<S, Idx> {
     #[inline]
-    fn underlying_storage_position(
-        normalized_index: usize,
-    ) -> Result<S::Position, IndexError<S::Error>> {
-        let storage_position =
-            (INDEX_BASE_MARKER_LENGTH + INDEX_RECORD_LENGTH * normalized_index) as u64;
-        u64_as_position!(storage_position, S::Position)
+    fn index_record_position(normalized_index: usize) -> Result<S::Position, IndexError<S::Error>> {
+        let position = (INDEX_BASE_MARKER_LENGTH + INDEX_RECORD_LENGTH * normalized_index) as u64;
+        u64_as_position!(position, S::Position)
     }
 }
 
@@ -442,10 +439,9 @@ where
                 .ok_or(IndexError::IndexGapEncountered)
                 .map(|&x| x)
         } else {
-            let position = Self::underlying_storage_position(normalized_index)?;
             PersistentSizedRecord::<IndexRecord, INDEX_RECORD_LENGTH>::read_at(
                 &self.storage,
-                &position,
+                &Self::index_record_position(normalized_index)?,
             )
             .await
             .map(|x| x.into_inner())
@@ -496,7 +492,7 @@ where
         let normalized_index = self.internal_normalized_index(idx)?;
 
         self.storage
-            .truncate(&Self::underlying_storage_position(normalized_index)?)
+            .truncate(&Self::index_record_position(normalized_index)?)
             .await
             .map_err(IndexError::StorageError)?;
 
