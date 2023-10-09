@@ -258,9 +258,9 @@ where
     ) -> Result<Vec<IndexRecord>, IndexError<S::Error>> {
         let mut position = INDEX_BASE_MARKER_LENGTH as u64;
 
-        let mut index_records = Vec::<IndexRecord>::with_capacity(
-            Self::estimated_index_records_len_in_storage(storage)?,
-        );
+        let estimated_index_records_len = Self::estimated_index_records_len_in_storage(storage)?;
+
+        let mut index_records = Vec::<IndexRecord>::with_capacity(estimated_index_records_len);
 
         while let Ok(index_record) =
             PersistentSizedRecord::<IndexRecord, INDEX_RECORD_LENGTH>::read_at(
@@ -274,8 +274,6 @@ where
         }
 
         index_records.shrink_to_fit();
-
-        let estimated_index_records_len = Self::estimated_index_records_len_in_storage(storage)?;
 
         if index_records.len() != estimated_index_records_len {
             Err(IndexError::InconsistentIndexSize)
