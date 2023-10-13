@@ -13,7 +13,6 @@ const THREAD_NAME: &str = "laminarmq_server_thread_0";
 
 struct State;
 
-#[cfg(not(tarpaulin_include))]
 #[instrument(skip(_shared_state))]
 async fn request_handler(
     _shared_state: Rc<State>,
@@ -37,7 +36,6 @@ async fn request_handler(
     }
 }
 
-#[cfg(not(tarpaulin_include))]
 #[cfg(target_os = "linux")]
 fn main() {
     let fmt_subscriber = FmtSubscriber::builder()
