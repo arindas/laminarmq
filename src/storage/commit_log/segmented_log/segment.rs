@@ -84,6 +84,7 @@ pub enum SegmentError<StorageError, SerDeError> {
     RecordMetadataNotFound,
     InvalidAppendIdx,
     InvalidIndexRecordGenerated,
+    UsizeU32Inconvertible,
     SegmentMaxed,
 }
 
@@ -149,17 +150,21 @@ where
             .map_err(SegmentError::StoreError)?;
 
         let metadata_bytes_len_bytes_len =
-            SERP::serialized_size(&0_usize).map_err(SegmentError::SerializationError)?;
+            SERP::serialized_size(&0_u32).map_err(SegmentError::SerializationError)?;
 
         let (metadata_bytes_len_bytes, metadata_with_value) = record_content
             .split_at(metadata_bytes_len_bytes_len)
             .ok_or(SegmentError::RecordMetadataNotFound)?;
 
-        let metadata_size = SERP::deserialize(&metadata_bytes_len_bytes)
+        let metadata_bytes_len: u32 = SERP::deserialize(&metadata_bytes_len_bytes)
             .map_err(SegmentError::SerializationError)?;
 
+        let metadata_bytes_len: usize = metadata_bytes_len
+            .try_into()
+            .map_err(|_| SegmentError::UsizeU32Inconvertible)?;
+
         let (metadata_bytes, value) = metadata_with_value
-            .split_at(metadata_size)
+            .split_at(metadata_bytes_len)
             .ok_or(SegmentError::RecordMetadataNotFound)?;
 
         let metadata =
@@ -229,8 +234,13 @@ where
         let metadata_bytes =
             SERP::serialize(&metadata).map_err(SegmentError::SerializationError)?;
 
+        let metadata_bytes_len: u32 = metadata_bytes
+            .len()
+            .try_into()
+            .map_err(|_| SegmentError::UsizeU32Inconvertible)?;
+
         let metadata_bytes_len_bytes =
-            SERP::serialize(&metadata_bytes.len()).map_err(SegmentError::SerializationError)?;
+            SERP::serialize(&metadata_bytes_len).map_err(SegmentError::SerializationError)?;
 
         enum SBuf<XBuf, YBuf> {
             XBuf(XBuf),
@@ -295,8 +305,13 @@ where
         let metadata_bytes =
             SERP::serialize(&metadata).map_err(SegmentError::SerializationError)?;
 
+        let metadata_bytes_len: u32 = metadata_bytes
+            .len()
+            .try_into()
+            .map_err(|_| SegmentError::UsizeU32Inconvertible)?;
+
         let metadata_bytes_len_bytes =
-            SERP::serialize(&metadata_bytes.len()).map_err(SegmentError::SerializationError)?;
+            SERP::serialize(&metadata_bytes_len).map_err(SegmentError::SerializationError)?;
 
         let stream = futures_lite::stream::iter([
             Ok::<&[u8], Infallible>(metadata_bytes_len_bytes.deref()),
@@ -505,7 +520,7 @@ pub(crate) mod test {
         Size: FromPrimitive,
         SERP: SerializationProvider,
     {
-        let metadata_len_serialized_size = SERP::serialized_size(&0_usize).ok()?;
+        let metadata_len_serialized_size = SERP::serialized_size(&0_u32).ok()?;
 
         let metadata_serialized_size = SERP::serialized_size(&MetaWithIdx {
             metadata: M::default(),
