@@ -428,7 +428,7 @@ where
     Idx: Unsigned + FromPrimitive + Copy + Eq,
     SERP: SerializationProvider,
 {
-    pub async fn with_segment_storage_provider_config_and_base_index<SSP>(
+    pub async fn with_segment_storage_provider_config_base_index_and_cache_index_records<SSP>(
         segment_storage_provider: &mut SSP,
         config: Config<S::Size>,
         base_index: Idx,
@@ -562,7 +562,7 @@ pub(crate) mod test {
         let config =
             _segment_config::<M, Idx, S::Size, SERP>(_RECORDS[0].len(), _RECORDS.len()).unwrap();
 
-        let mut segment = Segment::<S, M, H, Idx, S::Size, SERP>::with_segment_storage_provider_config_and_base_index(
+        let mut segment = Segment::<S, M, H, Idx, S::Size, SERP>::with_segment_storage_provider_config_base_index_and_cache_index_records(
             &mut _segment_storage_provider,
             config,
             segment_base_index,
@@ -593,7 +593,7 @@ pub(crate) mod test {
 
         segment.close().await.unwrap();
 
-        let mut segment = Segment::<S, M, H, Idx, S::Size, SERP>::with_segment_storage_provider_config_and_base_index(
+        let mut segment = Segment::<S, M, H, Idx, S::Size, SERP>::with_segment_storage_provider_config_base_index_and_cache_index_records(
             &mut _segment_storage_provider,
             config,
             segment_base_index,
@@ -669,7 +669,7 @@ pub(crate) mod test {
 
         segment.remove().await.unwrap();
 
-        let segment = Segment::<S, M, H, Idx, S::Size, SERP>::with_segment_storage_provider_config_and_base_index(
+        let segment = Segment::<S, M, H, Idx, S::Size, SERP>::with_segment_storage_provider_config_base_index_and_cache_index_records(
             &mut _segment_storage_provider,
             config,
             segment_base_index,
