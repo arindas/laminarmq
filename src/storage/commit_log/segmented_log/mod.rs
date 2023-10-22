@@ -163,15 +163,13 @@ where
             read_segment_base_indices.len(),
         );
 
-        let index_cache_read_segments = config.num_index_cached_read_segments.is_none();
-
         for segment_base_index in read_segment_base_indices {
             read_segments.push(
                 Segment::with_segment_storage_provider_config_base_index_and_cache_index_records_flag(
                     &mut segment_storage_provider,
                     config.segment_config,
                     segment_base_index,
-                    index_cache_read_segments,
+                    config.num_index_cached_read_segments.is_none(),
                 )
                 .await
                 .map_err(SegmentedLogError::SegmentError)?,
