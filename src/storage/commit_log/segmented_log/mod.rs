@@ -167,7 +167,7 @@ where
 
         for segment_base_index in read_segment_base_indices {
             read_segments.push(
-                Segment::with_segment_storage_provider_config_base_index_and_cache_index_records(
+                Segment::with_segment_storage_provider_config_base_index_and_cache_index_records_flag(
                     &mut segment_storage_provider,
                     config.segment_config,
                     segment_base_index,
@@ -179,7 +179,7 @@ where
         }
 
         let write_segment =
-            Segment::with_segment_storage_provider_config_base_index_and_cache_index_records(
+            Segment::with_segment_storage_provider_config_base_index_and_cache_index_records_flag(
                 &mut segment_storage_provider,
                 config.segment_config,
                 write_segment_base_index,
@@ -214,7 +214,7 @@ where
 
 macro_rules! new_write_segment {
     ($segmented_log:ident, $base_index:ident) => {
-        Segment::with_segment_storage_provider_config_base_index_and_cache_index_records(
+        Segment::with_segment_storage_provider_config_base_index_and_cache_index_records_flag(
             &mut $segmented_log.segment_storage_provider,
             $segmented_log.config.segment_config,
             $base_index,

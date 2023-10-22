@@ -428,11 +428,11 @@ where
     Idx: Unsigned + FromPrimitive + Copy + Eq,
     SERP: SerializationProvider,
 {
-    pub async fn with_segment_storage_provider_config_base_index_and_cache_index_records<SSP>(
+    pub async fn with_segment_storage_provider_config_base_index_and_cache_index_records_flag<SSP>(
         segment_storage_provider: &mut SSP,
         config: Config<S::Size>,
         base_index: Idx,
-        cache_index_records: bool,
+        cache_index_records_flag: bool,
     ) -> Result<Self, SegmentError<S::Error, SERP::Error>>
     where
         SSP: SegmentStorageProvider<S, Idx>,
@@ -442,7 +442,7 @@ where
             .await
             .map_err(SegmentError::StorageError)?;
 
-        let index = if cache_index_records {
+        let index = if cache_index_records_flag {
             Index::with_storage_and_base_index(segment_storage.index, base_index).await
         } else {
             Index::with_storage_index_records_option_and_validated_base_index(
@@ -562,7 +562,7 @@ pub(crate) mod test {
         let config =
             _segment_config::<M, Idx, S::Size, SERP>(_RECORDS[0].len(), _RECORDS.len()).unwrap();
 
-        let mut segment = Segment::<S, M, H, Idx, S::Size, SERP>::with_segment_storage_provider_config_base_index_and_cache_index_records(
+        let mut segment = Segment::<S, M, H, Idx, S::Size, SERP>::with_segment_storage_provider_config_base_index_and_cache_index_records_flag(
             &mut _segment_storage_provider,
             config,
             segment_base_index,
@@ -593,7 +593,7 @@ pub(crate) mod test {
 
         segment.close().await.unwrap();
 
-        let mut segment = Segment::<S, M, H, Idx, S::Size, SERP>::with_segment_storage_provider_config_base_index_and_cache_index_records(
+        let mut segment = Segment::<S, M, H, Idx, S::Size, SERP>::with_segment_storage_provider_config_base_index_and_cache_index_records_flag(
             &mut _segment_storage_provider,
             config,
             segment_base_index,
@@ -669,7 +669,7 @@ pub(crate) mod test {
 
         segment.remove().await.unwrap();
 
-        let segment = Segment::<S, M, H, Idx, S::Size, SERP>::with_segment_storage_provider_config_base_index_and_cache_index_records(
+        let segment = Segment::<S, M, H, Idx, S::Size, SERP>::with_segment_storage_provider_config_base_index_and_cache_index_records_flag(
             &mut _segment_storage_provider,
             config,
             segment_base_index,
