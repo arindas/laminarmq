@@ -70,7 +70,7 @@ impl<SR: SizedRecord, const REPR_SIZE: usize> PersistentSizedRecord<SR, REPR_SIZ
     where
         S: Storage,
     {
-        let index_record_bytes = source
+        let record_bytes = source
             .read(
                 position,
                 &<S::Size as FromPrimitive>::from_usize(REPR_SIZE)
@@ -79,7 +79,7 @@ impl<SR: SizedRecord, const REPR_SIZE: usize> PersistentSizedRecord<SR, REPR_SIZ
             .await
             .map_err(IndexError::StorageError)?;
 
-        let mut cursor = Cursor::new(index_record_bytes.deref());
+        let mut cursor = Cursor::new(record_bytes.deref());
 
         SR::read(&mut cursor).map(Self).map_err(IndexError::IoError)
     }
@@ -228,13 +228,13 @@ where
     pub fn estimated_index_records_len_in_storage(
         storage: &S,
     ) -> Result<usize, IndexError<S::Error>> {
-        let index_record_storage_size = storage
+        let index_storage_size = storage
             .size()
             .to_usize()
             .ok_or(IndexError::IncompatibleSizeType)?;
-        let estimated_index_records_len = index_record_storage_size
-            .saturating_sub(INDEX_BASE_MARKER_LENGTH)
-            / INDEX_RECORD_LENGTH;
+
+        let estimated_index_records_len =
+            index_storage_size.saturating_sub(INDEX_BASE_MARKER_LENGTH) / INDEX_RECORD_LENGTH;
 
         Ok(estimated_index_records_len)
     }
@@ -258,9 +258,9 @@ where
     ) -> Result<Vec<IndexRecord>, IndexError<S::Error>> {
         let mut position = INDEX_BASE_MARKER_LENGTH as u64;
 
-        let mut index_records = Vec::<IndexRecord>::with_capacity(
-            Self::estimated_index_records_len_in_storage(storage)?,
-        );
+        let estimated_index_records_len = Self::estimated_index_records_len_in_storage(storage)?;
+
+        let mut index_records = Vec::<IndexRecord>::with_capacity(estimated_index_records_len);
 
         while let Ok(index_record) =
             PersistentSizedRecord::<IndexRecord, INDEX_RECORD_LENGTH>::read_at(
@@ -274,8 +274,6 @@ where
         }
 
         index_records.shrink_to_fit();
-
-        let estimated_index_records_len = Self::estimated_index_records_len_in_storage(storage)?;
 
         if index_records.len() != estimated_index_records_len {
             Err(IndexError::InconsistentIndexSize)
@@ -390,12 +388,9 @@ impl<S: Storage, Idx> Sizable for Index<S, Idx> {
 
 impl<S: Storage, Idx> Index<S, Idx> {
     #[inline]
-    fn underlying_storage_position(
-        normalized_index: usize,
-    ) -> Result<S::Position, IndexError<S::Error>> {
-        let storage_position =
-            (INDEX_BASE_MARKER_LENGTH + INDEX_RECORD_LENGTH * normalized_index) as u64;
-        u64_as_position!(storage_position, S::Position)
+    fn index_record_position(normalized_index: usize) -> Result<S::Position, IndexError<S::Error>> {
+        let position = (INDEX_BASE_MARKER_LENGTH + INDEX_RECORD_LENGTH * normalized_index) as u64;
+        u64_as_position!(position, S::Position)
     }
 }
 
@@ -442,10 +437,9 @@ where
                 .ok_or(IndexError::IndexGapEncountered)
                 .map(|&x| x)
         } else {
-            let position = Self::underlying_storage_position(normalized_index)?;
             PersistentSizedRecord::<IndexRecord, INDEX_RECORD_LENGTH>::read_at(
                 &self.storage,
-                &position,
+                &Self::index_record_position(normalized_index)?,
             )
             .await
             .map(|x| x.into_inner())
@@ -496,7 +490,7 @@ where
         let normalized_index = self.internal_normalized_index(idx)?;
 
         self.storage
-            .truncate(&Self::underlying_storage_position(normalized_index)?)
+            .truncate(&Self::index_record_position(normalized_index)?)
             .await
             .map_err(IndexError::StorageError)?;
 
@@ -539,7 +533,7 @@ pub(crate) mod test {
     };
     use futures_lite::StreamExt;
     use num::{CheckedSub, FromPrimitive, ToPrimitive, Unsigned, Zero};
-    use std::{future::Future, hash::Hasher, marker::PhantomData, ops::Deref};
+    use std::{future::Future, hash::Hasher, marker::PhantomData};
 
     fn _test_records_provider<'a, const N: usize>(
         record_source: &'a [&'a [u8; N]],
@@ -556,9 +550,9 @@ pub(crate) mod test {
     where
         H: Hasher + Default,
     {
-        record_source
-            .map(|x| RecordHeader::compute::<H>(x.deref()))
-            .scan((0, 0), |(index, position), record_header| {
+        record_source.map(|x| RecordHeader::compute::<H>(x)).scan(
+            (0, 0),
+            |(index, position), record_header| {
                 let index_record =
                     IndexRecord::with_position_and_record_header::<u32>(*position, record_header)
                         .unwrap();
@@ -567,7 +561,8 @@ pub(crate) mod test {
                 *position += record_header.length as u32;
 
                 Some(index_record)
-            })
+            },
+        )
     }
 
     async fn _test_index_contains_records<S, Idx, I>(

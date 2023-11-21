@@ -84,6 +84,7 @@ pub enum SegmentError<StorageError, SerDeError> {
     RecordMetadataNotFound,
     InvalidAppendIdx,
     InvalidIndexRecordGenerated,
+    UsizeU32Inconvertible,
     SegmentMaxed,
 }
 
@@ -149,17 +150,21 @@ where
             .map_err(SegmentError::StoreError)?;
 
         let metadata_bytes_len_bytes_len =
-            SERP::serialized_size(&0_usize).map_err(SegmentError::SerializationError)?;
+            SERP::serialized_size(&0_u32).map_err(SegmentError::SerializationError)?;
 
         let (metadata_bytes_len_bytes, metadata_with_value) = record_content
             .split_at(metadata_bytes_len_bytes_len)
             .ok_or(SegmentError::RecordMetadataNotFound)?;
 
-        let metadata_size = SERP::deserialize(&metadata_bytes_len_bytes)
+        let metadata_bytes_len: u32 = SERP::deserialize(&metadata_bytes_len_bytes)
             .map_err(SegmentError::SerializationError)?;
 
+        let metadata_bytes_len: usize = metadata_bytes_len
+            .try_into()
+            .map_err(|_| SegmentError::UsizeU32Inconvertible)?;
+
         let (metadata_bytes, value) = metadata_with_value
-            .split_at(metadata_size)
+            .split_at(metadata_bytes_len)
             .ok_or(SegmentError::RecordMetadataNotFound)?;
 
         let metadata =
@@ -229,8 +234,13 @@ where
         let metadata_bytes =
             SERP::serialize(&metadata).map_err(SegmentError::SerializationError)?;
 
+        let metadata_bytes_len: u32 = metadata_bytes
+            .len()
+            .try_into()
+            .map_err(|_| SegmentError::UsizeU32Inconvertible)?;
+
         let metadata_bytes_len_bytes =
-            SERP::serialize(&metadata_bytes.len()).map_err(SegmentError::SerializationError)?;
+            SERP::serialize(&metadata_bytes_len).map_err(SegmentError::SerializationError)?;
 
         enum SBuf<XBuf, YBuf> {
             XBuf(XBuf),
@@ -295,8 +305,13 @@ where
         let metadata_bytes =
             SERP::serialize(&metadata).map_err(SegmentError::SerializationError)?;
 
+        let metadata_bytes_len: u32 = metadata_bytes
+            .len()
+            .try_into()
+            .map_err(|_| SegmentError::UsizeU32Inconvertible)?;
+
         let metadata_bytes_len_bytes =
-            SERP::serialize(&metadata_bytes.len()).map_err(SegmentError::SerializationError)?;
+            SERP::serialize(&metadata_bytes_len).map_err(SegmentError::SerializationError)?;
 
         let stream = futures_lite::stream::iter([
             Ok::<&[u8], Infallible>(metadata_bytes_len_bytes.deref()),
@@ -413,11 +428,11 @@ where
     Idx: Unsigned + FromPrimitive + Copy + Eq,
     SERP: SerializationProvider,
 {
-    pub async fn with_segment_storage_provider_config_and_base_index<SSP>(
+    pub async fn with_segment_storage_provider_config_base_index_and_cache_index_records_flag<SSP>(
         segment_storage_provider: &mut SSP,
         config: Config<S::Size>,
         base_index: Idx,
-        cache_index_records: bool,
+        cache_index_records_flag: bool,
     ) -> Result<Self, SegmentError<S::Error, SERP::Error>>
     where
         SSP: SegmentStorageProvider<S, Idx>,
@@ -427,7 +442,7 @@ where
             .await
             .map_err(SegmentError::StorageError)?;
 
-        let index = if cache_index_records {
+        let index = if cache_index_records_flag {
             Index::with_storage_and_base_index(segment_storage.index, base_index).await
         } else {
             Index::with_storage_index_records_option_and_validated_base_index(
@@ -505,7 +520,7 @@ pub(crate) mod test {
         Size: FromPrimitive,
         SERP: SerializationProvider,
     {
-        let metadata_len_serialized_size = SERP::serialized_size(&0_usize).ok()?;
+        let metadata_len_serialized_size = SERP::serialized_size(&0_u32).ok()?;
 
         let metadata_serialized_size = SERP::serialized_size(&MetaWithIdx {
             metadata: M::default(),
@@ -547,7 +562,7 @@ pub(crate) mod test {
         let config =
             _segment_config::<M, Idx, S::Size, SERP>(_RECORDS[0].len(), _RECORDS.len()).unwrap();
 
-        let mut segment = Segment::<S, M, H, Idx, S::Size, SERP>::with_segment_storage_provider_config_and_base_index(
+        let mut segment = Segment::<S, M, H, Idx, S::Size, SERP>::with_segment_storage_provider_config_base_index_and_cache_index_records_flag(
             &mut _segment_storage_provider,
             config,
             segment_base_index,
@@ -578,7 +593,7 @@ pub(crate) mod test {
 
         segment.close().await.unwrap();
 
-        let mut segment = Segment::<S, M, H, Idx, S::Size, SERP>::with_segment_storage_provider_config_and_base_index(
+        let mut segment = Segment::<S, M, H, Idx, S::Size, SERP>::with_segment_storage_provider_config_base_index_and_cache_index_records_flag(
             &mut _segment_storage_provider,
             config,
             segment_base_index,
@@ -654,7 +669,7 @@ pub(crate) mod test {
 
         segment.remove().await.unwrap();
 
-        let segment = Segment::<S, M, H, Idx, S::Size, SERP>::with_segment_storage_provider_config_and_base_index(
+        let segment = Segment::<S, M, H, Idx, S::Size, SERP>::with_segment_storage_provider_config_base_index_and_cache_index_records_flag(
             &mut _segment_storage_provider,
             config,
             segment_base_index,

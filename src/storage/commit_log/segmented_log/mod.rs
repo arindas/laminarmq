@@ -163,29 +163,28 @@ where
             read_segment_base_indices.len(),
         );
 
-        let index_cache_read_segments = config.num_index_cached_read_segments.is_none();
-
         for segment_base_index in read_segment_base_indices {
             read_segments.push(
-                Segment::with_segment_storage_provider_config_and_base_index(
+                Segment::with_segment_storage_provider_config_base_index_and_cache_index_records_flag(
                     &mut segment_storage_provider,
                     config.segment_config,
                     segment_base_index,
-                    index_cache_read_segments,
+                    config.num_index_cached_read_segments.is_none(),
                 )
                 .await
                 .map_err(SegmentedLogError::SegmentError)?,
             );
         }
 
-        let write_segment = Segment::with_segment_storage_provider_config_and_base_index(
-            &mut segment_storage_provider,
-            config.segment_config,
-            write_segment_base_index,
-            true, // write segment is always cached
-        )
-        .await
-        .map_err(SegmentedLogError::SegmentError)?;
+        let write_segment =
+            Segment::with_segment_storage_provider_config_base_index_and_cache_index_records_flag(
+                &mut segment_storage_provider,
+                config.segment_config,
+                write_segment_base_index,
+                true, // write segment is always cached
+            )
+            .await
+            .map_err(SegmentedLogError::SegmentError)?;
 
         let cache = match config.num_index_cached_read_segments {
             Some(cache_capacity) => {
@@ -213,7 +212,7 @@ where
 
 macro_rules! new_write_segment {
     ($segmented_log:ident, $base_index:ident) => {
-        Segment::with_segment_storage_provider_config_and_base_index(
+        Segment::with_segment_storage_provider_config_base_index_and_cache_index_records_flag(
             &mut $segmented_log.segment_storage_provider,
             $segmented_log.config.segment_config,
             $base_index,
@@ -1011,7 +1010,7 @@ pub(crate) mod test {
             let record_count = segmented_log_stream
                 .zip(futures_lite::stream::iter(expected_records))
                 .map(|(record, expected_record_value)| {
-                    assert_eq!(record.value.deref(), expected_record_value.deref());
+                    assert_eq!(record.value.deref(), expected_record_value);
                     Some(())
                 })
                 .count()
@@ -1030,8 +1029,8 @@ pub(crate) mod test {
                 .zip(segmented_log_stream_bounded)
                 .zip(futures_lite::stream::iter(expected_records))
                 .map(|((record_x, record_y), expected_record_value)| {
-                    assert_eq!(record_x.value.deref(), expected_record_value.deref());
-                    assert_eq!(record_y.value.deref(), expected_record_value.deref());
+                    assert_eq!(record_x.value.deref(), expected_record_value);
+                    assert_eq!(record_y.value.deref(), expected_record_value);
                     Some(())
                 })
                 .count()

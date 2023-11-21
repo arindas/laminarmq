@@ -8,7 +8,6 @@ pub trait SplitAt<T>: Deref<Target = [T]> + Sized {
     fn split_at(self, at: usize) -> Option<(Self, Self)>;
 }
 
-#[cfg(not(tarpaulin_include))]
 impl<T> SplitAt<T> for Vec<T> {
     fn split_at(mut self, at: usize) -> Option<(Self, Self)> {
         if at > self.len() {
