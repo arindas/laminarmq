@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/storage/commit_log/segmented_log/index.rs`."><title>index.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/SourceSerif4-Bold-a2c9cd1067f8b328.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../../../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-9bb858ba049f1f21.css" id="mainThemeStyle"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="laminarmq" data-themes="" data-resource-suffix="" data-rustdoc-version="1.72.1 (d5c2e9c34 2023-09-13)" data-channel="1.72.1" data-search-js="search-f6292fe389d70017.js" data-settings-js="settings-de11bff964e9d4e5.js" data-settings-css="settings-8c76f75bfb6bd192.css" data-theme-light-css="light-0f8c037637f9eb3e.css" data-theme-dark-css="dark-1097f8e92a01e3cf.css" data-theme-ayu-css="ayu-614652228113ac93.css" ><script src="../../../../../static.files/storage-59fd9b8ccb335783.js"></script><script defer src="../../../../../static.files/source-script-106908c7a7964ba4.js"></script><script defer src="../../../../../source-files.js"></script><script defer src="../../../../../static.files/main-0795b7d26be81095.js"></script><noscript><link rel="stylesheet" media="(prefers-color-scheme:light)" href="../../../../../static.files/light-0f8c037637f9eb3e.css"><link rel="stylesheet" media="(prefers-color-scheme:dark)" href="../../../../../static.files/dark-1097f8e92a01e3cf.css"><link rel="stylesheet" href="../../../../../static.files/noscript-13285aec31fa243e.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-16x16-8b506e7a72182f1c.png"><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-422f7d1d52889060.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-2c020d218678b618.svg"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"></nav><main><nav class="sub"><a class="sub-logo-container" href="../../../../../laminarmq/index.html"><img class="rust-logo" src="../../../../../static.files/rust-logo-151179464ae7ed46.svg" alt="logo"></a><form class="search-form"><span></span><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><a href="../../../../../help.html">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../../static.files/wheel-7b819b6101059cd0.svg"></a></div></form></nav><section id="main-content" class="content"><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers"><a href="#1" id="1">1</a>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/storage/commit_log/segmented_log/index.rs`."><title>index.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/SourceSerif4-Bold-a2c9cd1067f8b328.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../../../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-fa3bb1812debf86c.css"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="laminarmq" data-themes="" data-resource-suffix="" data-rustdoc-version="1.74.0 (79e9716c9 2023-11-13)" data-channel="1.74.0" data-search-js="search-8be46b629f5f14a8.js" data-settings-js="settings-74424d7eec62a23e.js" ><script src="../../../../../static.files/storage-fec3eaa3851e447d.js"></script><script defer src="../../../../../static.files/src-script-3280b574d94e47b4.js"></script><script defer src="../../../../../src-files.js"></script><script defer src="../../../../../static.files/main-c5bd66d33317d69f.js"></script><noscript><link rel="stylesheet" href="../../../../../static.files/noscript-5d8b3c7633ad77ba.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-16x16-8b506e7a72182f1c.png"><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-422f7d1d52889060.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-2c020d218678b618.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"></nav><main><nav class="sub"><a class="sub-logo-container" href="../../../../../laminarmq/index.html"><img class="rust-logo" src="../../../../../static.files/rust-logo-151179464ae7ed46.svg" alt="logo"></a><form class="search-form"><span></span><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><a href="../../../../../help.html">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../../static.files/wheel-7b819b6101059cd0.svg"></a></div></form></nav><section id="main-content" class="content"><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers"><a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
 <a href="#4" id="4">4</a>
@@ -689,11 +689,6 @@
 <a href="#689" id="689">689</a>
 <a href="#690" id="690">690</a>
 <a href="#691" id="691">691</a>
-<a href="#692" id="692">692</a>
-<a href="#693" id="693">693</a>
-<a href="#694" id="694">694</a>
-<a href="#695" id="695">695</a>
-<a href="#696" id="696">696</a>
 </pre></div><pre class="rust"><code><span class="kw">use super</span>::{
     <span class="kw">super</span>::<span class="kw">super</span>::{AsyncConsume, AsyncIndexedRead, AsyncTruncate, Sizable, Storage},
     store::common::RecordHeader,
@@ -766,7 +761,7 @@
     <span class="kw">where
         </span>S: Storage,
     {
-        <span class="kw">let </span>index_record_bytes = source
+        <span class="kw">let </span>record_bytes = source
             .read(
                 position,
                 <span class="kw-2">&amp;</span>&lt;S::Size <span class="kw">as </span>FromPrimitive&gt;::from_usize(REPR_SIZE)
@@ -775,7 +770,7 @@
             .<span class="kw">await
             </span>.map_err(IndexError::StorageError)<span class="question-mark">?</span>;
 
-        <span class="kw">let </span><span class="kw-2">mut </span>cursor = Cursor::new(index_record_bytes.deref());
+        <span class="kw">let </span><span class="kw-2">mut </span>cursor = Cursor::new(record_bytes.deref());
 
         SR::read(<span class="kw-2">&amp;mut </span>cursor).map(<span class="self">Self</span>).map_err(IndexError::IoError)
     }
@@ -924,13 +919,13 @@
     <span class="kw">pub fn </span>estimated_index_records_len_in_storage(
         storage: <span class="kw-2">&amp;</span>S,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;usize, IndexError&lt;S::Error&gt;&gt; {
-        <span class="kw">let </span>index_record_storage_size = storage
+        <span class="kw">let </span>index_storage_size = storage
             .size()
             .to_usize()
             .ok_or(IndexError::IncompatibleSizeType)<span class="question-mark">?</span>;
-        <span class="kw">let </span>estimated_index_records_len = index_record_storage_size
-            .saturating_sub(INDEX_BASE_MARKER_LENGTH)
-            / INDEX_RECORD_LENGTH;
+
+        <span class="kw">let </span>estimated_index_records_len =
+            index_storage_size.saturating_sub(INDEX_BASE_MARKER_LENGTH) / INDEX_RECORD_LENGTH;
 
         <span class="prelude-val">Ok</span>(estimated_index_records_len)
     }
@@ -954,9 +949,9 @@
     ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;IndexRecord&gt;, IndexError&lt;S::Error&gt;&gt; {
         <span class="kw">let </span><span class="kw-2">mut </span>position = INDEX_BASE_MARKER_LENGTH <span class="kw">as </span>u64;
 
-        <span class="kw">let </span><span class="kw-2">mut </span>index_records = Vec::&lt;IndexRecord&gt;::with_capacity(
-            <span class="self">Self</span>::estimated_index_records_len_in_storage(storage)<span class="question-mark">?</span>,
-        );
+        <span class="kw">let </span>estimated_index_records_len = <span class="self">Self</span>::estimated_index_records_len_in_storage(storage)<span class="question-mark">?</span>;
+
+        <span class="kw">let </span><span class="kw-2">mut </span>index_records = Vec::&lt;IndexRecord&gt;::with_capacity(estimated_index_records_len);
 
         <span class="kw">while let </span><span class="prelude-val">Ok</span>(index_record) =
             PersistentSizedRecord::&lt;IndexRecord, INDEX_RECORD_LENGTH&gt;::read_at(
@@ -970,8 +965,6 @@
         }
 
         index_records.shrink_to_fit();
-
-        <span class="kw">let </span>estimated_index_records_len = <span class="self">Self</span>::estimated_index_records_len_in_storage(storage)<span class="question-mark">?</span>;
 
         <span class="kw">if </span>index_records.len() != estimated_index_records_len {
             <span class="prelude-val">Err</span>(IndexError::InconsistentIndexSize)
@@ -1086,12 +1079,9 @@
 
 <span class="kw">impl</span>&lt;S: Storage, Idx&gt; Index&lt;S, Idx&gt; {
     <span class="attr">#[inline]
-    </span><span class="kw">fn </span>underlying_storage_position(
-        normalized_index: usize,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;S::Position, IndexError&lt;S::Error&gt;&gt; {
-        <span class="kw">let </span>storage_position =
-            (INDEX_BASE_MARKER_LENGTH + INDEX_RECORD_LENGTH * normalized_index) <span class="kw">as </span>u64;
-        <span class="macro">u64_as_position!</span>(storage_position, S::Position)
+    </span><span class="kw">fn </span>index_record_position(normalized_index: usize) -&gt; <span class="prelude-ty">Result</span>&lt;S::Position, IndexError&lt;S::Error&gt;&gt; {
+        <span class="kw">let </span>position = (INDEX_BASE_MARKER_LENGTH + INDEX_RECORD_LENGTH * normalized_index) <span class="kw">as </span>u64;
+        <span class="macro">u64_as_position!</span>(position, S::Position)
     }
 }
 
@@ -1138,10 +1128,9 @@
                 .ok_or(IndexError::IndexGapEncountered)
                 .map(|<span class="kw-2">&amp;</span>x| x)
         } <span class="kw">else </span>{
-            <span class="kw">let </span>position = <span class="self">Self</span>::underlying_storage_position(normalized_index)<span class="question-mark">?</span>;
             PersistentSizedRecord::&lt;IndexRecord, INDEX_RECORD_LENGTH&gt;::read_at(
                 <span class="kw-2">&amp;</span><span class="self">self</span>.storage,
-                <span class="kw-2">&amp;</span>position,
+                <span class="kw-2">&amp;</span><span class="self">Self</span>::index_record_position(normalized_index)<span class="question-mark">?</span>,
             )
             .<span class="kw">await
             </span>.map(|x| x.into_inner())
@@ -1192,7 +1181,7 @@
         <span class="kw">let </span>normalized_index = <span class="self">self</span>.internal_normalized_index(idx)<span class="question-mark">?</span>;
 
         <span class="self">self</span>.storage
-            .truncate(<span class="kw-2">&amp;</span><span class="self">Self</span>::underlying_storage_position(normalized_index)<span class="question-mark">?</span>)
+            .truncate(<span class="kw-2">&amp;</span><span class="self">Self</span>::index_record_position(normalized_index)<span class="question-mark">?</span>)
             .<span class="kw">await
             </span>.map_err(IndexError::StorageError)<span class="question-mark">?</span>;
 
@@ -1235,7 +1224,7 @@
     };
     <span class="kw">use </span>futures_lite::StreamExt;
     <span class="kw">use </span>num::{CheckedSub, FromPrimitive, ToPrimitive, Unsigned, Zero};
-    <span class="kw">use </span>std::{future::Future, hash::Hasher, marker::PhantomData, ops::Deref};
+    <span class="kw">use </span>std::{future::Future, hash::Hasher, marker::PhantomData};
 
     <span class="kw">fn </span>_test_records_provider&lt;<span class="lifetime">&#39;a</span>, <span class="kw">const </span>N: usize&gt;(
         record_source: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[u8; N]],
@@ -1252,9 +1241,9 @@
     </span><span class="kw">where
         </span>H: Hasher + Default,
     {
-        record_source
-            .map(|x| RecordHeader::compute::&lt;H&gt;(x.deref()))
-            .scan((<span class="number">0</span>, <span class="number">0</span>), |(index, position), record_header| {
+        record_source.map(|x| RecordHeader::compute::&lt;H&gt;(x)).scan(
+            (<span class="number">0</span>, <span class="number">0</span>),
+            |(index, position), record_header| {
                 <span class="kw">let </span>index_record =
                     IndexRecord::with_position_and_record_header::&lt;u32&gt;(<span class="kw-2">*</span>position, record_header)
                         .unwrap();
@@ -1263,7 +1252,8 @@
                 <span class="kw-2">*</span>position += record_header.length <span class="kw">as </span>u32;
 
                 <span class="prelude-val">Some</span>(index_record)
-            })
+            },
+        )
     }
 
     <span class="kw">async fn </span>_test_index_contains_records&lt;S, Idx, I&gt;(
