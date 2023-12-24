@@ -9,7 +9,7 @@ use std::{
     ops::Deref,
 };
 
-/// Extension used by backing files for [`Index`](Index) instances.
+/// Extension used by backing files for [`Index`] instances.
 pub const INDEX_FILE_EXTENSION: &str = "index";
 
 /// Number of bytes required for storing the base marker.

@@ -18,7 +18,7 @@ pub mod stream {
 }
 
 pub mod ref_ops {
-    //! Module providing utilities for [`Deref`](Deref) and [`AsRef`] interop.
+    //! Module providing utilities for [`Deref`] and [`AsRef`] interop.
 
     use std::ops::Deref;
 
