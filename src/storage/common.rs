@@ -1,3 +1,5 @@
+//! Module providing common utilities to aid commit-log implementations.
+
 use super::AsyncIndexedRead;
 use futures_core::Stream;
 use num::{CheckedSub, Unsigned};

@@ -1,10 +1,14 @@
+//! Module providing abstractions for modelling an ordered, persistent sequence of records.
+
 use super::{AsyncConsume, AsyncIndexedRead, AsyncTruncate, Sizable};
 
+/// The unit of storage in our [`CommitLog`].
 pub struct Record<M, T> {
     pub metadata: M,
     pub value: T,
 }
 
+/// An absrtact, append-only, ordered sequence of [`Record`] instances.
 #[async_trait::async_trait(?Send)]
 pub trait CommitLog<M, T>:
     AsyncIndexedRead<Value = Record<M, T>, ReadError = Self::Error>
@@ -12,14 +16,24 @@ pub trait CommitLog<M, T>:
     + AsyncConsume<ConsumeError = Self::Error>
     + Sizable
 {
+    /// Error type associated with [`CommitLog`].
     type Error: std::error::Error;
 
+    /// Appends the given [`Record`] at the end of this [`CommitLog`].
+    ///
+    /// The [`Record`] may contain a stream of byte slices. Implementations are to exhaustively
+    /// read the stream and append the corresponding byte slices as a single record.
+    ///
+    /// Returns the index at which the [`Record`] was appended.
     async fn append<X, XBuf, XE>(&mut self, record: Record<M, X>) -> Result<Self::Idx, Self::Error>
     where
         X: futures_lite::Stream<Item = Result<XBuf, XE>>,
         X: Unpin + 'async_trait,
         XBuf: std::ops::Deref<Target = [u8]>;
 
+    /// Removes all expired records from this [`CommitLog`].
+    ///
+    /// Returns the number of expired records.
     async fn remove_expired(
         &mut self,
         _expiry_duration: std::time::Duration,

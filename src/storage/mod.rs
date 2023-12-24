@@ -59,6 +59,7 @@ pub trait AsyncIndexedRead {
     }
 }
 
+/// [`AsyncIndexedRead`] with additional APIs for providing exclusive read access to elements.
 #[async_trait(?Send)]
 pub trait AsyncIndexedExclusiveRead: AsyncIndexedRead {
     /// Exclusively reads the value at the given index from this abstraction.
