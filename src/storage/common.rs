@@ -1,10 +1,16 @@
 //! Module providing common utilities to aid commit-log implementations.
+//!
+//! The methods present in this module are used for testing the consistency of our different
+//! storage-related trait and data-structure implementations.
 
 use super::AsyncIndexedRead;
 use futures_core::Stream;
 use num::{CheckedSub, Unsigned};
 use std::{cmp, ops::RangeBounds};
 
+/// Constrains the given [`RangeBounds`] to the given low and high values.
+///
+/// Returns the end points of the constrained range.
 pub fn index_bounds_for_range<RB, Idx>(index_bounds: RB, lo_min: Idx, hi_max: Idx) -> (Idx, Idx)
 where
     RB: RangeBounds<Idx>,

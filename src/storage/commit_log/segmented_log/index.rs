@@ -1,3 +1,8 @@
+//! Provides components necessary for mapping record indices to store-file positions in segments.
+//!
+//! This module is used by the `segment`implementation to store mapping from record
+//! indices to positions on the `segment-store` file.
+
 use super::{
     super::super::{AsyncConsume, AsyncIndexedRead, AsyncTruncate, Sizable, Storage},
     store::common::RecordHeader,

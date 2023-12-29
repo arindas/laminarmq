@@ -1,4 +1,7 @@
 //! Module providing abstractions for modelling an ordered, persistent sequence of records.
+//!
+//! This module forms the basis for storage in our message queue. It provides the different storage
+//! components for representing, storing, indexing and retreiving our records (messages).
 
 use super::{AsyncConsume, AsyncIndexedRead, AsyncTruncate, Sizable};
 
@@ -8,7 +11,10 @@ pub struct Record<M, T> {
     pub value: T,
 }
 
-/// An absrtact, append-only, ordered sequence of [`Record`] instances.
+/// An abstract, append-only, ordered sequence of [`Record`] instances.
+///
+/// This trait acts as a generalized storage mechanism for storing our records. All our
+/// message-queue server APIs can be expressed using this trait.
 #[async_trait::async_trait(?Send)]
 pub trait CommitLog<M, T>:
     AsyncIndexedRead<Value = Record<M, T>, ReadError = Self::Error>

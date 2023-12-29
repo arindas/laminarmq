@@ -1,3 +1,8 @@
+//! Present the backing storge components for a `segment` in a `segmented-log`.
+//!
+//! This module is responsible for ultimately persisting the records in our `segmented-log` to some
+//! form of [`Storage`].
+
 use self::common::RecordHeader;
 use super::super::super::{AsyncConsume, AsyncTruncate, Sizable, Storage};
 use async_trait::async_trait;

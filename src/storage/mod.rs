@@ -1,4 +1,8 @@
 //! Module providing abstractions to store records.
+//!
+//! This module provides traits to abstract over different storage behaviours. These traits allow
+//! us to implement our storage data-structures in a portable fashion - completely ddcoupled from
+//! the underlying device, async runtime or other file APIs.
 
 use super::common::stream::StreamUnexpectedLength;
 use async_trait::async_trait;

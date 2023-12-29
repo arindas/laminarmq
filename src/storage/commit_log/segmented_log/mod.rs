@@ -1,3 +1,99 @@
+//! A [`CommitLog`] implemented as a collection of segment files.
+//!
+//! The segmented-log data structure for storing was originally described in the [Apache
+//! Kafka](https://www.microsoft.com/en-us/research/wp-content/uploads/2017/09/Kafka.pdf) paper.
+//!
+//! <p align="center">
+//! <img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-indexed-segmented-log-landscape.svg" alt="segmented_log" />
+//! </p>
+//!
+//! A segmented log is a collection of read segments and a single write segment. Each "segment" is
+//! backed by a storage file on disk called "store".
+//!
+//! The log is:
+//! - "immutable", since only "append", "read" and "truncate" operations are allowed. It is not possible
+//!   to update or delete records from the middle of the log.
+//! - "segmented", since it is composed of segments, where each segment services records from a
+//!   particular range of offsets.
+//!
+//! All writes go to the write segment. A new record is written at the `highest_index`
+//! in the write segment. When we max out the capacity of the write segment, we close the write segment
+//! and reopen it as a read segment. The re-opened segment is added to the list of read segments. A new
+//! write segment is then created with `base_index` equal to the `highest_index` of the previous write
+//! segment.
+//!
+//! When reading from a particular index, we linearly check which segment contains the given read
+//! segment. If a segment capable of servicing a read from the given index is found, we read from that
+//! segment. If no such segment is found among the read segments, we default to the write segment. The
+//! following scenarios may occur when reading from the write segment in this case:
+//! - The write segment has synced the messages including the message at the given offset. In this case
+//!   the record is read successfully and returned.
+//! - The write segment hasn't synced the data at the given offset. In this case the read fails with a
+//!   segment I/O error.
+//! - If the offset is out of bounds of even the write segment, we return an "out of bounds" error.
+//!
+//! #### `laminarmq` specific enhancements to the `segmented_log` data structure
+//! Originally, the `segmented_log` addressed individual records with "offsets" which were continous
+//! accross all the segments. While the conventional `segmented_log` data structure is quite performant
+//! for a `commit_log` implementation, it still requires the following properties to hold true for the
+//! record being appended:
+//! - We have the entire record in memory
+//! - We know the record bytes' length and record bytes' checksum before the record is appended
+//!
+//! It's not possible to know this information when the record bytes are read from an asynchronous
+//! stream of bytes. Without the enhancements, we would have to concatenate intermediate byte buffers to
+//! a vector. This would not only incur more allocations, but also slow down our system.
+//!
+//! Hence, to accommodate this use case, we introduced an intermediate indexing layer to our design.
+//!
+//! ```text
+//! //! Index and position invariants across segmented_log
+//!
+//! // segmented_log index invariants
+//! segmented_log.lowest_index  = segmented_log.read_segments[0].lowest_index
+//! segmented_log.highest_index = segmented_log.write_segment.highest_index
+//!
+//! // record position invariants in store
+//! records[i+1].position = records[i].position + records[i].record_header.length
+//!
+//! // segment index invariants in segmented_log
+//! segments[i+1].base_index = segments[i].highest_index
+//!                          = segments[i].index[index.len-1].index + 1
+//! ```
+//! <p align="center">
+//! <b>Fig:</b> Data organisation for persisting the <code>segmented_log</code> data structure on a
+//! <code>*nix</code> file system.
+//! </p>
+//!
+//! In the design, instead of referring to records with a raw offset, we refer to them with indices.
+//! The index in each segment translates the record indices to raw file position in the segment store
+//! file.
+//!
+//! Now, the store append operation accepts an asynchronous stream of bytes instead of a contiguously
+//! laid out slice of bytes. We use this operation to write the record bytes, and at the time of writing
+//! the record bytes, we calculate the record bytes' length and checksum. Once we are done writing the
+//! record bytes to the store, we write it's corresponding `record_header` (containing the checksum and
+//! length), position and index as an `index_record` in the segment index.
+//!
+//! This provides two quality of life enhancements:
+//! - Allow asynchronous streaming writes, without having to concatenate intermediate byte buffers
+//! - Records are accessed much more easily with easy to use indices
+//!
+//! Now, to prevent a malicious user from overloading our storage capacity and memory with a maliciously
+//! crafted request which infinitely loops over some data and sends it to our server, we have provided
+//! an optional `append_threshold` parameter to all append operations. When provided, it prevents
+//! streaming append writes to write more bytes than the provided `append_threshold`.
+//!
+//! At the segment level, this requires us to keep a segment overflow capacity. All segment append
+//! operations now use `segment_capacity - segment.size + segment_overflow_capacity` as the
+//! `append_threshold` value. A good `segment_overflow_capacity` value could be `segment_capacity / 2`.
+//!
+//! ## Why is this nested as a submodule?
+//!
+//! There can be other implementations of a [`CommitLog`] which have a completely different
+//! structure. So we make "segmented-log" a submodule to repreent it as one of the possivle
+//! implementations.
+
 pub mod index;
 pub mod segment;
 pub mod store;
