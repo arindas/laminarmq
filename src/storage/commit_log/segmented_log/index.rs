@@ -1,7 +1,7 @@
 //! Provides components necessary for mapping record indices to store-file positions in segments.
 //!
-//! This module is used by the `segment`implementation to store mapping from record
-//! indices to positions on the `segment-store` file.
+//! This module is used by the `segment` implementation to store mappings from record-indices to
+//! positions on the `segment-store` file.
 
 use super::{
     super::super::{AsyncConsume, AsyncIndexedRead, AsyncTruncate, Sizable, Storage},
@@ -14,7 +14,7 @@ use std::{
     ops::Deref,
 };
 
-/// Extension used by backing files for [`Index`] instances.
+/// Extension used by backing files for [Index] instances.
 pub const INDEX_FILE_EXTENSION: &str = "index";
 
 /// Number of bytes required for storing the base marker.
@@ -26,6 +26,8 @@ pub const INDEX_RECORD_LENGTH: usize = 16;
 /// Lowest underlying storage position
 pub const INDEX_BASE_POSITION: u64 = 0;
 
+/// Unit of storage on an Index. Stores position, length and checksum metadata for a single
+/// [`Record`](super::Record) persisted in the `segment` [`Store`](super::store::Store).
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct IndexRecord {
     pub checksum: u64,
@@ -42,6 +44,7 @@ impl From<IndexRecord> for RecordHeader {
     }
 }
 
+/// Marker to persist the starting `base_index` of an [`Index`] in the index [`Storage`].
 pub struct IndexBaseMarker {
     pub base_index: u64,
     _padding: u64,
