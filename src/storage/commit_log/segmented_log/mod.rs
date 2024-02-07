@@ -239,7 +239,7 @@ where
         config: Config<Idx, S::Size>,
         mut segment_storage_provider: SSP,
     ) -> Result<Self, LogError<S, SERP, C>> {
-        let mut segment_base_indices = segment_storage_provider
+        let segment_base_indices = segment_storage_provider
             .obtain_base_indices_of_stored_segments()
             .await
             .map_err(SegmentedLogError::StorageError)?;
@@ -251,36 +251,31 @@ where
             _ => Ok(()),
         }?;
 
-        let write_segment_base_index = segment_base_indices.pop().unwrap_or(config.initial_index);
+        let (segment_base_indices, write_segment_base_index) =
+            match segment_base_indices.last().cloned() {
+                Some(last_index) => (segment_base_indices, last_index),
+                None => (vec![config.initial_index], config.initial_index),
+            };
 
-        let read_segment_base_indices = segment_base_indices;
+        let mut segments = Vec::with_capacity(segment_base_indices.len());
 
-        let mut read_segments = Vec::<Segment<S, M, H, Idx, S::Size, SERP>>::with_capacity(
-            read_segment_base_indices.len(),
-        );
+        for segment_base_index in segment_base_indices {
+            let cache_index_records_flag = (segment_base_index == write_segment_base_index)
+                || config.num_index_cached_read_segments.is_none();
 
-        for segment_base_index in read_segment_base_indices {
-            read_segments.push(
+            segments.push(
                 Segment::with_segment_storage_provider_config_base_index_and_cache_index_records_flag(
                     &mut segment_storage_provider,
                     config.segment_config,
                     segment_base_index,
-                    config.num_index_cached_read_segments.is_none(),
+                    cache_index_records_flag ,
                 )
                 .await
                 .map_err(SegmentedLogError::SegmentError)?,
             );
         }
 
-        let write_segment =
-            Segment::with_segment_storage_provider_config_base_index_and_cache_index_records_flag(
-                &mut segment_storage_provider,
-                config.segment_config,
-                write_segment_base_index,
-                true, // write segment is always cached
-            )
-            .await
-            .map_err(SegmentedLogError::SegmentError)?;
+        let write_segment = segments.pop().ok_or(SegmentedLogError::WriteSegmentLost)?;
 
         let cache = match config.num_index_cached_read_segments {
             Some(cache_capacity) => {
@@ -298,7 +293,7 @@ where
 
         Ok(Self {
             write_segment: Some(write_segment),
-            read_segments,
+            read_segments: segments,
             config,
             segments_with_cached_index: cache,
             segment_storage_provider,
