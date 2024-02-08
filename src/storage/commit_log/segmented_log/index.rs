@@ -211,6 +211,20 @@ impl IndexRecord {
     }
 }
 
+/// [`Index`] for every [`Segment`](super::Segment) in a [`SegmentedLog`](super::SegmentedLog).
+///
+/// [`Index`] stores a mapping from [`Record`](super::Record) logical indices to positions on its
+/// parent [`Segment`](super::Segment) instance's underlying [`Store`](super::store::Store). It
+/// acts as an index to position translation-table when reading record contents from the underlying
+/// [`Store`](super::store::Store) using the record's logical index.
+///
+/// <p align="center">
+/// <img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-indexed-segmented-log-segment.drawio.png" alt="segmented_log_segment" />
+/// </p>
+/// <p align="center">
+/// <b>Fig:</b> <code>Segment</code> diagram showing <code>Index</code>, mapping logical indices
+/// to<code>Store</code> positions.
+/// </p>
 pub struct Index<S, Idx> {
     index_records: Option<Vec<IndexRecord>>,
     base_index: Idx,
