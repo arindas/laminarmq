@@ -35,7 +35,7 @@ tower-service = "0.3.2"
 num = "0.4.0"
 futures-time = "3.0.0"
 async-io = "1.13.0"
-generational-cache = "0.2.1"
+generational-cache = "0.2.2"
 
 [lib]
 name = "laminarmq"

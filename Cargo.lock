@@ -652,9 +652,9 @@ dependencies = [
 
 [[package]]
 name = "generational-cache"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d816f5c40761e00c6fc202c12a231f740a9b8b48d885688494a9fb910bc86d2"
+checksum = "8f81129066835be752a1470e4b4c182f92881c11635b292c6b18594539984843"
 
 [[package]]
 name = "getrandom"
