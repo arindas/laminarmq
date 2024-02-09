@@ -55,6 +55,12 @@ order they need.
 Find examples demonstrating different capabilities of `laminarmq` in the
 [examples branch](https://github.com/arindas/laminarmq/tree/examples).
 
+## Media
+
+Media associated with the `laminarmq` project.
+
+- `[BLOG]` [Building Segmented Logs in Rust: From Theory to Production!](https://arindas.github.io/blog/segmented-log-rust/)
+
 ## Design
 
 This section describes the internal design of `laminarmq`.
@@ -640,47 +646,47 @@ All benchmarks in the reports have been run on a machine (HP Pavilion x360 Conve
 
 ### Selected Benchmark Reports
 
-**Note**: We use the following names for different record sizes:
+This section presents some selected benchmark reports.
 
-<table>
-    <tr>
-        <td><b>size_name</b></td>
-        <td><b>size</b></td>
-        <td><b>comments</b></td>
-    </tr>
-    <tr>
-        <td><code>tiny</code></td>
-        <td><code>12 bytes</code></td>
-        <td>none</td>
-    </tr>
-    <tr>
-        <td><code>tweet</code></td>
-        <td><code>140 bytes</code></td>
-        <td>none</td>
-    </tr>
-    <tr>
-        <td><code>half_k</code></td>
-        <td><code>560 bytes</code></td>
-        <td><code>≈ 512 bytes</code></td>
-    </tr>
-    <tr>
-        <td><code>k</code></td>
-        <td><code>1120 bytes</code></td>
-        <td><code>≈ 1024 bytes (1 KiB)</code></td>
-    </tr>
-    <tr>
-        <td><code>linked_in_post</code></td>
-        <td><code>2940 bytes</code></td>
-        <td><code>≤ 3000 bytes (3 KB)</code></td>
-    </tr>
-    <tr>
-        <td><code>blog</code></td>
-        <td><code>11760 bytes (11.76 KB)</code></td>
-        <td><code>4X linked_in_post</code></td>
-    </tr>
-</table>
-
-This section presents some selected benchmark reports:
+> **Note**: We use the following names for different record sizes:
+>
+> <table>
+>    <tr>
+>        <td><b>size_name</b></td>
+>        <td><b>size</b></td>
+>        <td><b>comments</b></td>
+>    </tr>
+>    <tr>
+>        <td><code>tiny</code></td>
+>        <td><code>12 bytes</code></td>
+>        <td>none</td>
+>    </tr>
+>    <tr>
+>        <td><code>tweet</code></td>
+>        <td><code>140 bytes</code></td>
+>        <td>none</td>
+>    </tr>
+>    <tr>
+>        <td><code>half_k</code></td>
+>        <td><code>560 bytes</code></td>
+>        <td><code>≈ 512 bytes</code></td>
+>    </tr>
+>    <tr>
+>        <td><code>k</code></td>
+>        <td><code>1120 bytes</code></td>
+>        <td><code>≈ 1024 bytes (1 KiB)</code></td>
+>    </tr>
+>    <tr>
+>        <td><code>linked_in_post</code></td>
+>        <td><code>2940 bytes</code></td>
+>        <td><code>≤ 3000 bytes (3 KB)</code></td>
+>    </tr>
+>    <tr>
+>        <td><code>blog</code></td>
+>        <td><code>11760 bytes (11.76 KB)</code></td>
+>        <td><code>4X linked_in_post</code></td>
+>    </tr>
+> </table>
 
 #### `commit_log` write benchmark with 1KB messages
 

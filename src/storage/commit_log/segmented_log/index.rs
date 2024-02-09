@@ -1,7 +1,7 @@
 //! Provides components necessary for mapping record indices to store-file positions in segments.
 //!
-//! This module is used by the `segment` implementation to store mappings from record-indices to
-//! positions on the `segment-store` file.
+//! This module provides [`Index`] which maintains a mapping from logical record indices to
+//! positions on the [`Store`](super::store::Store) of a [`Segment`](super::Segment).
 
 use super::{
     super::super::{AsyncConsume, AsyncIndexedRead, AsyncTruncate, Sizable, Storage},
@@ -51,6 +51,7 @@ pub struct IndexBaseMarker {
 }
 
 impl IndexBaseMarker {
+    /// Creates a new [`IndexBaseMarker`] with the given `base_index`.
     pub fn new(base_index: u64) -> Self {
         Self {
             base_index,
@@ -149,6 +150,7 @@ impl SizedRecord for IndexBaseMarker {
     }
 }
 
+/// Error type associated with operations on [`Index`].
 #[derive(Debug)]
 pub enum IndexError<StorageError> {
     StorageError(StorageError),
@@ -199,6 +201,7 @@ macro_rules! idx_as_u64 {
 }
 
 impl IndexRecord {
+    /// Creates a new [`IndexRecord`] with the given position and [`RecordHeader`].
     pub fn with_position_and_record_header<P: ToPrimitive>(
         position: P,
         record_header: RecordHeader,
@@ -225,6 +228,17 @@ impl IndexRecord {
 /// <b>Fig:</b> <code>Segment</code> diagram showing <code>Index</code>, mapping logical indices
 /// to<code>Store</code> positions.
 /// </p>
+///
+/// [`Index`] also stores checksum and length information for every record with [`RecordHeader`].
+/// This information is used to detect any data corruption on the underlying persistent media when
+/// reading from [`Store`](super::store::Store).
+///
+/// ### Type parameters
+/// - `S`
+///     Underlying [`Storage`] implementation for storing [`IndexRecord`] instances
+/// - `Idx`
+///     Type to use for representing logical indices. (Usually an unsigned integer like u32, u64
+///     usize, etc.)
 pub struct Index<S, Idx> {
     index_records: Option<Vec<IndexRecord>>,
     base_index: Idx,
@@ -233,10 +247,12 @@ pub struct Index<S, Idx> {
 }
 
 impl<S, Idx> Index<S, Idx> {
+    /// Maps this [`Index`] to the underlying [`Storage`] implementation instance.
     pub fn into_storage(self) -> S {
         self.storage
     }
 
+    /// Obtains the logical index of the first record in this [`Index`].
     pub fn base_index(&self) -> &Idx {
         &self.base_index
     }
@@ -247,6 +263,10 @@ where
     S: Storage,
     Idx: Unsigned + FromPrimitive + Copy + Eq,
 {
+    /// Returns the estimated number of [`IndexRecord`] instances stored in the given [`Storage`].
+    ///
+    /// This function calculates this estimate by using the [`Storage`] size and the size of a
+    /// single [`IndexRecord`].
     pub fn estimated_index_records_len_in_storage(
         storage: &S,
     ) -> Result<usize, IndexError<S::Error>> {
@@ -261,6 +281,8 @@ where
         Ok(estimated_index_records_len)
     }
 
+    /// Reads and returns the `base_index` of the [`Index`] persisted on the provided [`Storage`]
+    /// instance by reading the [`IndexBaseMarker`] at [`INDEX_BASE_POSITION`].
     pub async fn base_index_from_storage(storage: &S) -> Result<Idx, IndexError<S::Error>> {
         let index_base_marker =
             PersistentSizedRecord::<IndexBaseMarker, INDEX_BASE_MARKER_LENGTH>::read_at(
