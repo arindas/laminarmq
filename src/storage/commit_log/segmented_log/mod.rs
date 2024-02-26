@@ -127,9 +127,13 @@ use std::{
     time::Duration,
 };
 
+/// Represent metadata for records in the [`SegmentedLog`].
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct MetaWithIdx<M, Idx> {
+    /// Generic metadata for the record as necessary
     pub metadata: M,
+
+    /// Index of the record within the [`SegmentedLog`].
     pub index: Option<Idx>,
 }
 
@@ -137,6 +141,10 @@ impl<M, Idx> MetaWithIdx<M, Idx>
 where
     Idx: Eq,
 {
+    /// Returns a [`Some`]`(`[`MetaWithIdx`]`)` containing this instance's `metadata` and the
+    /// provided `anchor_idx` if this indices match or this instance's `index` is `None`.
+    ///
+    /// Returns `None` if this instance contains an `index` and the indices mismatch.
     pub fn anchored_with_index(self, anchor_idx: Idx) -> Option<Self> {
         let index = match self.index {
             Some(idx) if idx != anchor_idx => None,
@@ -150,6 +158,8 @@ where
     }
 }
 
+/// Record type alias for [`SegmentedLog`] using [`MetaWithIdx`] for the generic metadata
+/// parameter.
 pub type Record<M, Idx, T> = super::Record<MetaWithIdx<M, Idx>, T>;
 
 #[derive(Debug)]
