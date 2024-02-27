@@ -127,7 +127,7 @@ use std::{
     time::Duration,
 };
 
-/// Represents metadata for records in the [`SegmentedLog`].
+/// Represents metadata for [`Record`] instances in the [`SegmentedLog`].
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct MetaWithIdx<M, Idx> {
     /// Generic metadata for the record as necessary
@@ -142,7 +142,7 @@ where
     Idx: Eq,
 {
     /// Returns a [`Some`]`(`[`MetaWithIdx`]`)` containing this instance's `metadata` and the
-    /// provided `anchor_idx` if this indices match or this instance's `index` is `None`.
+    /// provided `anchor_idx` if the indices match or this instance's `index` is `None`.
     ///
     /// Returns `None` if this instance contains an `index` and the indices mismatch.
     pub fn anchored_with_index(self, anchor_idx: Idx) -> Option<Self> {
@@ -158,8 +158,7 @@ where
     }
 }
 
-/// Record type alias for [`SegmentedLog`] using [`MetaWithIdx`] for the generic metadata
-/// parameter.
+/// Record type alias for [`SegmentedLog`] using [`MetaWithIdx`] as the metadata.
 pub type Record<M, Idx, T> = super::Record<MetaWithIdx<M, Idx>, T>;
 
 /// Error type associated with [`SegmentedLog`] operations.
@@ -211,13 +210,91 @@ where
 {
 }
 
+/// Configuration for [`SegmentedLog`].
+///
+/// Used to configure specific invariants of a segmented log.
 #[derive(Default, Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Config<Idx, Size> {
+    /// Number of [`Segment`] instances in the [`SegmentedLog`] to be _index-cached_.
+    ///
+    /// _Index-cached_ [`Segment`] instances cache their inner [`Index`](index::Index) in memory.
+    /// This helps to avoid I/O for reading [`Record`] persistent metadata (such as position in
+    /// store file or checksum) everytime the [`Record`] is read from the [`Segment`]
+    ///
+    /// This configuration has the following effects depending on it's values:
+    /// - [`None`]: Default, *all* [`Segment`] instances are _index-cached_
+    /// - [`Some`]`(0)`: *No* [`Segment`] instances are _index-cached_
+    /// - [`Some`]`(<non-zero-value>)`: A *maximum of the given number* of [`Segment`] instances are
+    /// _index-cached_ at any time.
+    ///
+    /// >You may think of it this way -- you can opt-in to optional index-caching by specific a
+    /// >[`Some`]. Or, you can keep using the default setting to index-cache all segments by
+    /// >specifying [`None`].
+    ///
+    /// _Optional index-caching_ is benefical in [`SegmentedLog`] with a large number of
+    /// [`Segment`] instances, only a few of which are actively read from at any given point of
+    /// time. This is beneifical when working with limited heap memory but a large amount of
+    /// storage.
+    ///
+    /// <div></div>
     pub num_index_cached_read_segments: Option<usize>,
+
+    /// [`Segment`] specific configuration to be used for all [`Segment`] instances in the
+    /// [`SegmentedLog`] in question.
+    ///
+    /// <div></div>
     pub segment_config: segment::Config<Size>,
+
+    /// Lowest possible record index in the [`SegmentedLog`] in question.
+    ///
+    /// `( initial_index <= read_segments[0].base_index )`
     pub initial_index: Idx,
 }
 
+/// The [`SegmentedLog`] abstraction, implementing a [`CommitLog`] with a collection of _read_
+/// [`Segment`]`s` and a single _write_ [`Segment`].
+///
+/// Uses a [`Vec`] to store _read_ [`Segment`] instances and an [`Option`] to store the _write_
+/// [`Segment`]. The [`Option`] is used so that we can easily move out the _write_ [`Segment`] or
+/// move in a new one when implementing some of the APIs. The
+/// [`SegmentedLogError::WriteSegmentLost`] error is a result of this implementation decision.
+///
+/// [`SegmentedLog`] also has the ability to only optionally _index-cache_ some of the [`Segment`]
+/// instances.
+///
+/// >_Index-cached_ [`Segment`] instances cache their inner [`Index`](index::Index) in memory.
+/// >This helps to avoid I/O for reading [`Record`] persistent metadata (such as position in store
+/// >file, checksum) everytime the [`Record`] is read from the [`Segment`]
+///
+/// >_Optional index-caching_ is benefical in [`SegmentedLog`] with a large number of
+/// >[`Segment`] instances, only a few of which are actively read from at any given point of
+/// >time. This is beneifical when working with limited heap memory but a large amount of
+/// >storage.
+///
+/// [`SegmentedLog`] maintains a [`Cache`] to keep track of which [`Segment`] instances to
+/// _index-cache_. The _index-caching_ behaviour will depend on the [`Cache`] implementation used.
+/// (For instance, an `LRUCache` would cache the least recently used [`Segment`] instances.) In
+/// order to enable such behaviour, we perform lookups and inserts on this inner cache when
+/// referring to any [`Segment`] for any operation.
+///
+/// The _write_ [`Segment`] is always _index-cached_.
+///
+/// Only the metadata associated with [`Record`] instances are serialized or deserialized. The
+/// reocord content bytes are always written and read from the [`Storage`] as-is.
+///
+/// ### Type parameters
+/// - `S`: [`Storage`] implementation to be used for [`Segment`] instances
+/// - `M`: Metadata to be used for [`Record`] instances
+/// - `H`: [`Hasher`] to use for computing checksums of our [`Record`] contents
+/// - `Idx`: Unsigned integer type to used for represeting record indices
+/// - `Size`: Unsized integer to represent record and persistent storage sizes
+/// - `SERP`: [`SerializationProvider`] used for serializing and deserializing metadata associated
+/// with our records.
+/// - `SSP`: [`SegmentStorageProvider`] used for obtaining backing storage for our [`Segment`]
+/// instances
+/// - `C`: [`Cache`] implementation to use for _index-caching_ behaviour. You may use
+/// [`NoOpCache`](crate::common::cache::NoOpCache) when opting out of _optional index-caching_,
+/// i.e. using [`None`] for [`Config::num_index_cached_read_segments`].
 pub struct SegmentedLog<S, M, H, Idx, Size, SERP, SSP, C> {
     write_segment: Option<Segment<S, M, H, Idx, Size, SERP>>,
     read_segments: Vec<Segment<S, M, H, Idx, Size, SERP>>,
