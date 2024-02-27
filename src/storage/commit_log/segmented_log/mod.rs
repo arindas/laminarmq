@@ -127,7 +127,7 @@ use std::{
     time::Duration,
 };
 
-/// Represent metadata for records in the [`SegmentedLog`].
+/// Represents metadata for records in the [`SegmentedLog`].
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct MetaWithIdx<M, Idx> {
     /// Generic metadata for the record as necessary
@@ -162,15 +162,33 @@ where
 /// parameter.
 pub type Record<M, Idx, T> = super::Record<MetaWithIdx<M, Idx>, T>;
 
+/// Error type associated with [`SegmentedLog`] operations.
 #[derive(Debug)]
 pub enum SegmentedLogError<SE, SDE, CE> {
+    /// Used to denote errors from the underlying [`Storage`] implementation.
     StorageError(SE),
+
+    /// Used to denote errors from operations on [`Segment`] instances.
     SegmentError(segment::SegmentError<SE, SDE>),
+
+    /// Used to denote errors from the [`SegmentedLog`] inner cache.
     CacheError(CE),
+
+    /// Used when the inner cache is not configured while using APIs that expect it.
     CacheNotFound,
+
+    /// Used when the resulting `base_index` of a [`Segment`] in the [`SegmentedLog`]
+    /// is lesser than the `initial_index` configured at the [`SegmentedLog`] level.
     BaseIndexLesserThanInitialIndex,
+
+    /// Used when the _write_ [`Segment`] containing [`Option`] is set to `None`
     WriteSegmentLost,
+
+    /// Used when the given index is outside the range `[lowest_index, highest_index)`
     IndexOutOfBounds,
+
+    /// Used when no [`Record`] is found at a valid index inside the range
+    /// `[lowest_index, highest_index]`
     IndexGapEncountered,
 }
 
