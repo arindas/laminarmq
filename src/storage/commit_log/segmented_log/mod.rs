@@ -255,7 +255,7 @@ pub struct Config<Idx, Size> {
 /// [`Segment`]`s` and a single _write_ [`Segment`].
 ///
 /// Uses a [`Vec`] to store _read_ [`Segment`] instances and an [`Option`] to store the _write_
-/// [`Segment`]. The [`Option`] is used so that we can easily move out the _write_ [`Segment`] or
+/// [`Segment`]. An [`Option`] is used so that we can easily move out the _write_ [`Segment`] or
 /// move in a new one when implementing some of the APIs. The
 /// [`SegmentedLogError::WriteSegmentLost`] error is a result of this implementation decision.
 ///
@@ -295,6 +295,80 @@ pub struct Config<Idx, Size> {
 /// - `C`: [`Cache`] implementation to use for _index-caching_ behaviour. You may use
 /// [`NoOpCache`](crate::common::cache::NoOpCache) when opting out of _optional index-caching_,
 /// i.e. using [`None`] for [`Config::num_index_cached_read_segments`].
+///
+/// ### Example
+///
+/// Here's an example using
+/// [`InMemStorage`](crate::storage::impls::in_mem::storage::InMemStorage):
+///
+/// ```
+/// use futures_lite::{stream, future::block_on, StreamExt};
+/// use laminarmq::{
+///     common::{cache::NoOpCache, serde_compat::bincode},
+///     storage::{
+///         commit_log::{
+///             segmented_log::{segment::Config as SegmentConfig, Config, MetaWithIdx, SegmentedLog},
+///             CommitLog, Record,
+///         },
+///         impls::{
+///             common::DiskBackedSegmentStorageProvider,
+///             in_mem::{segment::InMemSegmentStorageProvider, storage::InMemStorage},
+///         },
+///         AsyncConsume,
+///     },
+/// };
+/// use std::convert::Infallible;
+///
+/// fn record<X, Idx>(stream: X) -> Record<MetaWithIdx<(), Idx>, X> {
+///     Record {
+///         metadata: MetaWithIdx {
+///             metadata: (),
+///             index: None,
+///         },
+///         value: stream,
+///     }
+/// }
+///
+/// fn infallible<T>(t: T) -> Result<T, Infallible> {
+///     Ok(t)
+/// }
+///
+/// const IN_MEMORY_SEGMENTED_LOG_CONFIG: Config<u32, usize> = Config {
+///     segment_config: SegmentConfig {
+///         max_store_size: 1048576, // = 1MiB in bytes
+///         max_store_overflow: 524288,
+///         max_index_size: 1048576,
+///     },
+///     initial_index: 0,
+///     num_index_cached_read_segments: None,
+/// };
+///  
+/// block_on(async {
+///     let mut segmented_log = SegmentedLog::<
+///         InMemStorage,
+///         (),
+///         crc32fast::Hasher,
+///         u32,
+///         usize,
+///         bincode::BinCode,
+///         _,
+///         NoOpCache<usize, ()>,
+///     >::new(
+///         IN_MEMORY_SEGMENTED_LOG_CONFIG,
+///         InMemSegmentStorageProvider::<u32>::default(),
+///     )
+///     .await
+///     .unwrap();
+///
+///     let tiny_message = stream::once(b"Hello World!" as &[u8])
+///         .map(infallible);
+///
+///     segmented_log
+///         .append(record(tiny_message))
+///         .await
+///         .unwrap();
+/// });
+/// ```
 pub struct SegmentedLog<S, M, H, Idx, Size, SERP, SSP, C> {
     write_segment: Option<Segment<S, M, H, Idx, Size, SERP>>,
     read_segments: Vec<Segment<S, M, H, Idx, Size, SERP>>,
@@ -306,6 +380,7 @@ pub struct SegmentedLog<S, M, H, Idx, Size, SERP, SSP, C> {
     segment_storage_provider: SSP,
 }
 
+/// Type alias for [`SegmentedLogError`] with additional type parameter trait bounds.
 pub type LogError<S, SERP, C> = SegmentedLogError<
     <S as Storage>::Error,
     <SERP as SerializationProvider>::Error,
