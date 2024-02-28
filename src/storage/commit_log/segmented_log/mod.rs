@@ -763,7 +763,7 @@ where
     ///
     /// This method uses the _optional index-caching_ behaviour by using the inner cache.
     ///
-    /// Returns a [`SegRead`] containing the [`Record`] and next index to read from, or seek
+    /// Returns a [`SeqRead`] containing the [`Record`] and next index to read from, or seek
     /// information containing which [`Segment`] and `idx` to read from next.
     pub async fn read_seq_exclusive(
         &mut self,
