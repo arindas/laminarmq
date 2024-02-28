@@ -519,6 +519,7 @@ where
     }
 }
 
+/// Creates a new _write_ [`Segment`] for the given `segmented_log` wth the given `base_index`.
 macro_rules! new_write_segment {
     ($segmented_log:ident, $base_index:ident) => {
         Segment::with_segment_storage_provider_config_base_index_and_cache_index_records_flag(
@@ -532,6 +533,7 @@ macro_rules! new_write_segment {
     };
 }
 
+/// Consumes the given [`Segment`] with the provided [`AsyncConsume`] method.
 macro_rules! consume_segment {
     ($segment:ident, $consume_method:ident) => {
         $segment
@@ -541,6 +543,7 @@ macro_rules! consume_segment {
     };
 }
 
+/// Takes the _write_ [`Segment`] from the given [`SegmentedLog`].
 macro_rules! take_write_segment {
     ($segmented_log:ident) => {
         $segmented_log
@@ -550,6 +553,8 @@ macro_rules! take_write_segment {
     };
 }
 
+/// Obtains a reference to the _write_ [`Segment`] of the given [`SegmentedLog`] using the
+/// provided reference function. (can be [`Option::as_mut`] or [`Option::as_ref`]).
 macro_rules! write_segment_ref {
     ($segmented_log:ident, $ref_method:ident) => {
         $segmented_log
