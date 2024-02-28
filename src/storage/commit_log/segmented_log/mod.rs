@@ -598,6 +598,22 @@ where
             .unwrap_or(self.config.initial_index)
     }
 
+    /// Reads the [`Record`] at the given `idx`.
+    ///
+    /// Note that this method is purely idempotent and doesn't trigger the _optional-index-caching_
+    /// behaviour. If the [`Segment`] containing the [`Record`] is not _index-cached_, it incurs an
+    /// additional I/O cost to read the position and checksum metadata for the [`Record`].
+    ///
+    /// If however all [`Segment`] instances are _index-cached_ i.e when using the default
+    /// configuration, no additional I/O cost is incurred.
+    ///
+    /// Returns the [`Record`] read.
+    ///
+    /// ## Errors
+    /// - [`SegmentedLogError::IndexOutOfBounds`]: if the provided `idx` is out of the index bounds
+    /// of this [`SegmentedLog`]
+    /// - [`SegmentedLogError::SegmentError`]: if there is any error in reading the [`Record`] from
+    /// the underlying [`Segment`].
     async fn read(&self, idx: &Self::Idx) -> Result<Self::Value, Self::ReadError> {
         if !self.has_index(idx) {
             return Err(SegmentedLogError::IndexOutOfBounds);
@@ -742,6 +758,13 @@ where
     C: Cache<usize, ()>,
     C::Error: Debug,
 {
+    /// Exclusively reads the [`Record`] from the [`Segment`] specified by the provided `segment_id`
+    /// at the provided `idx`.
+    ///
+    /// This method uses the _optional index-caching_ behaviour by using the inner cache.
+    ///
+    /// Returns a [`SegRead`] containing the [`Record`] and next index to read from, or seek
+    /// information containing which [`Segment`] and `idx` to read from next.
     pub async fn read_seq_exclusive(
         &mut self,
         segment_id: usize,
@@ -775,6 +798,9 @@ where
     C: Cache<usize, ()>,
     C::Error: Debug,
 {
+    /// Exclusively reads the [`Record`] at the given `idx` from this [`SegmentedLog`].
+    ///
+    /// This method triggers the _optional index-caching_ behaviour by using the inner cache.
     async fn exclusive_read(&mut self, idx: &Self::Idx) -> Result<Self::Value, Self::ReadError> {
         if !self.has_index(idx) {
             return Err(SegmentedLogError::IndexOutOfBounds);
@@ -791,21 +817,54 @@ where
     }
 }
 
+/// Returned by methods which allow manual resolution of which [`Segment`] to read from in a
+/// [`SegmentedLog`].
+///
+/// Methods like [`SegmentedLog::read_seq`] and [`SegmentedLog::read_seq_exclusive`] allow manual
+/// control over which [`Segment`] to read from by explicitly having a `segment_id` as a parameter.
+/// [`SeqRead`] is used to represent the value of these operations.
+///
+/// APIs like these enable avoiding searching for which [`Segment`] can service a `read()` since we
+/// can explicitly pass in a `segment_id` to specify which [`Segment`] to read from. This helps us
+/// avoid the cost of searching when simply contiguously iterating over all the [`Record`]
+/// instances in a [`SegmentedLog`].
+///
+/// Generally, APIs using this type are meant to be used as follows:
+///
+/// ```text
+/// let (mut segment_id, mut idx) = (0, 0);
+///
+/// while let Ok(seq_read) = segmented_log.seq_read().await {
+///     match seq_read {
+///         Read { record, next_idx } => {
+///             // do something with record
+///             idx = next_idx;
+///         }
+///         Seek { next_segment, next_idx } => {
+///             segment_id, idx = next_segment, next_idx
+///         }
+///     };
+/// }
+/// ```
 pub enum SeqRead<M, Idx, C> {
+    /// A valid _read_ containing the read [`Record`] and the index to the next [`Record`]
     Read {
         record: Record<M, Idx, C>,
         next_idx: Idx,
     },
-    Seek {
-        next_segment: usize,
-        next_idx: Idx,
-    },
+
+    /// Used when the _read_ hits the end of a [`Segment`] and the next [`Record`] can be found in
+    /// the next [`Segment`]. Contains the `segment_id` of the next [`Segment`] to read from and
+    /// the `index` to read at.
+    Seek { next_segment: usize, next_idx: Idx },
 }
 
-pub type ResolvedSegmentMutResult<'a, S, M, H, Idx, SERP, C> =
+/// Used as the result of resolving a `segment_id` ta a mutable ref to a [`Segment`].
+type ResolvedSegmentMutResult<'a, S, M, H, Idx, SERP, C> =
     Result<&'a mut Segment<S, M, H, Idx, <S as Sizable>::Size, SERP>, LogError<S, SERP, C>>;
 
-pub type ResolvedSegmentResult<'a, S, M, H, Idx, SERP, C> =
+/// Used as the result of resolving a `segment_id` ta an immutable ref to a [`Segment`].
+type ResolvedSegmentResult<'a, S, M, H, Idx, SERP, C> =
     Result<&'a Segment<S, M, H, Idx, <S as Sizable>::Size, SERP>, LogError<S, SERP, C>>;
 
 impl<S, M, H, Idx, SERP, SSP, C> SegmentedLog<S, M, H, Idx, S::Size, SERP, SSP, C>
