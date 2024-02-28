@@ -282,6 +282,15 @@ pub struct Config<Idx, Size> {
 /// Only the metadata associated with [`Record`] instances are serialized or deserialized. The
 /// reocord content bytes are always written and read from the [`Storage`] as-is.
 ///
+/// Every [`Segment`] in a [`SegmentedLog`] has fixed maximum [`Storage`] size. Writes always go to
+/// the current _write_ [`Segment`]. Whenever a _write_ [`Segment`] exceeds the configured storage
+/// size, it is rotated back to the collection of _read_ [`Segment`] instances and a new _write_
+/// [`Segment`] is created in it's place, with it's `base_index` as the `highest_index` of the previous
+/// _write_ [`Segment`].
+///
+/// Reads are serviced by both _read_ and _write_ [`Segment`] instances depending on whether the
+/// [`Record`] to be read lies within their [`Record`] index range.
+///
 /// ### Type parameters
 /// - `S`: [`Storage`] implementation to be used for [`Segment`] instances
 /// - `M`: Metadata to be used for [`Record`] instances
@@ -388,6 +397,8 @@ pub type LogError<S, SERP, C> = SegmentedLogError<
 >;
 
 impl<S, M, H, Idx, Size, SERP, SSP, C> SegmentedLog<S, M, H, Idx, Size, SERP, SSP, C> {
+    /// Returns an iterator containing immutable references all the [`Segment`] instances in this
+    /// [`SegmentedLog`].
     fn segments(&self) -> impl Iterator<Item = &Segment<S, M, H, Idx, Size, SERP>> {
         self.read_segments.iter().chain(self.write_segment.iter())
     }
@@ -415,6 +426,31 @@ where
     C: Cache<usize, ()> + Default,
     C::Error: Debug,
 {
+    /// Creates a new [`SegmentedLog`] instance with the given [`Config`] and
+    /// [`SegmentStorageProvider`] implementation.
+    ///
+    /// This function first scans for already persisted [`Segment`] instances in the given
+    /// [`SegmentStorageProvider`]. The segments are already sorted by their `base_index`. Next it
+    /// uses the last segment in this sorted order as the `write_segment` and the remaining _n - 1_
+    /// segments as the `read_segments`.
+    ///
+    /// If no segments are already persisted in the provided storage, we create a new
+    /// `write_segment` with the given [`Config::initial_index`] and no read segments. Read
+    /// segments are created when this `write_segment` is rotated back as a read segment.
+    ///
+    /// Returns a [`SegmentedLog`].
+    ///
+    /// # Errors
+    ///
+    /// - [`SegmentedLogError::StorageError`]: if there's an error in scanning for the segments on the
+    /// [`SegmentStorageProvider`]
+    /// - [`SegmentedLogError::BaseIndexLesserThanInitialIndex`]: if the `base_index` of the first
+    /// segment read from the storage is lesser than the configured `initial_index`.
+    /// - [`SegmentedLogError::SegmentError`]: if there's an error in creating a [`Segment`].
+    /// - [`SegmentedLogError::WriteSegmentLost`]: if there's an error in obtaining the _write_
+    /// segment after creating all the [`Segment`] instances.
+    /// - [`SegmentedLogError::CacheError`]: if there's an error in initializing the inner cache
+    /// for _optional-index-caching_.
     pub async fn new(
         config: Config<Idx, S::Size>,
         mut segment_storage_provider: SSP,
@@ -440,6 +476,8 @@ where
         let mut segments = Vec::with_capacity(segment_base_indices.len());
 
         for segment_base_index in segment_base_indices {
+            // index-cache the current segment if this the write_segment or
+            // "optional-index-caching" is disabled.
             let cache_index_records_flag = (segment_base_index == write_segment_base_index)
                 || config.num_index_cached_read_segments.is_none();
 
