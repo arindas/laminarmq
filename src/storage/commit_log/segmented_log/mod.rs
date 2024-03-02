@@ -927,6 +927,11 @@ where
         }
     }
 
+    /// Reads the [`Record`] from the [`Segment`] specified by the provided `segment_id` at the
+    /// provided `idx`.
+    ///
+    /// Returns a [`SeqRead`] containing the [`Record`] and next index to read from, or seek
+    /// information containing which [`Segment`] and `idx` to read from next.
     pub async fn read_seq(
         &self,
         segment_id: usize,
@@ -943,6 +948,8 @@ where
         self.read_seq_unchecked(segment_id, idx).await
     }
 
+    /// Returns a [`Stream`] containing [`Record`] instances within the given `index_bounds` in
+    /// this [`SegmentedLog`], ordered by record index.
     pub fn stream<RB>(
         &self,
         index_bounds: RB,
@@ -971,6 +978,8 @@ where
             .flatten()
     }
 
+    /// Returns a [`Stream`] containing all [`Record`] instances in this [`SegmentedLog`], ordered
+    /// by record index.
     pub fn stream_unbounded(&self) -> impl Stream<Item = Record<M, Idx, S::Content>> + '_ {
         stream::iter(self.segments())
             .map(move |segment| indexed_read_stream(segment, ..))
