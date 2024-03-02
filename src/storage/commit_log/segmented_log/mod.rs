@@ -627,22 +627,10 @@ where
 }
 
 #[derive(Debug)]
-enum CacheOpKind {
-    Uncache,
-    Cache,
-    None,
-}
-
-#[derive(Debug)]
-struct CacheOp {
-    segment_id: usize,
-    kind: CacheOpKind,
-}
-
-impl CacheOp {
-    fn new(segment_id: usize, kind: CacheOpKind) -> Self {
-        Self { segment_id, kind }
-    }
+enum SegmentIndexCacheOp {
+    Drop { evicted_segment_id: usize },
+    Cache { segment_id: usize },
+    Nop,
 }
 
 impl<S, M, H, Idx, SERP, SSP, C> SegmentedLog<S, M, H, Idx, S::Size, SERP, SSP, C>
@@ -665,10 +653,7 @@ where
             return Ok(());
         }
 
-        let mut cache_op_buf = [
-            CacheOp::new(0, CacheOpKind::None),
-            CacheOp::new(0, CacheOpKind::None),
-        ];
+        let mut cache_op_buf = [SegmentIndexCacheOp::Nop, SegmentIndexCacheOp::Nop];
 
         let cache = self
             .segments_with_cached_index
@@ -681,15 +666,15 @@ where
                 Ok(Lookup::Hit(_)) => Ok(&cache_op_buf[..0]),
                 Ok(Lookup::Miss) => match cache.insert(segment_id, ()) {
                     Ok(Eviction::None) => {
-                        cache_op_buf[0] = CacheOp::new(segment_id, CacheOpKind::Cache);
+                        cache_op_buf[0] = SegmentIndexCacheOp::Cache { segment_id };
                         Ok(&cache_op_buf[..1])
                     }
                     Ok(Eviction::Block {
-                        key: evicted_id,
+                        key: evicted_segment_id,
                         value: _,
                     }) => {
-                        cache_op_buf[0] = CacheOp::new(evicted_id, CacheOpKind::Uncache);
-                        cache_op_buf[1] = CacheOp::new(segment_id, CacheOpKind::Cache);
+                        cache_op_buf[0] = SegmentIndexCacheOp::Drop { evicted_segment_id };
+                        cache_op_buf[1] = SegmentIndexCacheOp::Cache { segment_id };
                         Ok(&cache_op_buf[..])
                     }
                     Ok(Eviction::Value(_)) => Ok(&cache_op_buf[..0]),
@@ -701,15 +686,17 @@ where
         .map_err(SegmentedLogError::CacheError)?;
 
         for segment_cache_op in cache_ops {
-            let segment = self.resolve_segment_mut(Some(segment_cache_op.segment_id))?;
-
-            match segment_cache_op.kind {
-                CacheOpKind::Uncache => drop(segment.take_cached_index_records()),
-                CacheOpKind::Cache => segment
+            match *segment_cache_op {
+                SegmentIndexCacheOp::Drop { evicted_segment_id } => drop(
+                    self.resolve_segment_mut(Some(evicted_segment_id))?
+                        .take_cached_index_records(),
+                ),
+                SegmentIndexCacheOp::Cache { segment_id } => self
+                    .resolve_segment_mut(Some(segment_id))?
                     .cache_index()
                     .await
                     .map_err(SegmentedLogError::SegmentError)?,
-                CacheOpKind::None => {}
+                SegmentIndexCacheOp::Nop => {}
             }
         }
 
