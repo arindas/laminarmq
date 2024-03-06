@@ -91,7 +91,7 @@
 //! ## Why is this nested as a submodule?
 //!
 //! There can be other implementations of a [`CommitLog`] which have a completely different
-//! structure. So we make "segmented-log" a submodule to repreent it as one of the possivle
+//! structure. So we make "segmented-log" a submodule to represent it as one of the possible
 //! implementations.
 
 pub mod index;
