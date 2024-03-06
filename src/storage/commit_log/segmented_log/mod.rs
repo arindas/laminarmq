@@ -1001,6 +1001,16 @@ where
     C: Cache<usize, ()>,
     C::Error: Debug,
 {
+    /// Rotates the current _write_ [`Segment`] to a _read_ [`Segment`], creating a new _write_
+    /// [`Segment`] in its place.
+    ///
+    /// Closes the current _write_ [`Segment`], reopens it as a new _read_ [`Segment`] and appends
+    /// it the the collection of _read_ [`Segment`] instances. Next, a new _write_ [`Segment`] is
+    /// created for this [`SegmentedLog`] with it's `base_index` set to the `highest_index` of the
+    /// previous _write_ [`Segment`].
+    ///
+    /// This operations is used when the _write_ [`Segment`] exceeds the confiured [`Segment`]
+    /// storage size limit and needs to be rotated.
     pub async fn rotate_new_write_segment(&mut self) -> Result<(), LogError<S, SERP, C>> {
         self.flush().await?;
 
@@ -1021,6 +1031,7 @@ where
         Ok(())
     }
 
+    /// Flushes all writes in the current _write_ [`Segment`] to persistent [`Storage`].
     pub async fn flush(&mut self) -> Result<(), LogError<S, SERP, C>> {
         let write_segment = take_write_segment!(self)?;
 
@@ -1034,6 +1045,10 @@ where
         Ok(())
     }
 
+    /// Removes all [`Segment`] instances that are older than the given `expiry_duration`.
+    ///
+    /// Returns the total number of [`Record`] instances removed from removing the [`Segment`]
+    /// instances.
     pub async fn remove_expired_segments(
         &mut self,
         expiry_duration: Duration,
@@ -1095,6 +1110,9 @@ where
     C: Cache<usize, ()>,
     C::Error: Debug,
 {
+    /// Appends a new [`Record`] containing value bytes laid out in a contiguous fashion.
+    ///
+    /// Returns the index of the newly appended [`Record`].
     pub async fn append_record_with_contiguous_bytes<X>(
         &mut self,
         record: &Record<M, Idx, X>,
