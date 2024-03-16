@@ -153,15 +153,39 @@ impl SizedRecord for IndexBaseMarker {
 /// Error type associated with operations on [`Index`].
 #[derive(Debug)]
 pub enum IndexError<StorageError> {
+    /// Used to denote errors from the backing [`Storage`] implementation.
     StorageError(StorageError),
+
+    /// Used to denote I/O errors caused during serializing or deserializing [`IndexRecord`]
+    /// instances.
     IoError(std::io::Error),
+
+    /// Used when the type used for representing positions is incompatible with [`u64`].
     IncompatiblePositionType,
+
+    /// Used when the type used for representing sizes is incompatible with [`u64`].
     IncompatibleSizeType,
+
+    /// Used when the type used for representing indices is incompatible with [`u64`].
     IncompatibleIdxType,
+
+    /// Used when the index used for an operation is outside the permissible bounds for the
+    /// referenced [`Index`]
     IndexOutOfBounds,
+
+    /// Used when there is a range of indices the [`Index`] bounds which are not mapped to any
+    /// [`IndexRecord`] instances.
     IndexGapEncountered,
+
+    /// Used when the `base_index` for the referenced [`Index`] cannot be inferred from the
+    /// provided [`Storage`], in the absence of an explicitly provided `base_index`.
     NoBaseIndexFound,
+
+    /// Used when the inferred and provided `base_index` values mismatch.
     BaseIndexMismatch,
+
+    /// Used when the number of [`IndexRecord`] instances read from an [`Index`] is inconsistent
+    /// the estimated number of [`IndexRecord`] instances based on the underlying storage size.
     InconsistentIndexSize,
 }
 
@@ -297,6 +321,16 @@ where
             .and_then(|x| u64_as_idx!(x, Idx))
     }
 
+    /// Reads all [`IndexRecord`] instances persisted in the provided [`Storage`] instance.
+    ///
+    /// Returns a [`Vec`] containing the read [`IndexRecord`] instances.
+    ///
+    /// # Errors
+    ///
+    /// - [`IndexError::InconsistentIndexSize`]:
+    ///     If the number of [`IndexRecord`] instances read is inconsistent with the estimated
+    ///     number of [`IndexRecord`] instances persisted. (Calculated with
+    ///     [`Self::estimated_index_records_len_in_storage`])
     pub async fn index_records_from_storage(
         storage: &S,
     ) -> Result<Vec<IndexRecord>, IndexError<S::Error>> {
