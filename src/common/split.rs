@@ -19,19 +19,23 @@ impl<T> SplitAt<T> for Vec<T> {
     }
 }
 
-#[cfg(target_os = "linux")]
-pub mod glommio_impl {
-    //! Module containing [`super::SplitAt`] implementations for [`glommio`] specific types.
-    use glommio::io::ReadResult;
+pub mod impls {
+    //! Module providing [`SplitAt`](super::SplitAt) implementations.
 
-    use super::SplitAt;
+    #[cfg(target_os = "linux")]
+    pub mod glommio {
+        //! Module containing [`SplitAt`] implementations for [`glommio`](https://docs.rs/glommio) specific types.
+        use glommio::io::ReadResult;
 
-    impl SplitAt<u8> for ReadResult {
-        fn split_at(self, at: usize) -> Option<(Self, Self)> {
-            Some((
-                ReadResult::slice(&self, 0, at)?,
-                ReadResult::slice(&self, at, self.len() - at)?,
-            ))
+        use super::super::SplitAt;
+
+        impl SplitAt<u8> for ReadResult {
+            fn split_at(self, at: usize) -> Option<(Self, Self)> {
+                Some((
+                    ReadResult::slice(&self, 0, at)?,
+                    ReadResult::slice(&self, at, self.len() - at)?,
+                ))
+            }
         }
     }
 }

@@ -1,3 +1,9 @@
+//! Presents the `segment` units that a `segmented-log` is made out of.
+//!
+//! Each `segment` contains an `index` for addressing reocrds and a `store` for backing storage.
+//! The `index` stores a mapping from record indices to positions on the `store` file. The `store`
+//! file stores the actual records on the underlying storage.
+
 use super::{
     super::super::{
         super::common::{serde_compat::SerializationProvider, split::SplitAt},

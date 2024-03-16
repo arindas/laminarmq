@@ -18,7 +18,7 @@ pub mod stream {
 }
 
 pub mod ref_ops {
-    //! Module providing utilities for [`Deref`](Deref) and [`AsRef`] interop.
+    //! Module providing utilities for [`Deref`] and [`AsRef`] interop.
 
     use std::ops::Deref;
 
@@ -43,22 +43,28 @@ pub mod ref_ops {
 }
 
 pub mod cache {
+    //! Module providing [`Cache`] implementation adapters for using with `laminarmq`
+
     pub use generational_cache::{
         cache::lru_cache::LRUCacheBlockArenaEntry,
         prelude::{
             AllocBTreeMap, AllocVec, Cache, Eviction, LRUCache, LRUCacheError, Link, Lookup, Map,
         },
     };
+
     use std::{fmt::Display, marker::PhantomData};
 
+    /// A [`LRUCache`] using an [`AllocVec`] and [`AllocBTreeMap`].
     pub type AllocLRUCache<K, T> =
         LRUCache<AllocVec<LRUCacheBlockArenaEntry<K, T>>, K, T, AllocBTreeMap<K, Link>>;
 
+    /// A [`Cache`] that does a no-op on every cache operation and returns an error instead.
     #[derive(Debug, Default)]
     pub struct NoOpCache<K, V> {
         _phantom_data: PhantomData<(K, V)>,
     }
 
+    /// Error type used by [`NoOpCache`].
     #[derive(Debug, Default)]
     pub struct UnsupportedOp;
 
