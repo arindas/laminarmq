@@ -360,6 +360,19 @@ where
         }
     }
 
+    /// Returns a validated `base_index` for this [`Index`].
+    ///
+    /// Compares the given `base_index` with the read `base_index` to obtain the `base_index` for
+    /// this [`Index`]. If the `base_index` could be obtained from only one of the sources, then
+    /// that obtained value is retured. If the `base_index` could be obtained from both the soures:
+    /// - If the read values mismatch across the different sources, we return
+    /// [`IndexError::BaseIndexMismatch`]
+    /// - If the read values are same, we return the provided value
+    ///
+    /// # Errors
+    ///
+    /// - [`IndexError::BaseIndexMismatch`]: if the read `base_index` and the provided
+    /// `base_index` mismatch.
     pub async fn validated_base_index(
         storage: &S,
         base_index: Option<Idx>,
@@ -375,6 +388,9 @@ where
         }
     }
 
+    /// Creates an [`Index`] instance from the given `storage` and an optional `base_index`.
+    ///
+    /// The created [`Index`] uses the provided `storage` instance as it's storage backend.
     pub async fn with_storage_and_base_index_option(
         storage: S,
         base_index: Option<Idx>,
@@ -395,6 +411,7 @@ where
         })
     }
 
+    /// Creates an [`Index`] instance from the given `storage` and a `base_index`.
     pub async fn with_storage_and_base_index(
         storage: S,
         base_index: Idx,
@@ -402,10 +419,16 @@ where
         Self::with_storage_and_base_index_option(storage, Some(base_index)).await
     }
 
+    /// Creates an [`Index`] from the given storage.
     pub async fn with_storage(storage: S) -> Result<Self, IndexError<S::Error>> {
         Self::with_storage_and_base_index_option(storage, None).await
     }
 
+    /// Creates an [`Index`] with the given `storage` buffered `index_records` and a
+    /// validated_base_index`.
+    ///
+    /// This method doesn't use any additional checks for the `validated_base_index` and the
+    /// buffered `index_records` against the `storage` provided.
     pub fn with_storage_index_records_option_and_validated_base_index(
         storage: S,
         index_records: Option<Vec<IndexRecord>>,
@@ -422,14 +445,18 @@ where
         })
     }
 
+    /// Takes out the cached [`IndexRecord`] instances from this [`Index`], leaving the
+    /// cache empty.
     pub fn take_cached_index_records(&mut self) -> Option<Vec<IndexRecord>> {
         self.index_records.take()
     }
 
+    /// Returns a reference to the cached [`IndexRecord`] instance.
     pub fn cached_index_records(&self) -> Option<&Vec<IndexRecord>> {
         self.index_records.as_ref()
     }
 
+    /// Cache all the [`IndexRecord`] instances in the underlying `storage` in this [`Index`].
     pub async fn cache(&mut self) -> Result<(), IndexError<S::Error>> {
         if self.index_records.as_ref().is_some() {
             return Ok(());
@@ -446,6 +473,7 @@ where
     S: Default,
     Idx: Copy,
 {
+    /// Creates an empty [`Index`] with the given `base_index`.
     pub fn with_base_index(base_index: Idx) -> Self {
         Self {
             index_records: Some(Vec::new()),
@@ -513,7 +541,7 @@ where
             index_records
                 .get(normalized_index)
                 .ok_or(IndexError::IndexGapEncountered)
-                .map(|&x| x)
+                .copied()
         } else {
             PersistentSizedRecord::<IndexRecord, INDEX_RECORD_LENGTH>::read_at(
                 &self.storage,
@@ -530,6 +558,7 @@ where
     S: Storage,
     Idx: Unsigned + ToPrimitive + Copy,
 {
+    /// Appends the given [`IndexRecord`] instance to the end of this [`Index`].
     pub async fn append(&mut self, index_record: IndexRecord) -> Result<Idx, IndexError<S::Error>> {
         let write_index = self.next_index;
 
