@@ -53,7 +53,7 @@ order they need.
 ## Examples
 
 Find examples demonstrating different capabilities of `laminarmq` in the
-[examples branch](https://github.com/arindas/laminarmq/tree/examples).
+[examples](./examples) directory.
 
 ## Media
 
