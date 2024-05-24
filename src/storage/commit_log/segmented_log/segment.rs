@@ -1,3 +1,9 @@
+//! Presents the `segment` units that a `segmented-log` is made out of.
+//!
+//! Each `segment` contains an `index` for addressing reocrds and a `store` for backing storage.
+//! The `index` stores a mapping from record indices to positions on the `store` file. The `store`
+//! file stores the actual records on the underlying storage.
+
 use super::{
     super::super::{
         super::common::{serde_compat::SerializationProvider, split::SplitAt},
@@ -21,12 +27,24 @@ use std::{
     time::{Duration, Instant},
 };
 
+/// [`Store`] and [`Index`] size configuration for a [`Segment`].
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
 pub struct Config<Size> {
     pub max_store_size: Size,
     pub max_store_overflow: Size,
     pub max_index_size: Size,
 }
+
+/// A segment unit in a [`SegmentedLog`](super::SegmentedLog).
+///
+/// <p align="center">
+/// <img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-indexed-segmented-log-segment.drawio.png" alt="segmented_log_segment" />
+/// </p>
+/// <p align="center">
+/// <b>Fig:</b> <code>Segment</code> diagram showing <code>Index</code>, mapping logical indices
+/// to<code>Store</code> positions and a <code>Store</code> persisting record bytes at the
+/// demarcated positions.
+/// </p>
 
 pub struct Segment<S, M, H, Idx, Size, SERP> {
     index: Index<S, Idx>,
@@ -74,17 +92,39 @@ where
     }
 }
 
+/// Error type associated with operations on [`Segment`].
 #[derive(Debug)]
 pub enum SegmentError<StorageError, SerDeError> {
+    /// Used to denote errors from the backing [`Storage`] implementation.
     StorageError(StorageError),
+
+    /// Used to denote errors from the underlying [`Store`].
     StoreError(StoreError<StorageError>),
+
+    /// Used to denote errors from the underlying [`Index`].
     IndexError(IndexError<StorageError>),
+
+    /// Used when the type used for representing positions is incompatible with [`u64`].
     IncompatiblePositionType,
+
+    /// Used to denote errors when serializing or deserializing data. (for instance, [`Record`]
+    /// metadata)
     SerializationError(SerDeError),
+
+    /// Used when the metadata associated with a [`Record`] is not found.
     RecordMetadataNotFound,
+
+    /// Used when the provided append index is not the hghest index of the [`Segment`].
     InvalidAppendIdx,
+
+    /// Used when the [`Segment`] is unable to regenerate an [`IndexRecord`] from the position and
+    /// [`RecordHeader`](super::store::common::RecordHeader).
     InvalidIndexRecordGenerated,
+
+    /// Used when usize cannot be coerced to u32 and vice versa.
     UsizeU32Inconvertible,
+
+    /// Used when a given [`Segment`] maxes out its capacity when we append to it.
     SegmentMaxed,
 }
 
@@ -105,6 +145,7 @@ where
 {
 }
 
+#[doc(hidden)]
 pub type SegmentOpError<S, SERP> =
     SegmentError<<S as Storage>::Error, <SERP as SerializationProvider>::Error>;
 
@@ -214,6 +255,15 @@ where
         Ok(write_index)
     }
 
+    /// Appends a new [`Record`] to this [`Segment`].
+    ///
+    /// Serializes the record metadata and bytes and writes them to the backing [`Store`]. Also
+    /// makes an [`IndexRecord`] entry in the underlying [`Index`] to keep track of the [`Record`].
+    ///
+    /// Returns the index at which the [`Record`] was written.
+    ///
+    /// Errors out with a [`SegmentError`] when necessary. Refer to [`SegmentError`] for more info
+    /// about error situations and types.
     pub async fn append<XBuf, X, XE>(
         &mut self,
         record: Record<M, Idx, X>,
@@ -285,6 +335,8 @@ where
     Idx: Serialize,
     SERP: SerializationProvider,
 {
+    /// Like [`Segment::append`] but the [`Record`] contains a contiguous slice of bytes, as
+    /// opposed to a stream.
     pub async fn append_record_with_contiguous_bytes<X>(
         &mut self,
         record: &Record<M, Idx, X>,
@@ -393,31 +445,46 @@ where
     SERP: SerializationProvider,
     Idx: Unsigned + FromPrimitive + Copy + Eq,
 {
+    /// Caches the [`Index`] contents i.e [`IndexRecord`] instances in memory for fast lookup.
     pub async fn cache_index(&mut self) -> Result<(), SegmentError<S::Error, SERP::Error>> {
         self.index.cache().await.map_err(SegmentError::IndexError)
     }
 
+    /// Takes the cached [`IndexRecord`] instances from this [`Segment`], leaving [`None`] in their
+    /// place.
     pub fn take_cached_index_records(&mut self) -> Option<Vec<IndexRecord>> {
         self.index.take_cached_index_records()
     }
 
+    /// Returns a reference to the cached [`IndexRecord`] instances.
     pub fn cached_index_records(&self) -> Option<&Vec<IndexRecord>> {
         self.index.cached_index_records()
     }
 }
 
+/// Backing storage for an [`Index`] and [`Store`] within a [`Segment`].
 pub struct SegmentStorage<S> {
     pub store: S,
     pub index: S,
 }
 
+/// Provides backing storage for [`Segment`] instances.
+///
+/// Used to abstract the mechanism of acquiring storage handles from the underlying persistent
+/// media.
 #[async_trait(?Send)]
 pub trait SegmentStorageProvider<S, Idx>
 where
     S: Storage,
 {
+    /// Returns the base indices of all the [`Segment`] instances persisted in this storage media.
     async fn obtain_base_indices_of_stored_segments(&mut self) -> Result<Vec<Idx>, S::Error>;
 
+    /// Obtains a [`SegmentStorage`] instance for a [`Segment`] with the given `idx` as their base
+    /// index.
+    ///
+    /// Implementations are required to allocate/arrange new storage handles if a [`Segment`] with
+    /// the given base index is not already persisted on the underlying storage media.
     async fn obtain(&mut self, idx: &Idx) -> Result<SegmentStorage<S>, S::Error>;
 }
 

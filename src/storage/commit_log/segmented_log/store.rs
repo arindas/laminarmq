@@ -1,3 +1,8 @@
+//! Present the backing storage components for a `segment` in a `segmented-log`.
+//!
+//! This module is responsible for ultimately persisting the records in our `segmented-log` to some
+//! form of [`Storage`].
+
 use self::common::RecordHeader;
 use super::super::super::{AsyncConsume, AsyncTruncate, Sizable, Storage};
 use async_trait::async_trait;
@@ -6,9 +11,11 @@ use futures_lite::StreamExt;
 use std::{error::Error as StdError, hash::Hasher, marker::PhantomData, ops::Deref};
 
 pub mod common {
+    //! Module providing common entities for all [`Store`](super::Store) implementations.
+
     use std::{
         hash::Hasher,
-        io::{ErrorKind::UnexpectedEof, Read, Write},
+        io::{self, ErrorKind::UnexpectedEof, Read, Write},
     };
 
     use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
@@ -19,6 +26,9 @@ pub mod common {
     /// Number of bytes required for storing the record header.
     pub const RECORD_HEADER_LENGTH: usize = 16;
 
+    /// Header containing the checksum and length of the bytes contained within a Record.
+    ///
+    /// Used for maintaining data integrity of all persisted data.
     #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
     pub struct RecordHeader {
         pub checksum: u64,
@@ -26,7 +36,8 @@ pub mod common {
     }
 
     impl RecordHeader {
-        pub fn read<R: Read>(source: &mut R) -> std::io::Result<RecordHeader> {
+        /// Reads a [`RecordHeader`] header instance from the given [`Read`] impl.
+        pub fn read<R: Read>(source: &mut R) -> io::Result<Self> {
             let checksum = source.read_u64::<LittleEndian>()?;
             let length = source.read_u64::<LittleEndian>()?;
 
@@ -37,13 +48,16 @@ pub mod common {
             }
         }
 
-        pub fn write<W: Write>(&self, dest: &mut W) -> std::io::Result<()> {
+        /// Writes this [`RecordHeader`] instance to the given [`Write`] impl.
+        pub fn write<W: Write>(&self, dest: &mut W) -> io::Result<()> {
             dest.write_u64::<LittleEndian>(self.checksum)?;
             dest.write_u64::<LittleEndian>(self.length)?;
 
             Ok(())
         }
 
+        /// Computes and returns the [`RecordHeader`] for a record containing the
+        /// given `record_bytes`.
         pub fn compute<H>(record_bytes: &[u8]) -> Self
         where
             H: Hasher + Default,
@@ -60,6 +74,17 @@ pub mod common {
     }
 }
 
+/// Unit of persistence within a [`Segment`](super::segment::Segment).
+///
+/// <p align="center">
+/// <img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-indexed-segmented-log-segment.drawio.png" alt="segmented_log_segment" />
+/// </p>
+/// <p align="center">
+/// <b>Fig:</b> <code>Segment</code> diagram showing <code>Store</code>, persisting
+/// record bytes at positions mapped out by the <code>Index</code> records.
+/// </p>
+///
+/// A [`Store`] contains a backing [`Storage`] impl instance to persist record bytes.
 pub struct Store<S, H> {
     storage: S,
 
@@ -73,6 +98,7 @@ impl<S: Default, H> Default for Store<S, H> {
 }
 
 impl<S, H> Store<S, H> {
+    /// Creates a new [`Store`] instance from the given backing [`Storage`] instance.
     pub fn new(storage: S) -> Self {
         Self {
             storage,
@@ -81,11 +107,20 @@ impl<S, H> Store<S, H> {
     }
 }
 
+/// Error type used for [`Store`] operations.
 #[derive(Debug)]
 pub enum StoreError<SE> {
+    /// Used to denote errors from the backing [`Storage`] implementation.
     StorageError(SE),
+
+    /// Used when the type used for representing sizes is incompatible with [`u64`].
     IncompatibleSizeType,
+
+    /// Used in the case of a data integrity error when the computed [`RecordHeader`]
+    /// doesn't match the designated [`RecordHeader`] for a given record.
     RecordHeaderMismatch,
+
+    /// Used when reading from an empty [`Store`].
     ReadOnEmptyStore,
 }
 
@@ -121,6 +156,8 @@ where
     S: Storage,
     H: Hasher + Default,
 {
+    /// Reads record bytes for a record persisted at the given `position` with the designated
+    /// [`RecordHeader`].
     pub async fn read(
         &self,
         position: &S::Position,
@@ -146,6 +183,10 @@ where
         Ok(record_bytes)
     }
 
+    /// Appends the bytes for a new record at the end of this store.
+    ///
+    /// Returns the computed [`RecordHeader`] for the provided record bytes along with the
+    /// position where the record was written.
     pub async fn append<XBuf, X, XE>(
         &mut self,
         stream: X,
