@@ -1,3 +1,8 @@
+//! Provides components necessary for mapping record indices to store-file positions in segments.
+//!
+//! This module provides [`Index`] which maintains a mapping from logical record indices to
+//! positions on the [`Store`](super::store::Store) of a [`Segment`](super::Segment).
+
 use super::{
     super::super::{AsyncConsume, AsyncIndexedRead, AsyncTruncate, Sizable, Storage},
     store::common::RecordHeader,
@@ -9,7 +14,7 @@ use std::{
     ops::Deref,
 };
 
-/// Extension used by backing files for [`Index`](Index) instances.
+/// Extension used by backing files for [Index] instances.
 pub const INDEX_FILE_EXTENSION: &str = "index";
 
 /// Number of bytes required for storing the base marker.
@@ -21,6 +26,8 @@ pub const INDEX_RECORD_LENGTH: usize = 16;
 /// Lowest underlying storage position
 pub const INDEX_BASE_POSITION: u64 = 0;
 
+/// Unit of storage on an Index. Stores position, length and checksum metadata for a single
+/// [`Record`](super::Record) persisted in the `segment` [`Store`](super::store::Store).
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct IndexRecord {
     pub checksum: u64,
@@ -37,12 +44,14 @@ impl From<IndexRecord> for RecordHeader {
     }
 }
 
+/// Marker to persist the starting `base_index` of an [`Index`] in the index [`Storage`].
 pub struct IndexBaseMarker {
     pub base_index: u64,
     _padding: u64,
 }
 
 impl IndexBaseMarker {
+    /// Creates a new [`IndexBaseMarker`] with the given `base_index`.
     pub fn new(base_index: u64) -> Self {
         Self {
             base_index,
@@ -141,17 +150,42 @@ impl SizedRecord for IndexBaseMarker {
     }
 }
 
+/// Error type associated with operations on [`Index`].
 #[derive(Debug)]
 pub enum IndexError<StorageError> {
+    /// Used to denote errors from the backing [`Storage`] implementation.
     StorageError(StorageError),
+
+    /// Used to denote I/O errors caused during serializing or deserializing [`IndexRecord`]
+    /// instances.
     IoError(std::io::Error),
+
+    /// Used when the type used for representing positions is incompatible with [`u64`].
     IncompatiblePositionType,
+
+    /// Used when the type used for representing sizes is incompatible with [`u64`].
     IncompatibleSizeType,
+
+    /// Used when the type used for representing indices is incompatible with [`u64`].
     IncompatibleIdxType,
+
+    /// Used when the index used for an operation is outside the permissible bounds for the
+    /// referenced [`Index`]
     IndexOutOfBounds,
+
+    /// Used when there is a range of indices the [`Index`] bounds which are not mapped to any
+    /// [`IndexRecord`] instances.
     IndexGapEncountered,
+
+    /// Used when the `base_index` for the referenced [`Index`] cannot be inferred from the
+    /// provided [`Storage`], in the absence of an explicitly provided `base_index`.
     NoBaseIndexFound,
+
+    /// Used when the inferred and provided `base_index` values mismatch.
     BaseIndexMismatch,
+
+    /// Used when the number of [`IndexRecord`] instances read from an [`Index`] is inconsistent
+    /// the estimated number of [`IndexRecord`] instances based on the underlying storage size.
     InconsistentIndexSize,
 }
 
@@ -191,6 +225,7 @@ macro_rules! idx_as_u64 {
 }
 
 impl IndexRecord {
+    /// Creates a new [`IndexRecord`] with the given position and [`RecordHeader`].
     pub fn with_position_and_record_header<P: ToPrimitive>(
         position: P,
         record_header: RecordHeader,
@@ -203,6 +238,31 @@ impl IndexRecord {
     }
 }
 
+/// [`Index`] for every [`Segment`](super::Segment) in a [`SegmentedLog`](super::SegmentedLog).
+///
+/// [`Index`] stores a mapping from [`Record`](super::Record) logical indices to positions on its
+/// parent [`Segment`](super::Segment) instance's underlying [`Store`](super::store::Store). It
+/// acts as an index to position translation-table when reading record contents from the underlying
+/// [`Store`](super::store::Store) using the record's logical index.
+///
+/// <p align="center">
+/// <img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-indexed-segmented-log-segment.drawio.png" alt="segmented_log_segment" />
+/// </p>
+/// <p align="center">
+/// <b>Fig:</b> <code>Segment</code> diagram showing <code>Index</code>, mapping logical indices
+/// to<code>Store</code> positions.
+/// </p>
+///
+/// [`Index`] also stores checksum and length information for every record with [`RecordHeader`].
+/// This information is used to detect any data corruption on the underlying persistent media when
+/// reading from [`Store`](super::store::Store).
+///
+/// ### Type parameters
+/// - `S`
+///     Underlying [`Storage`] implementation for storing [`IndexRecord`] instances
+/// - `Idx`
+///     Type to use for representing logical indices. (Usually an unsigned integer like u32, u64
+///     usize, etc.)
 pub struct Index<S, Idx> {
     index_records: Option<Vec<IndexRecord>>,
     base_index: Idx,
@@ -211,10 +271,12 @@ pub struct Index<S, Idx> {
 }
 
 impl<S, Idx> Index<S, Idx> {
+    /// Maps this [`Index`] to the underlying [`Storage`] implementation instance.
     pub fn into_storage(self) -> S {
         self.storage
     }
 
+    /// Obtains the logical index of the first record in this [`Index`].
     pub fn base_index(&self) -> &Idx {
         &self.base_index
     }
@@ -225,6 +287,10 @@ where
     S: Storage,
     Idx: Unsigned + FromPrimitive + Copy + Eq,
 {
+    /// Returns the estimated number of [`IndexRecord`] instances stored in the given [`Storage`].
+    ///
+    /// This function calculates this estimate by using the [`Storage`] size and the size of a
+    /// single [`IndexRecord`].
     pub fn estimated_index_records_len_in_storage(
         storage: &S,
     ) -> Result<usize, IndexError<S::Error>> {
@@ -239,6 +305,8 @@ where
         Ok(estimated_index_records_len)
     }
 
+    /// Reads and returns the `base_index` of the [`Index`] persisted on the provided [`Storage`]
+    /// instance by reading the [`IndexBaseMarker`] at [`INDEX_BASE_POSITION`].
     pub async fn base_index_from_storage(storage: &S) -> Result<Idx, IndexError<S::Error>> {
         let index_base_marker =
             PersistentSizedRecord::<IndexBaseMarker, INDEX_BASE_MARKER_LENGTH>::read_at(
@@ -253,6 +321,16 @@ where
             .and_then(|x| u64_as_idx!(x, Idx))
     }
 
+    /// Reads all [`IndexRecord`] instances persisted in the provided [`Storage`] instance.
+    ///
+    /// Returns a [`Vec`] containing the read [`IndexRecord`] instances.
+    ///
+    /// # Errors
+    ///
+    /// - [`IndexError::InconsistentIndexSize`]:
+    ///     If the number of [`IndexRecord`] instances read is inconsistent with the estimated
+    ///     number of [`IndexRecord`] instances persisted. (Calculated with
+    ///     [`Self::estimated_index_records_len_in_storage`])
     pub async fn index_records_from_storage(
         storage: &S,
     ) -> Result<Vec<IndexRecord>, IndexError<S::Error>> {
@@ -282,6 +360,19 @@ where
         }
     }
 
+    /// Returns a validated `base_index` for this [`Index`].
+    ///
+    /// Compares the given `base_index` with the read `base_index` to obtain the `base_index` for
+    /// this [`Index`]. If the `base_index` could be obtained from only one of the sources, then
+    /// that obtained value is retured. If the `base_index` could be obtained from both the soures:
+    /// - If the read values mismatch across the different sources, we return
+    /// [`IndexError::BaseIndexMismatch`]
+    /// - If the read values are same, we return the provided value
+    ///
+    /// # Errors
+    ///
+    /// - [`IndexError::BaseIndexMismatch`]: if the read `base_index` and the provided
+    /// `base_index` mismatch.
     pub async fn validated_base_index(
         storage: &S,
         base_index: Option<Idx>,
@@ -297,6 +388,9 @@ where
         }
     }
 
+    /// Creates an [`Index`] instance from the given `storage` and an optional `base_index`.
+    ///
+    /// The created [`Index`] uses the provided `storage` instance as it's storage backend.
     pub async fn with_storage_and_base_index_option(
         storage: S,
         base_index: Option<Idx>,
@@ -317,6 +411,7 @@ where
         })
     }
 
+    /// Creates an [`Index`] instance from the given `storage` and a `base_index`.
     pub async fn with_storage_and_base_index(
         storage: S,
         base_index: Idx,
@@ -324,10 +419,16 @@ where
         Self::with_storage_and_base_index_option(storage, Some(base_index)).await
     }
 
+    /// Creates an [`Index`] from the given storage.
     pub async fn with_storage(storage: S) -> Result<Self, IndexError<S::Error>> {
         Self::with_storage_and_base_index_option(storage, None).await
     }
 
+    /// Creates an [`Index`] with the given `storage` buffered `index_records` and a
+    /// validated_base_index`.
+    ///
+    /// This method doesn't use any additional checks for the `validated_base_index` and the
+    /// buffered `index_records` against the `storage` provided.
     pub fn with_storage_index_records_option_and_validated_base_index(
         storage: S,
         index_records: Option<Vec<IndexRecord>>,
@@ -344,14 +445,18 @@ where
         })
     }
 
+    /// Takes out the cached [`IndexRecord`] instances from this [`Index`], leaving the
+    /// cache empty.
     pub fn take_cached_index_records(&mut self) -> Option<Vec<IndexRecord>> {
         self.index_records.take()
     }
 
+    /// Returns a reference to the cached [`IndexRecord`] instance.
     pub fn cached_index_records(&self) -> Option<&Vec<IndexRecord>> {
         self.index_records.as_ref()
     }
 
+    /// Cache all the [`IndexRecord`] instances in the underlying `storage` in this [`Index`].
     pub async fn cache(&mut self) -> Result<(), IndexError<S::Error>> {
         if self.index_records.as_ref().is_some() {
             return Ok(());
@@ -368,6 +473,7 @@ where
     S: Default,
     Idx: Copy,
 {
+    /// Creates an empty [`Index`] with the given `base_index`.
     pub fn with_base_index(base_index: Idx) -> Self {
         Self {
             index_records: Some(Vec::new()),
@@ -435,7 +541,7 @@ where
             index_records
                 .get(normalized_index)
                 .ok_or(IndexError::IndexGapEncountered)
-                .map(|&x| x)
+                .copied()
         } else {
             PersistentSizedRecord::<IndexRecord, INDEX_RECORD_LENGTH>::read_at(
                 &self.storage,
@@ -452,6 +558,7 @@ where
     S: Storage,
     Idx: Unsigned + ToPrimitive + Copy,
 {
+    /// Appends the given [`IndexRecord`] instance to the end of this [`Index`].
     pub async fn append(&mut self, index_record: IndexRecord) -> Result<Idx, IndexError<S::Error>> {
         let write_index = self.next_index;
 

@@ -1,3 +1,99 @@
+//! A [`CommitLog`] implemented as a collection of segment files.
+//!
+//! The segmented-log data structure for storing was originally described in the [Apache
+//! Kafka](https://www.microsoft.com/en-us/research/wp-content/uploads/2017/09/Kafka.pdf) paper.
+//!
+//! <p align="center">
+//! <img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-indexed-segmented-log-landscape.svg" alt="segmented_log" />
+//! </p>
+//!
+//! A segmented log is a collection of read segments and a single write segment. Each "segment" is
+//! backed by a storage file on disk called "store".
+//!
+//! The log is:
+//! - "immutable", since only "append", "read" and "truncate" operations are allowed. It is not possible
+//!   to update or delete records from the middle of the log.
+//! - "segmented", since it is composed of segments, where each segment services records from a
+//!   particular range of offsets.
+//!
+//! All writes go to the write segment. A new record is written at the `highest_index`
+//! in the write segment. When we max out the capacity of the write segment, we close the write segment
+//! and reopen it as a read segment. The re-opened segment is added to the list of read segments. A new
+//! write segment is then created with `base_index` equal to the `highest_index` of the previous write
+//! segment.
+//!
+//! When reading from a particular index, we linearly check which segment contains the given read
+//! segment. If a segment capable of servicing a read from the given index is found, we read from that
+//! segment. If no such segment is found among the read segments, we default to the write segment. The
+//! following scenarios may occur when reading from the write segment in this case:
+//! - The write segment has synced the messages including the message at the given offset. In this case
+//!   the record is read successfully and returned.
+//! - The write segment hasn't synced the data at the given offset. In this case the read fails with a
+//!   segment I/O error.
+//! - If the offset is out of bounds of even the write segment, we return an "out of bounds" error.
+//!
+//! #### `laminarmq` specific enhancements to the `segmented_log` data structure
+//! Originally, the `segmented_log` addressed individual records with "offsets" which were continous
+//! accross all the segments. While the conventional `segmented_log` data structure is quite performant
+//! for a `commit_log` implementation, it still requires the following properties to hold true for the
+//! record being appended:
+//! - We have the entire record in memory
+//! - We know the record bytes' length and record bytes' checksum before the record is appended
+//!
+//! It's not possible to know this information when the record bytes are read from an asynchronous
+//! stream of bytes. Without the enhancements, we would have to concatenate intermediate byte buffers to
+//! a vector. This would not only incur more allocations, but also slow down our system.
+//!
+//! Hence, to accommodate this use case, we introduced an intermediate indexing layer to our design.
+//!
+//! ```text
+//! //! Index and position invariants across segmented_log
+//!
+//! // segmented_log index invariants
+//! segmented_log.lowest_index  = segmented_log.read_segments[0].lowest_index
+//! segmented_log.highest_index = segmented_log.write_segment.highest_index
+//!
+//! // record position invariants in store
+//! records[i+1].position = records[i].position + records[i].record_header.length
+//!
+//! // segment index invariants in segmented_log
+//! segments[i+1].base_index = segments[i].highest_index
+//!                          = segments[i].index[index.len-1].index + 1
+//! ```
+//! <p align="center">
+//! <b>Fig:</b> Data organisation for persisting the <code>segmented_log</code> data structure on a
+//! <code>*nix</code> file system.
+//! </p>
+//!
+//! In the design, instead of referring to records with a raw offset, we refer to them with indices.
+//! The index in each segment translates the record indices to raw file position in the segment store
+//! file.
+//!
+//! Now, the store append operation accepts an asynchronous stream of bytes instead of a contiguously
+//! laid out slice of bytes. We use this operation to write the record bytes, and at the time of writing
+//! the record bytes, we calculate the record bytes' length and checksum. Once we are done writing the
+//! record bytes to the store, we write it's corresponding `record_header` (containing the checksum and
+//! length), position and index as an `index_record` in the segment index.
+//!
+//! This provides two quality of life enhancements:
+//! - Allow asynchronous streaming writes, without having to concatenate intermediate byte buffers
+//! - Records are accessed much more easily with easy to use indices
+//!
+//! Now, to prevent a malicious user from overloading our storage capacity and memory with a maliciously
+//! crafted request which infinitely loops over some data and sends it to our server, we have provided
+//! an optional `append_threshold` parameter to all append operations. When provided, it prevents
+//! streaming append writes to write more bytes than the provided `append_threshold`.
+//!
+//! At the segment level, this requires us to keep a segment overflow capacity. All segment append
+//! operations now use `segment_capacity - segment.size + segment_overflow_capacity` as the
+//! `append_threshold` value. A good `segment_overflow_capacity` value could be `segment_capacity / 2`.
+//!
+//! ## Why is this nested as a submodule?
+//!
+//! There can be other implementations of a [`CommitLog`] which have a completely different
+//! structure. So we make "segmented-log" a submodule to represent it as one of the possible
+//! implementations.
+
 pub mod index;
 pub mod segment;
 pub mod store;
@@ -31,9 +127,13 @@ use std::{
     time::Duration,
 };
 
+/// Represents metadata for [`Record`] instances in the [`SegmentedLog`].
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct MetaWithIdx<M, Idx> {
+    /// Generic metadata for the record as necessary
     pub metadata: M,
+
+    /// Index of the record within the [`SegmentedLog`].
     pub index: Option<Idx>,
 }
 
@@ -41,6 +141,10 @@ impl<M, Idx> MetaWithIdx<M, Idx>
 where
     Idx: Eq,
 {
+    /// Returns a [`Some`]`(`[`MetaWithIdx`]`)` containing this instance's `metadata` and the
+    /// provided `anchor_idx` if the indices match or this instance's `index` is `None`.
+    ///
+    /// Returns `None` if this instance contains an `index` and the indices mismatch.
     pub fn anchored_with_index(self, anchor_idx: Idx) -> Option<Self> {
         let index = match self.index {
             Some(idx) if idx != anchor_idx => None,
@@ -54,17 +158,36 @@ where
     }
 }
 
+/// Record type alias for [`SegmentedLog`] using [`MetaWithIdx`] as the metadata.
 pub type Record<M, Idx, T> = super::Record<MetaWithIdx<M, Idx>, T>;
 
+/// Error type associated with [`SegmentedLog`] operations.
 #[derive(Debug)]
 pub enum SegmentedLogError<SE, SDE, CE> {
+    /// Used to denote errors from the underlying [`Storage`] implementation.
     StorageError(SE),
+
+    /// Used to denote errors from operations on [`Segment`] instances.
     SegmentError(segment::SegmentError<SE, SDE>),
+
+    /// Used to denote errors from the [`SegmentedLog`] inner cache.
     CacheError(CE),
+
+    /// Used when the inner cache is not configured while using APIs that expect it.
     CacheNotFound,
+
+    /// Used when the resulting `base_index` of a [`Segment`] in the [`SegmentedLog`]
+    /// is lesser than the `initial_index` configured at the [`SegmentedLog`] level.
     BaseIndexLesserThanInitialIndex,
+
+    /// Used when the _write_ [`Segment`] containing [`Option`] is set to `None`
     WriteSegmentLost,
+
+    /// Used when the given index is outside the range `[lowest_index, highest_index)`
     IndexOutOfBounds,
+
+    /// Used when no [`Record`] is found at a valid index inside the range
+    /// `[lowest_index, highest_index]`
     IndexGapEncountered,
 }
 
@@ -87,13 +210,174 @@ where
 {
 }
 
+/// Configuration for [`SegmentedLog`].
+///
+/// Used to configure specific invariants of a segmented log.
 #[derive(Default, Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Config<Idx, Size> {
+    /// Number of [`Segment`] instances in the [`SegmentedLog`] to be _index-cached_.
+    ///
+    /// _Index-cached_ [`Segment`] instances cache their inner [`Index`](index::Index) in memory.
+    /// This helps to avoid I/O for reading [`Record`] persistent metadata (such as position in
+    /// store file or checksum) everytime the [`Record`] is read from the [`Segment`]
+    ///
+    /// This configuration has the following effects depending on it's values:
+    /// - [`None`]: Default, *all* [`Segment`] instances are _index-cached_
+    /// - [`Some`]`(0)`: *No* [`Segment`] instances are _index-cached_
+    /// - [`Some`]`(<non-zero-value>)`: A *maximum of the given number* of [`Segment`] instances are
+    /// _index-cached_ at any time.
+    ///
+    /// >You may think of it this way -- you can opt-in to optional index-caching by specific a
+    /// >[`Some`]. Or, you can keep using the default setting to index-cache all segments by
+    /// >specifying [`None`].
+    ///
+    /// _Optional index-caching_ is benefical in [`SegmentedLog`] with a large number of
+    /// [`Segment`] instances, only a few of which are actively read from at any given point of
+    /// time. This is beneifical when working with limited heap memory but a large amount of
+    /// storage.
+    ///
+    /// <div></div>
     pub num_index_cached_read_segments: Option<usize>,
+
+    /// [`Segment`] specific configuration to be used for all [`Segment`] instances in the
+    /// [`SegmentedLog`] in question.
+    ///
+    /// <div></div>
     pub segment_config: segment::Config<Size>,
+
+    /// Lowest possible record index in the [`SegmentedLog`] in question.
+    ///
+    /// `( initial_index <= read_segments[0].base_index )`
     pub initial_index: Idx,
 }
 
+/// The [`SegmentedLog`] abstraction, implementing a [`CommitLog`] with a collection of _read_
+/// [`Segment`]`s` and a single _write_ [`Segment`].
+///
+/// Uses a [`Vec`] to store _read_ [`Segment`] instances and an [`Option`] to store the _write_
+/// [`Segment`]. An [`Option`] is used so that we can easily move out the _write_ [`Segment`] or
+/// move in a new one when implementing some of the APIs. The
+/// [`SegmentedLogError::WriteSegmentLost`] error is a result of this implementation decision.
+///
+/// [`SegmentedLog`] also has the ability to only optionally _index-cache_ some of the [`Segment`]
+/// instances.
+///
+/// >_Index-cached_ [`Segment`] instances cache their inner [`Index`](index::Index) in memory.
+/// >This helps to avoid I/O for reading [`Record`] persistent metadata (such as position in store
+/// >file, checksum) everytime the [`Record`] is read from the [`Segment`]
+///
+/// >_Optional index-caching_ is benefical in [`SegmentedLog`] with a large number of
+/// >[`Segment`] instances, only a few of which are actively read from at any given point of
+/// >time. This is beneifical when working with limited heap memory but a large amount of
+/// >storage.
+///
+/// [`SegmentedLog`] maintains a [`Cache`] to keep track of which [`Segment`] instances to
+/// _index-cache_. The _index-caching_ behaviour will depend on the [`Cache`] implementation used.
+/// (For instance, an `LRUCache` would cache the least recently used [`Segment`] instances.) In
+/// order to enable such behaviour, we perform lookups and inserts on this inner cache when
+/// referring to any [`Segment`] for any operation.
+///
+/// The _write_ [`Segment`] is always _index-cached_.
+///
+/// Only the metadata associated with [`Record`] instances are serialized or deserialized. The
+/// reocord content bytes are always written and read from the [`Storage`] as-is.
+///
+/// Every [`Segment`] in a [`SegmentedLog`] has fixed maximum [`Storage`] size. Writes always go to
+/// the current _write_ [`Segment`]. Whenever a _write_ [`Segment`] exceeds the configured storage
+/// size, it is rotated back to the collection of _read_ [`Segment`] instances and a new _write_
+/// [`Segment`] is created in it's place, with it's `base_index` as the `highest_index` of the previous
+/// _write_ [`Segment`].
+///
+/// Reads are serviced by both _read_ and _write_ [`Segment`] instances depending on whether the
+/// [`Record`] to be read lies within their [`Record`] index range.
+///
+/// ### Type parameters
+/// - `S`: [`Storage`] implementation to be used for [`Segment`] instances
+/// - `M`: Metadata to be used for [`Record`] instances
+/// - `H`: [`Hasher`] to use for computing checksums of our [`Record`] contents
+/// - `Idx`: Unsigned integer type to used for represeting record indices
+/// - `Size`: Unsized integer to represent record and persistent storage sizes
+/// - `SERP`: [`SerializationProvider`] used for serializing and deserializing metadata associated
+/// with our records.
+/// - `SSP`: [`SegmentStorageProvider`] used for obtaining backing storage for our [`Segment`]
+/// instances
+/// - `C`: [`Cache`] implementation to use for _index-caching_ behaviour. You may use
+/// [`NoOpCache`](crate::common::cache::NoOpCache) when opting out of _optional index-caching_,
+/// i.e. using [`None`] for [`Config::num_index_cached_read_segments`].
+///
+/// ### Example
+///
+/// Here's an example using
+/// [`InMemStorage`](crate::storage::impls::in_mem::storage::InMemStorage):
+///
+/// ```
+/// use futures_lite::{stream, future::block_on, StreamExt};
+/// use laminarmq::{
+///     common::{cache::NoOpCache, serde_compat::bincode},
+///     storage::{
+///         commit_log::{
+///             segmented_log::{segment::Config as SegmentConfig, Config, MetaWithIdx, SegmentedLog},
+///             CommitLog, Record,
+///         },
+///         impls::{
+///             common::DiskBackedSegmentStorageProvider,
+///             in_mem::{segment::InMemSegmentStorageProvider, storage::InMemStorage},
+///         },
+///         AsyncConsume,
+///     },
+/// };
+/// use std::convert::Infallible;
+///
+/// fn record<X, Idx>(stream: X) -> Record<MetaWithIdx<(), Idx>, X> {
+///     Record {
+///         metadata: MetaWithIdx {
+///             metadata: (),
+///             index: None,
+///         },
+///         value: stream,
+///     }
+/// }
+///
+/// fn infallible<T>(t: T) -> Result<T, Infallible> {
+///     Ok(t)
+/// }
+///
+/// const IN_MEMORY_SEGMENTED_LOG_CONFIG: Config<u32, usize> = Config {
+///     segment_config: SegmentConfig {
+///         max_store_size: 1048576, // = 1MiB in bytes
+///         max_store_overflow: 524288,
+///         max_index_size: 1048576,
+///     },
+///     initial_index: 0,
+///     num_index_cached_read_segments: None,
+/// };
+///  
+/// block_on(async {
+///     let mut segmented_log = SegmentedLog::<
+///         InMemStorage,
+///         (),
+///         crc32fast::Hasher,
+///         u32,
+///         usize,
+///         bincode::BinCode,
+///         _,
+///         NoOpCache<usize, ()>,
+///     >::new(
+///         IN_MEMORY_SEGMENTED_LOG_CONFIG,
+///         InMemSegmentStorageProvider::<u32>::default(),
+///     )
+///     .await
+///     .unwrap();
+///
+///     let tiny_message = stream::once(b"Hello World!" as &[u8])
+///         .map(infallible);
+///
+///     segmented_log
+///         .append(record(tiny_message))
+///         .await
+///         .unwrap();
+/// });
+/// ```
 pub struct SegmentedLog<S, M, H, Idx, Size, SERP, SSP, C> {
     write_segment: Option<Segment<S, M, H, Idx, Size, SERP>>,
     read_segments: Vec<Segment<S, M, H, Idx, Size, SERP>>,
@@ -105,6 +389,7 @@ pub struct SegmentedLog<S, M, H, Idx, Size, SERP, SSP, C> {
     segment_storage_provider: SSP,
 }
 
+/// Type alias for [`SegmentedLogError`] with additional type parameter trait bounds.
 pub type LogError<S, SERP, C> = SegmentedLogError<
     <S as Storage>::Error,
     <SERP as SerializationProvider>::Error,
@@ -112,6 +397,8 @@ pub type LogError<S, SERP, C> = SegmentedLogError<
 >;
 
 impl<S, M, H, Idx, Size, SERP, SSP, C> SegmentedLog<S, M, H, Idx, Size, SERP, SSP, C> {
+    /// Returns an iterator containing immutable references all the [`Segment`] instances in this
+    /// [`SegmentedLog`].
     fn segments(&self) -> impl Iterator<Item = &Segment<S, M, H, Idx, Size, SERP>> {
         self.read_segments.iter().chain(self.write_segment.iter())
     }
@@ -139,11 +426,36 @@ where
     C: Cache<usize, ()> + Default,
     C::Error: Debug,
 {
+    /// Creates a new [`SegmentedLog`] instance with the given [`Config`] and
+    /// [`SegmentStorageProvider`] implementation.
+    ///
+    /// This function first scans for already persisted [`Segment`] instances in the given
+    /// [`SegmentStorageProvider`]. The segments are already sorted by their `base_index`. Next it
+    /// uses the last segment in this sorted order as the `write_segment` and the remaining _n - 1_
+    /// segments as the `read_segments`.
+    ///
+    /// If no segments are already persisted in the provided storage, we create a new
+    /// `write_segment` with the given [`Config::initial_index`] and no read segments. Read
+    /// segments are created when this `write_segment` is rotated back as a read segment.
+    ///
+    /// Returns a [`SegmentedLog`].
+    ///
+    /// # Errors
+    ///
+    /// - [`SegmentedLogError::StorageError`]: if there's an error in scanning for the segments on the
+    /// [`SegmentStorageProvider`]
+    /// - [`SegmentedLogError::BaseIndexLesserThanInitialIndex`]: if the `base_index` of the first
+    /// segment read from the storage is lesser than the configured `initial_index`.
+    /// - [`SegmentedLogError::SegmentError`]: if there's an error in creating a [`Segment`].
+    /// - [`SegmentedLogError::WriteSegmentLost`]: if there's an error in obtaining the _write_
+    /// segment after creating all the [`Segment`] instances.
+    /// - [`SegmentedLogError::CacheError`]: if there's an error in initializing the inner cache
+    /// for _optional-index-caching_.
     pub async fn new(
         config: Config<Idx, S::Size>,
         mut segment_storage_provider: SSP,
     ) -> Result<Self, LogError<S, SERP, C>> {
-        let mut segment_base_indices = segment_storage_provider
+        let segment_base_indices = segment_storage_provider
             .obtain_base_indices_of_stored_segments()
             .await
             .map_err(SegmentedLogError::StorageError)?;
@@ -155,36 +467,33 @@ where
             _ => Ok(()),
         }?;
 
-        let write_segment_base_index = segment_base_indices.pop().unwrap_or(config.initial_index);
+        let (segment_base_indices, write_segment_base_index) =
+            match segment_base_indices.last().cloned() {
+                Some(last_index) => (segment_base_indices, last_index),
+                None => (vec![config.initial_index], config.initial_index),
+            };
 
-        let read_segment_base_indices = segment_base_indices;
+        let mut segments = Vec::with_capacity(segment_base_indices.len());
 
-        let mut read_segments = Vec::<Segment<S, M, H, Idx, S::Size, SERP>>::with_capacity(
-            read_segment_base_indices.len(),
-        );
+        for segment_base_index in segment_base_indices {
+            // index-cache the current segment if this the write_segment or
+            // "optional-index-caching" is disabled.
+            let cache_index_records_flag = (segment_base_index == write_segment_base_index)
+                || config.num_index_cached_read_segments.is_none();
 
-        for segment_base_index in read_segment_base_indices {
-            read_segments.push(
+            segments.push(
                 Segment::with_segment_storage_provider_config_base_index_and_cache_index_records_flag(
                     &mut segment_storage_provider,
                     config.segment_config,
                     segment_base_index,
-                    config.num_index_cached_read_segments.is_none(),
+                    cache_index_records_flag ,
                 )
                 .await
                 .map_err(SegmentedLogError::SegmentError)?,
             );
         }
 
-        let write_segment =
-            Segment::with_segment_storage_provider_config_base_index_and_cache_index_records_flag(
-                &mut segment_storage_provider,
-                config.segment_config,
-                write_segment_base_index,
-                true, // write segment is always cached
-            )
-            .await
-            .map_err(SegmentedLogError::SegmentError)?;
+        let write_segment = segments.pop().ok_or(SegmentedLogError::WriteSegmentLost)?;
 
         let cache = match config.num_index_cached_read_segments {
             Some(cache_capacity) => {
@@ -202,7 +511,7 @@ where
 
         Ok(Self {
             write_segment: Some(write_segment),
-            read_segments,
+            read_segments: segments,
             config,
             segments_with_cached_index: cache,
             segment_storage_provider,
@@ -210,6 +519,7 @@ where
     }
 }
 
+/// Creates a new _write_ [`Segment`] for the given `segmented_log` wth the given `base_index`.
 macro_rules! new_write_segment {
     ($segmented_log:ident, $base_index:ident) => {
         Segment::with_segment_storage_provider_config_base_index_and_cache_index_records_flag(
@@ -223,6 +533,7 @@ macro_rules! new_write_segment {
     };
 }
 
+/// Consumes the given [`Segment`] with the provided [`AsyncConsume`] method.
 macro_rules! consume_segment {
     ($segment:ident, $consume_method:ident) => {
         $segment
@@ -232,6 +543,7 @@ macro_rules! consume_segment {
     };
 }
 
+/// Takes the _write_ [`Segment`] from the given [`SegmentedLog`].
 macro_rules! take_write_segment {
     ($segmented_log:ident) => {
         $segmented_log
@@ -241,6 +553,8 @@ macro_rules! take_write_segment {
     };
 }
 
+/// Obtains a reference to the _write_ [`Segment`] of the given [`SegmentedLog`] using the
+/// provided reference function. (can be [`Option::as_mut`] or [`Option::as_ref`]).
 macro_rules! write_segment_ref {
     ($segmented_log:ident, $ref_method:ident) => {
         $segmented_log
@@ -284,6 +598,22 @@ where
             .unwrap_or(self.config.initial_index)
     }
 
+    /// Reads the [`Record`] at the given `idx`.
+    ///
+    /// Note that this method is purely idempotent and doesn't trigger the _optional-index-caching_
+    /// behaviour. If the [`Segment`] containing the [`Record`] is not _index-cached_, it incurs an
+    /// additional I/O cost to read the position and checksum metadata for the [`Record`].
+    ///
+    /// If however all [`Segment`] instances are _index-cached_ i.e when using the default
+    /// configuration, no additional I/O cost is incurred.
+    ///
+    /// Returns the [`Record`] read.
+    ///
+    /// ## Errors
+    /// - [`SegmentedLogError::IndexOutOfBounds`]: if the provided `idx` is out of the index bounds
+    /// of this [`SegmentedLog`]
+    /// - [`SegmentedLogError::SegmentError`]: if there is any error in reading the [`Record`] from
+    /// the underlying [`Segment`].
     async fn read(&self, idx: &Self::Idx) -> Result<Self::Value, Self::ReadError> {
         if !self.has_index(idx) {
             return Err(SegmentedLogError::IndexOutOfBounds);
@@ -297,22 +627,10 @@ where
 }
 
 #[derive(Debug)]
-enum CacheOpKind {
-    Uncache,
-    Cache,
-    None,
-}
-
-#[derive(Debug)]
-struct CacheOp {
-    segment_id: usize,
-    kind: CacheOpKind,
-}
-
-impl CacheOp {
-    fn new(segment_id: usize, kind: CacheOpKind) -> Self {
-        Self { segment_id, kind }
-    }
+enum SegmentIndexCacheOp {
+    Drop { evicted_segment_id: usize },
+    Cache { segment_id: usize },
+    Nop,
 }
 
 impl<S, M, H, Idx, SERP, SSP, C> SegmentedLog<S, M, H, Idx, S::Size, SERP, SSP, C>
@@ -335,10 +653,7 @@ where
             return Ok(());
         }
 
-        let mut cache_op_buf = [
-            CacheOp::new(0, CacheOpKind::None),
-            CacheOp::new(0, CacheOpKind::None),
-        ];
+        let mut cache_op_buf = [SegmentIndexCacheOp::Nop, SegmentIndexCacheOp::Nop];
 
         let cache = self
             .segments_with_cached_index
@@ -351,15 +666,15 @@ where
                 Ok(Lookup::Hit(_)) => Ok(&cache_op_buf[..0]),
                 Ok(Lookup::Miss) => match cache.insert(segment_id, ()) {
                     Ok(Eviction::None) => {
-                        cache_op_buf[0] = CacheOp::new(segment_id, CacheOpKind::Cache);
+                        cache_op_buf[0] = SegmentIndexCacheOp::Cache { segment_id };
                         Ok(&cache_op_buf[..1])
                     }
                     Ok(Eviction::Block {
-                        key: evicted_id,
+                        key: evicted_segment_id,
                         value: _,
                     }) => {
-                        cache_op_buf[0] = CacheOp::new(evicted_id, CacheOpKind::Uncache);
-                        cache_op_buf[1] = CacheOp::new(segment_id, CacheOpKind::Cache);
+                        cache_op_buf[0] = SegmentIndexCacheOp::Drop { evicted_segment_id };
+                        cache_op_buf[1] = SegmentIndexCacheOp::Cache { segment_id };
                         Ok(&cache_op_buf[..])
                     }
                     Ok(Eviction::Value(_)) => Ok(&cache_op_buf[..0]),
@@ -371,15 +686,17 @@ where
         .map_err(SegmentedLogError::CacheError)?;
 
         for segment_cache_op in cache_ops {
-            let segment = self.resolve_segment_mut(Some(segment_cache_op.segment_id))?;
-
-            match segment_cache_op.kind {
-                CacheOpKind::Uncache => drop(segment.take_cached_index_records()),
-                CacheOpKind::Cache => segment
+            match *segment_cache_op {
+                SegmentIndexCacheOp::Drop { evicted_segment_id } => drop(
+                    self.resolve_segment_mut(Some(evicted_segment_id))?
+                        .take_cached_index_records(),
+                ),
+                SegmentIndexCacheOp::Cache { segment_id } => self
+                    .resolve_segment_mut(Some(segment_id))?
                     .cache_index()
                     .await
                     .map_err(SegmentedLogError::SegmentError)?,
-                CacheOpKind::None => {}
+                SegmentIndexCacheOp::Nop => {}
             }
         }
 
@@ -428,6 +745,13 @@ where
     C: Cache<usize, ()>,
     C::Error: Debug,
 {
+    /// Exclusively reads the [`Record`] from the [`Segment`] specified by the provided `segment_id`
+    /// at the provided `idx`.
+    ///
+    /// This method uses the _optional index-caching_ behaviour by using the inner cache.
+    ///
+    /// Returns a [`SeqRead`] containing the [`Record`] and next index to read from, or seek
+    /// information containing which [`Segment`] and `idx` to read from next.
     pub async fn read_seq_exclusive(
         &mut self,
         segment_id: usize,
@@ -461,6 +785,9 @@ where
     C: Cache<usize, ()>,
     C::Error: Debug,
 {
+    /// Exclusively reads the [`Record`] at the given `idx` from this [`SegmentedLog`].
+    ///
+    /// This method triggers the _optional index-caching_ behaviour by using the inner cache.
     async fn exclusive_read(&mut self, idx: &Self::Idx) -> Result<Self::Value, Self::ReadError> {
         if !self.has_index(idx) {
             return Err(SegmentedLogError::IndexOutOfBounds);
@@ -477,21 +804,54 @@ where
     }
 }
 
+/// Returned by methods which allow manual resolution of which [`Segment`] to read from in a
+/// [`SegmentedLog`].
+///
+/// Methods like [`SegmentedLog::read_seq`] and [`SegmentedLog::read_seq_exclusive`] allow manual
+/// control over which [`Segment`] to read from by explicitly having a `segment_id` as a parameter.
+/// [`SeqRead`] is used to represent the value of these operations.
+///
+/// APIs like these enable avoiding searching for which [`Segment`] can service a `read()` since we
+/// can explicitly pass in a `segment_id` to specify which [`Segment`] to read from. This helps us
+/// avoid the cost of searching when simply contiguously iterating over all the [`Record`]
+/// instances in a [`SegmentedLog`].
+///
+/// Generally, APIs using this type are meant to be used as follows:
+///
+/// ```text
+/// let (mut segment_id, mut idx) = (0, 0);
+///
+/// while let Ok(seq_read) = segmented_log.seq_read().await {
+///     match seq_read {
+///         Read { record, next_idx } => {
+///             // do something with record
+///             idx = next_idx;
+///         }
+///         Seek { next_segment, next_idx } => {
+///             segment_id, idx = next_segment, next_idx
+///         }
+///     };
+/// }
+/// ```
 pub enum SeqRead<M, Idx, C> {
+    /// A valid _read_ containing the read [`Record`] and the index to the next [`Record`]
     Read {
         record: Record<M, Idx, C>,
         next_idx: Idx,
     },
-    Seek {
-        next_segment: usize,
-        next_idx: Idx,
-    },
+
+    /// Used when the _read_ hits the end of a [`Segment`] and the next [`Record`] can be found in
+    /// the next [`Segment`]. Contains the `segment_id` of the next [`Segment`] to read from and
+    /// the `index` to read at.
+    Seek { next_segment: usize, next_idx: Idx },
 }
 
-pub type ResolvedSegmentMutResult<'a, S, M, H, Idx, SERP, C> =
+/// Used as the result of resolving a `segment_id` ta a mutable ref to a [`Segment`].
+type ResolvedSegmentMutResult<'a, S, M, H, Idx, SERP, C> =
     Result<&'a mut Segment<S, M, H, Idx, <S as Sizable>::Size, SERP>, LogError<S, SERP, C>>;
 
-pub type ResolvedSegmentResult<'a, S, M, H, Idx, SERP, C> =
+/// Used as the result of resolving a `segment_id` ta an immutable ref to a [`Segment`].
+type ResolvedSegmentResult<'a, S, M, H, Idx, SERP, C> =
     Result<&'a Segment<S, M, H, Idx, <S as Sizable>::Size, SERP>, LogError<S, SERP, C>>;
 
 impl<S, M, H, Idx, SERP, SSP, C> SegmentedLog<S, M, H, Idx, S::Size, SERP, SSP, C>
@@ -567,6 +927,11 @@ where
         }
     }
 
+    /// Reads the [`Record`] from the [`Segment`] specified by the provided `segment_id` at the
+    /// provided `idx`.
+    ///
+    /// Returns a [`SeqRead`] containing the [`Record`] and next index to read from, or seek
+    /// information containing which [`Segment`] and `idx` to read from next.
     pub async fn read_seq(
         &self,
         segment_id: usize,
@@ -583,6 +948,8 @@ where
         self.read_seq_unchecked(segment_id, idx).await
     }
 
+    /// Returns a [`Stream`] containing [`Record`] instances within the given `index_bounds` in
+    /// this [`SegmentedLog`], ordered by record index.
     pub fn stream<RB>(
         &self,
         index_bounds: RB,
@@ -611,6 +978,8 @@ where
             .flatten()
     }
 
+    /// Returns a [`Stream`] containing all [`Record`] instances in this [`SegmentedLog`], ordered
+    /// by record index.
     pub fn stream_unbounded(&self) -> impl Stream<Item = Record<M, Idx, S::Content>> + '_ {
         stream::iter(self.segments())
             .map(move |segment| indexed_read_stream(segment, ..))
@@ -632,6 +1001,16 @@ where
     C: Cache<usize, ()>,
     C::Error: Debug,
 {
+    /// Rotates the current _write_ [`Segment`] to a _read_ [`Segment`], creating a new _write_
+    /// [`Segment`] in its place.
+    ///
+    /// Closes the current _write_ [`Segment`], reopens it as a new _read_ [`Segment`] and appends
+    /// it the the collection of _read_ [`Segment`] instances. Next, a new _write_ [`Segment`] is
+    /// created for this [`SegmentedLog`] with it's `base_index` set to the `highest_index` of the
+    /// previous _write_ [`Segment`].
+    ///
+    /// This operations is used when the _write_ [`Segment`] exceeds the confiured [`Segment`]
+    /// storage size limit and needs to be rotated.
     pub async fn rotate_new_write_segment(&mut self) -> Result<(), LogError<S, SERP, C>> {
         self.flush().await?;
 
@@ -652,6 +1031,7 @@ where
         Ok(())
     }
 
+    /// Flushes all writes in the current _write_ [`Segment`] to persistent [`Storage`].
     pub async fn flush(&mut self) -> Result<(), LogError<S, SERP, C>> {
         let write_segment = take_write_segment!(self)?;
 
@@ -665,6 +1045,10 @@ where
         Ok(())
     }
 
+    /// Removes all [`Segment`] instances that are older than the given `expiry_duration`.
+    ///
+    /// Returns the total number of [`Record`] instances removed from removing the [`Segment`]
+    /// instances.
     pub async fn remove_expired_segments(
         &mut self,
         expiry_duration: Duration,
@@ -726,6 +1110,9 @@ where
     C: Cache<usize, ()>,
     C::Error: Debug,
 {
+    /// Appends a new [`Record`] containing value bytes laid out in a contiguous fashion.
+    ///
+    /// Returns the index of the newly appended [`Record`].
     pub async fn append_record_with_contiguous_bytes<X>(
         &mut self,
         record: &Record<M, Idx, X>,

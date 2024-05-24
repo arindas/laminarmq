@@ -24,7 +24,7 @@ pub mod segmented_log {
             async_io::block_on(async {
                 segmented_log::test::_test_segmented_log_remove_expired_segments(
                     InMemSegmentStorageProvider::<u32>::default(),
-                    |duration| async { () }.delay(Duration::from(duration)),
+                    |duration| async {}.delay(Duration::from(duration)),
                     PhantomData::<((), crc32fast::Hasher, bincode::BinCode)>,
                 )
                 .await;
@@ -36,7 +36,7 @@ pub mod segmented_log {
             async_io::block_on(async {
                 segmented_log::test::_test_segmented_log_segment_index_caching(
                     InMemSegmentStorageProvider::<u32>::default(),
-                    |duration| async { () }.delay(Duration::from(duration)),
+                    |duration| async {}.delay(Duration::from(duration)),
                     true,
                     PhantomData::<((), crc32fast::Hasher, bincode::BinCode)>,
                 )
