@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["glommio_impl"],"trait":["SplitAt"]};
+window.SIDEBAR_ITEMS = {"mod":["impls"],"trait":["SplitAt"]};

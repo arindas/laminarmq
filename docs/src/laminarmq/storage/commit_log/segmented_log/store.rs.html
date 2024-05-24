@@ -1,4 +1,6 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/storage/commit_log/segmented_log/store.rs`."><title>store.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/SourceSerif4-Bold-a2c9cd1067f8b328.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../../../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-fa3bb1812debf86c.css"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="laminarmq" data-themes="" data-resource-suffix="" data-rustdoc-version="1.74.0 (79e9716c9 2023-11-13)" data-channel="1.74.0" data-search-js="search-8be46b629f5f14a8.js" data-settings-js="settings-74424d7eec62a23e.js" ><script src="../../../../../static.files/storage-fec3eaa3851e447d.js"></script><script defer src="../../../../../static.files/src-script-3280b574d94e47b4.js"></script><script defer src="../../../../../src-files.js"></script><script defer src="../../../../../static.files/main-c5bd66d33317d69f.js"></script><noscript><link rel="stylesheet" href="../../../../../static.files/noscript-5d8b3c7633ad77ba.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-16x16-8b506e7a72182f1c.png"><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-422f7d1d52889060.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-2c020d218678b618.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"></nav><main><nav class="sub"><a class="sub-logo-container" href="../../../../../laminarmq/index.html"><img class="rust-logo" src="../../../../../static.files/rust-logo-151179464ae7ed46.svg" alt="logo"></a><form class="search-form"><span></span><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><a href="../../../../../help.html">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../../static.files/wheel-7b819b6101059cd0.svg"></a></div></form></nav><section id="main-content" class="content"><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers"><a href="#1" id="1">1</a>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/storage/commit_log/segmented_log/store.rs`."><title>store.rs - source</title><script> if (window.location.protocol !== "file:") document.write(`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2">`)</script><link rel="stylesheet" href="../../../../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-e935ef01ae1c1829.css"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="laminarmq" data-themes="" data-resource-suffix="" data-rustdoc-version="1.78.0 (9b00956e5 2024-04-29)" data-channel="1.78.0" data-search-js="search-42d8da7a6b9792c2.js" data-settings-js="settings-4313503d2e1961c2.js" ><script src="../../../../../static.files/storage-4c98445ec4002617.js"></script><script defer src="../../../../../static.files/src-script-e66d777a5a92e9b2.js"></script><script defer src="../../../../../src-files.js"></script><script defer src="../../../../../static.files/main-12cf3b4f4f9dc36d.js"></script><noscript><link rel="stylesheet" href="../../../../../static.files/noscript-04d5337699b92874.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-16x16-8b506e7a72182f1c.png"><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-422f7d1d52889060.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-2c020d218678b618.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title">
+            <h2>Files</h2></div></nav><div class="sidebar-resizer"></div>
+    <main><nav class="sub"><form class="search-form"><span></span><div id="sidebar-button" tabindex="-1"><a href="../../../../../laminarmq/all.html" title="show sidebar"></a></div><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" tabindex="-1"><a href="../../../../../help.html" title="help">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../../static.files/wheel-7b819b6101059cd0.svg"></a></div></form></nav><section id="main-content" class="content"><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers"><a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
 <a href="#4" id="4">4</a>
@@ -332,7 +334,53 @@
 <a href="#332" id="332">332</a>
 <a href="#333" id="333">333</a>
 <a href="#334" id="334">334</a>
-</pre></div><pre class="rust"><code><span class="kw">use </span><span class="self">self</span>::common::RecordHeader;
+<a href="#335" id="335">335</a>
+<a href="#336" id="336">336</a>
+<a href="#337" id="337">337</a>
+<a href="#338" id="338">338</a>
+<a href="#339" id="339">339</a>
+<a href="#340" id="340">340</a>
+<a href="#341" id="341">341</a>
+<a href="#342" id="342">342</a>
+<a href="#343" id="343">343</a>
+<a href="#344" id="344">344</a>
+<a href="#345" id="345">345</a>
+<a href="#346" id="346">346</a>
+<a href="#347" id="347">347</a>
+<a href="#348" id="348">348</a>
+<a href="#349" id="349">349</a>
+<a href="#350" id="350">350</a>
+<a href="#351" id="351">351</a>
+<a href="#352" id="352">352</a>
+<a href="#353" id="353">353</a>
+<a href="#354" id="354">354</a>
+<a href="#355" id="355">355</a>
+<a href="#356" id="356">356</a>
+<a href="#357" id="357">357</a>
+<a href="#358" id="358">358</a>
+<a href="#359" id="359">359</a>
+<a href="#360" id="360">360</a>
+<a href="#361" id="361">361</a>
+<a href="#362" id="362">362</a>
+<a href="#363" id="363">363</a>
+<a href="#364" id="364">364</a>
+<a href="#365" id="365">365</a>
+<a href="#366" id="366">366</a>
+<a href="#367" id="367">367</a>
+<a href="#368" id="368">368</a>
+<a href="#369" id="369">369</a>
+<a href="#370" id="370">370</a>
+<a href="#371" id="371">371</a>
+<a href="#372" id="372">372</a>
+<a href="#373" id="373">373</a>
+<a href="#374" id="374">374</a>
+<a href="#375" id="375">375</a>
+</pre></div><pre class="rust"><code><span class="doccomment">//! Present the backing storage components for a `segment` in a `segmented-log`.
+//!
+//! This module is responsible for ultimately persisting the records in our `segmented-log` to some
+//! form of [`Storage`].
+
+</span><span class="kw">use </span><span class="self">self</span>::common::RecordHeader;
 <span class="kw">use </span><span class="kw">super</span>::<span class="kw">super</span>::<span class="kw">super</span>::{AsyncConsume, AsyncTruncate, Sizable, Storage};
 <span class="kw">use </span>async_trait::async_trait;
 <span class="kw">use </span>futures_core::Stream;
@@ -340,27 +388,33 @@
 <span class="kw">use </span>std::{error::Error <span class="kw">as </span>StdError, hash::Hasher, marker::PhantomData, ops::Deref};
 
 <span class="kw">pub mod </span>common {
-    <span class="kw">use </span>std::{
+    <span class="doccomment">//! Module providing common entities for all [`Store`](super::Store) implementations.
+
+    </span><span class="kw">use </span>std::{
         hash::Hasher,
-        io::{ErrorKind::UnexpectedEof, Read, Write},
+        io::{<span class="self">self</span>, ErrorKind::UnexpectedEof, Read, Write},
     };
 
     <span class="kw">use </span>byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
     <span class="doccomment">/// Extension used by backing files for [`Store`](super::Store) instances.
-    </span><span class="kw">pub const </span>STORE_FILE_EXTENSION: <span class="kw-2">&amp;</span>str = <span class="string">&quot;store&quot;</span>;
+    </span><span class="kw">pub const </span>STORE_FILE_EXTENSION: <span class="kw-2">&amp;</span>str = <span class="string">"store"</span>;
 
     <span class="doccomment">/// Number of bytes required for storing the record header.
     </span><span class="kw">pub const </span>RECORD_HEADER_LENGTH: usize = <span class="number">16</span>;
 
-    <span class="attr">#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+    <span class="doccomment">/// Header containing the checksum and length of the bytes contained within a Record.
+    ///
+    /// Used for maintaining data integrity of all persisted data.
+    </span><span class="attr">#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
     </span><span class="kw">pub struct </span>RecordHeader {
         <span class="kw">pub </span>checksum: u64,
         <span class="kw">pub </span>length: u64,
     }
 
     <span class="kw">impl </span>RecordHeader {
-        <span class="kw">pub fn </span>read&lt;R: Read&gt;(source: <span class="kw-2">&amp;mut </span>R) -&gt; std::io::Result&lt;RecordHeader&gt; {
+        <span class="doccomment">/// Reads a [`RecordHeader`] header instance from the given [`Read`] impl.
+        </span><span class="kw">pub fn </span>read&lt;R: Read&gt;(source: <span class="kw-2">&amp;mut </span>R) -&gt; io::Result&lt;<span class="self">Self</span>&gt; {
             <span class="kw">let </span>checksum = source.read_u64::&lt;LittleEndian&gt;()<span class="question-mark">?</span>;
             <span class="kw">let </span>length = source.read_u64::&lt;LittleEndian&gt;()<span class="question-mark">?</span>;
 
@@ -371,14 +425,17 @@
             }
         }
 
-        <span class="kw">pub fn </span>write&lt;W: Write&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, dest: <span class="kw-2">&amp;mut </span>W) -&gt; std::io::Result&lt;()&gt; {
+        <span class="doccomment">/// Writes this [`RecordHeader`] instance to the given [`Write`] impl.
+        </span><span class="kw">pub fn </span>write&lt;W: Write&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, dest: <span class="kw-2">&amp;mut </span>W) -&gt; io::Result&lt;()&gt; {
             dest.write_u64::&lt;LittleEndian&gt;(<span class="self">self</span>.checksum)<span class="question-mark">?</span>;
             dest.write_u64::&lt;LittleEndian&gt;(<span class="self">self</span>.length)<span class="question-mark">?</span>;
 
             <span class="prelude-val">Ok</span>(())
         }
 
-        <span class="kw">pub fn </span>compute&lt;H&gt;(record_bytes: <span class="kw-2">&amp;</span>[u8]) -&gt; <span class="self">Self
+        <span class="doccomment">/// Computes and returns the [`RecordHeader`] for a record containing the
+        /// given `record_bytes`.
+        </span><span class="kw">pub fn </span>compute&lt;H&gt;(record_bytes: <span class="kw-2">&amp;</span>[u8]) -&gt; <span class="self">Self
         </span><span class="kw">where
             </span>H: Hasher + Default,
         {
@@ -394,7 +451,18 @@
     }
 }
 
-<span class="kw">pub struct </span>Store&lt;S, H&gt; {
+<span class="doccomment">/// Unit of persistence within a [`Segment`](super::segment::Segment).
+///
+/// &lt;p align="center"&gt;
+/// &lt;img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-indexed-segmented-log-segment.drawio.png" alt="segmented_log_segment" /&gt;
+/// &lt;/p&gt;
+/// &lt;p align="center"&gt;
+/// &lt;b&gt;Fig:&lt;/b&gt; &lt;code&gt;Segment&lt;/code&gt; diagram showing &lt;code&gt;Store&lt;/code&gt;, persisting
+/// record bytes at positions mapped out by the &lt;code&gt;Index&lt;/code&gt; records.
+/// &lt;/p&gt;
+///
+/// A [`Store`] contains a backing [`Storage`] impl instance to persist record bytes.
+</span><span class="kw">pub struct </span>Store&lt;S, H&gt; {
     storage: S,
 
     _phantom_data: PhantomData&lt;H&gt;,
@@ -407,7 +475,8 @@
 }
 
 <span class="kw">impl</span>&lt;S, H&gt; Store&lt;S, H&gt; {
-    <span class="kw">pub fn </span>new(storage: S) -&gt; <span class="self">Self </span>{
+    <span class="doccomment">/// Creates a new [`Store`] instance from the given backing [`Storage`] instance.
+    </span><span class="kw">pub fn </span>new(storage: S) -&gt; <span class="self">Self </span>{
         <span class="self">Self </span>{
             storage,
             _phantom_data: PhantomData,
@@ -415,26 +484,35 @@
     }
 }
 
-<span class="attr">#[derive(Debug)]
+<span class="doccomment">/// Error type used for [`Store`] operations.
+</span><span class="attr">#[derive(Debug)]
 </span><span class="kw">pub enum </span>StoreError&lt;SE&gt; {
-    StorageError(SE),
-    IncompatibleSizeType,
-    RecordHeaderMismatch,
-    ReadOnEmptyStore,
+    <span class="doccomment">/// Used to denote errors from the backing [`Storage`] implementation.
+    </span>StorageError(SE),
+
+    <span class="doccomment">/// Used when the type used for representing sizes is incompatible with [`u64`].
+    </span>IncompatibleSizeType,
+
+    <span class="doccomment">/// Used in the case of a data integrity error when the computed [`RecordHeader`]
+    /// doesn't match the designated [`RecordHeader`] for a given record.
+    </span>RecordHeaderMismatch,
+
+    <span class="doccomment">/// Used when reading from an empty [`Store`].
+    </span>ReadOnEmptyStore,
 }
 
 <span class="kw">impl</span>&lt;SE&gt; std::fmt::Display <span class="kw">for </span>StoreError&lt;SE&gt;
 <span class="kw">where
     </span>SE: StdError,
 {
-    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>std::fmt::Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; std::fmt::Result {
-        <span class="macro">write!</span>(f, <span class="string">&quot;{self:?}&quot;</span>)
+    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>std::fmt::Formatter&lt;<span class="lifetime">'_</span>&gt;) -&gt; std::fmt::Result {
+        <span class="macro">write!</span>(f, <span class="string">"{self:?}"</span>)
     }
 }
 
 <span class="kw">impl</span>&lt;SE&gt; StdError <span class="kw">for </span>StoreError&lt;SE&gt; <span class="kw">where </span>SE: StdError {}
 
-<span class="macro">macro_rules! </span>u64_as_size {
+<span class="macro">macro_rules!</span> u64_as_size {
     (<span class="macro-nonterminal">$size</span>:ident, <span class="macro-nonterminal">$Size</span>:ty) =&gt; {
         &lt;<span class="macro-nonterminal">$Size </span><span class="kw">as </span>num::FromPrimitive&gt;::from_u64(<span class="macro-nonterminal">$size</span>).ok_or(StoreError::IncompatibleSizeType)
     };
@@ -444,7 +522,7 @@
     };
 }
 
-<span class="macro">macro_rules! </span>size_as_u64 {
+<span class="macro">macro_rules!</span> size_as_u64 {
     (<span class="macro-nonterminal">$size</span>:ident, <span class="macro-nonterminal">$Size</span>:ty) =&gt; {
         &lt;<span class="macro-nonterminal">$Size </span><span class="kw">as </span>num::ToPrimitive&gt;::to_u64(<span class="kw-2">&amp;</span><span class="macro-nonterminal">$size</span>).ok_or(StoreError::IncompatibleSizeType)
     };
@@ -455,7 +533,9 @@
     </span>S: Storage,
     H: Hasher + Default,
 {
-    <span class="kw">pub async fn </span>read(
+    <span class="doccomment">/// Reads record bytes for a record persisted at the given `position` with the designated
+    /// [`RecordHeader`].
+    </span><span class="kw">pub async fn </span>read(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         position: <span class="kw-2">&amp;</span>S::Position,
         record_header: <span class="kw-2">&amp;</span>RecordHeader,
@@ -480,7 +560,11 @@
         <span class="prelude-val">Ok</span>(record_bytes)
     }
 
-    <span class="kw">pub async fn </span>append&lt;XBuf, X, XE&gt;(
+    <span class="doccomment">/// Appends the bytes for a new record at the end of this store.
+    ///
+    /// Returns the computed [`RecordHeader`] for the provided record bytes along with the
+    /// position where the record was written.
+    </span><span class="kw">pub async fn </span>append&lt;XBuf, X, XE&gt;(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         stream: X,
         append_threshold: <span class="prelude-ty">Option</span>&lt;S::Size&gt;,
@@ -560,26 +644,26 @@
     <span class="kw">use </span>std::{convert::Infallible, future::Future, hash::Hasher, marker::PhantomData, ops::Deref};
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">const </span>_RECORDS: [<span class="kw-2">&amp;</span>[u8; <span class="number">129</span>]; <span class="number">20</span>] = [
-                    <span class="string">b&quot;T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77t&quot;</span>,
-                    <span class="string">b&quot;9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9YxuipjdD&quot;</span>,
-                    <span class="string">b&quot;zjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMsW&quot;</span>,
-                    <span class="string">b&quot;9cOGqwqc9cOGqwqc9cOGqwqc9cOGqwqc9cOGqwqc9cOGqwqc9cOGqwqc9cOGqwqc9cOGqwqc9cOGqwqc9cOGqwqc9cOGqwqc9cOGqwqc9cOGqwqc9cOGqwqc9cOGqwqcw&quot;</span>,
-                    <span class="string">b&quot;ZXI6B7XcZXI6B7XcZXI6B7XcZXI6B7XcZXI6B7XcZXI6B7XcZXI6B7XcZXI6B7XcZXI6B7XcZXI6B7XcZXI6B7XcZXI6B7XcZXI6B7XcZXI6B7XcZXI6B7XcZXI6B7Xco&quot;</span>,
-                    <span class="string">b&quot;9sjES6nO9sjES6nO9sjES6nO9sjES6nO9sjES6nO9sjES6nO9sjES6nO9sjES6nO9sjES6nO9sjES6nO9sjES6nO9sjES6nO9sjES6nO9sjES6nO9sjES6nO9sjES6nOi&quot;</span>,
-                    <span class="string">b&quot;KZq1Egx3KZq1Egx3KZq1Egx3KZq1Egx3KZq1Egx3KZq1Egx3KZq1Egx3KZq1Egx3KZq1Egx3KZq1Egx3KZq1Egx3KZq1Egx3KZq1Egx3KZq1Egx3KZq1Egx3KZq1Egx3A&quot;</span>,
-                    <span class="string">b&quot;cJQv6uykcJQv6uykcJQv6uykcJQv6uykcJQv6uykcJQv6uykcJQv6uykcJQv6uykcJQv6uykcJQv6uykcJQv6uykcJQv6uykcJQv6uykcJQv6uykcJQv6uykcJQv6uykL&quot;</span>,
-                    <span class="string">b&quot;6BKwSxL76BKwSxL76BKwSxL76BKwSxL76BKwSxL76BKwSxL76BKwSxL76BKwSxL76BKwSxL76BKwSxL76BKwSxL76BKwSxL76BKwSxL76BKwSxL76BKwSxL76BKwSxL7O&quot;</span>,
-                    <span class="string">b&quot;h5FxA3eKh5FxA3eKh5FxA3eKh5FxA3eKh5FxA3eKh5FxA3eKh5FxA3eKh5FxA3eKh5FxA3eKh5FxA3eKh5FxA3eKh5FxA3eKh5FxA3eKh5FxA3eKh5FxA3eKh5FxA3eKe&quot;</span>,
-                    <span class="string">b&quot;DNNs0NpcDNNs0NpcDNNs0NpcDNNs0NpcDNNs0NpcDNNs0NpcDNNs0NpcDNNs0NpcDNNs0NpcDNNs0NpcDNNs0NpcDNNs0NpcDNNs0NpcDNNs0NpcDNNs0NpcDNNs0Npc8&quot;</span>,
-                    <span class="string">b&quot;6lHRDBOh6lHRDBOh6lHRDBOh6lHRDBOh6lHRDBOh6lHRDBOh6lHRDBOh6lHRDBOh6lHRDBOh6lHRDBOh6lHRDBOh6lHRDBOh6lHRDBOh6lHRDBOh6lHRDBOh6lHRDBOhu&quot;</span>,
-                    <span class="string">b&quot;0emonuBO0emonuBO0emonuBO0emonuBO0emonuBO0emonuBO0emonuBO0emonuBO0emonuBO0emonuBO0emonuBO0emonuBO0emonuBO0emonuBO0emonuBO0emonuBO6&quot;</span>,
-                    <span class="string">b&quot;BXn8YHM1BXn8YHM1BXn8YHM1BXn8YHM1BXn8YHM1BXn8YHM1BXn8YHM1BXn8YHM1BXn8YHM1BXn8YHM1BXn8YHM1BXn8YHM1BXn8YHM1BXn8YHM1BXn8YHM1BXn8YHM1V&quot;</span>,
-                    <span class="string">b&quot;VWa0VnRcVWa0VnRcVWa0VnRcVWa0VnRcVWa0VnRcVWa0VnRcVWa0VnRcVWa0VnRcVWa0VnRcVWa0VnRcVWa0VnRcVWa0VnRcVWa0VnRcVWa0VnRcVWa0VnRcVWa0VnRcX&quot;</span>,
-                    <span class="string">b&quot;RaiNfDSVRaiNfDSVRaiNfDSVRaiNfDSVRaiNfDSVRaiNfDSVRaiNfDSVRaiNfDSVRaiNfDSVRaiNfDSVRaiNfDSVRaiNfDSVRaiNfDSVRaiNfDSVRaiNfDSVRaiNfDSVc&quot;</span>,
-                    <span class="string">b&quot;ujz06A7Pujz06A7Pujz06A7Pujz06A7Pujz06A7Pujz06A7Pujz06A7Pujz06A7Pujz06A7Pujz06A7Pujz06A7Pujz06A7Pujz06A7Pujz06A7Pujz06A7Pujz06A7PE&quot;</span>,
-                    <span class="string">b&quot;6q4fzIbs6q4fzIbs6q4fzIbs6q4fzIbs6q4fzIbs6q4fzIbs6q4fzIbs6q4fzIbs6q4fzIbs6q4fzIbs6q4fzIbs6q4fzIbs6q4fzIbs6q4fzIbs6q4fzIbs6q4fzIbs9&quot;</span>,
-                    <span class="string">b&quot;28qu1qcv28qu1qcv28qu1qcv28qu1qcv28qu1qcv28qu1qcv28qu1qcv28qu1qcv28qu1qcv28qu1qcv28qu1qcv28qu1qcv28qu1qcv28qu1qcv28qu1qcv28qu1qcvW&quot;</span>,
-                    <span class="string">b&quot;j9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSD&quot;</span>,
+                    <span class="string">b"T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77T0fesa77t"</span>,
+                    <span class="string">b"9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9Yxuipjd9YxuipjdD"</span>,
+                    <span class="string">b"zjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMszjxEHzMsW"</span>,
+                    <span class="string">b"9cOGqwqc9cOGqwqc9cOGqwqc9cOGqwqc9cOGqwqc9cOGqwqc9cOGqwqc9cOGqwqc9cOGqwqc9cOGqwqc9cOGqwqc9cOGqwqc9cOGqwqc9cOGqwqc9cOGqwqc9cOGqwqcw"</span>,
+                    <span class="string">b"ZXI6B7XcZXI6B7XcZXI6B7XcZXI6B7XcZXI6B7XcZXI6B7XcZXI6B7XcZXI6B7XcZXI6B7XcZXI6B7XcZXI6B7XcZXI6B7XcZXI6B7XcZXI6B7XcZXI6B7XcZXI6B7Xco"</span>,
+                    <span class="string">b"9sjES6nO9sjES6nO9sjES6nO9sjES6nO9sjES6nO9sjES6nO9sjES6nO9sjES6nO9sjES6nO9sjES6nO9sjES6nO9sjES6nO9sjES6nO9sjES6nO9sjES6nO9sjES6nOi"</span>,
+                    <span class="string">b"KZq1Egx3KZq1Egx3KZq1Egx3KZq1Egx3KZq1Egx3KZq1Egx3KZq1Egx3KZq1Egx3KZq1Egx3KZq1Egx3KZq1Egx3KZq1Egx3KZq1Egx3KZq1Egx3KZq1Egx3KZq1Egx3A"</span>,
+                    <span class="string">b"cJQv6uykcJQv6uykcJQv6uykcJQv6uykcJQv6uykcJQv6uykcJQv6uykcJQv6uykcJQv6uykcJQv6uykcJQv6uykcJQv6uykcJQv6uykcJQv6uykcJQv6uykcJQv6uykL"</span>,
+                    <span class="string">b"6BKwSxL76BKwSxL76BKwSxL76BKwSxL76BKwSxL76BKwSxL76BKwSxL76BKwSxL76BKwSxL76BKwSxL76BKwSxL76BKwSxL76BKwSxL76BKwSxL76BKwSxL76BKwSxL7O"</span>,
+                    <span class="string">b"h5FxA3eKh5FxA3eKh5FxA3eKh5FxA3eKh5FxA3eKh5FxA3eKh5FxA3eKh5FxA3eKh5FxA3eKh5FxA3eKh5FxA3eKh5FxA3eKh5FxA3eKh5FxA3eKh5FxA3eKh5FxA3eKe"</span>,
+                    <span class="string">b"DNNs0NpcDNNs0NpcDNNs0NpcDNNs0NpcDNNs0NpcDNNs0NpcDNNs0NpcDNNs0NpcDNNs0NpcDNNs0NpcDNNs0NpcDNNs0NpcDNNs0NpcDNNs0NpcDNNs0NpcDNNs0Npc8"</span>,
+                    <span class="string">b"6lHRDBOh6lHRDBOh6lHRDBOh6lHRDBOh6lHRDBOh6lHRDBOh6lHRDBOh6lHRDBOh6lHRDBOh6lHRDBOh6lHRDBOh6lHRDBOh6lHRDBOh6lHRDBOh6lHRDBOh6lHRDBOhu"</span>,
+                    <span class="string">b"0emonuBO0emonuBO0emonuBO0emonuBO0emonuBO0emonuBO0emonuBO0emonuBO0emonuBO0emonuBO0emonuBO0emonuBO0emonuBO0emonuBO0emonuBO0emonuBO6"</span>,
+                    <span class="string">b"BXn8YHM1BXn8YHM1BXn8YHM1BXn8YHM1BXn8YHM1BXn8YHM1BXn8YHM1BXn8YHM1BXn8YHM1BXn8YHM1BXn8YHM1BXn8YHM1BXn8YHM1BXn8YHM1BXn8YHM1BXn8YHM1V"</span>,
+                    <span class="string">b"VWa0VnRcVWa0VnRcVWa0VnRcVWa0VnRcVWa0VnRcVWa0VnRcVWa0VnRcVWa0VnRcVWa0VnRcVWa0VnRcVWa0VnRcVWa0VnRcVWa0VnRcVWa0VnRcVWa0VnRcVWa0VnRcX"</span>,
+                    <span class="string">b"RaiNfDSVRaiNfDSVRaiNfDSVRaiNfDSVRaiNfDSVRaiNfDSVRaiNfDSVRaiNfDSVRaiNfDSVRaiNfDSVRaiNfDSVRaiNfDSVRaiNfDSVRaiNfDSVRaiNfDSVRaiNfDSVc"</span>,
+                    <span class="string">b"ujz06A7Pujz06A7Pujz06A7Pujz06A7Pujz06A7Pujz06A7Pujz06A7Pujz06A7Pujz06A7Pujz06A7Pujz06A7Pujz06A7Pujz06A7Pujz06A7Pujz06A7Pujz06A7PE"</span>,
+                    <span class="string">b"6q4fzIbs6q4fzIbs6q4fzIbs6q4fzIbs6q4fzIbs6q4fzIbs6q4fzIbs6q4fzIbs6q4fzIbs6q4fzIbs6q4fzIbs6q4fzIbs6q4fzIbs6q4fzIbs6q4fzIbs6q4fzIbs9"</span>,
+                    <span class="string">b"28qu1qcv28qu1qcv28qu1qcv28qu1qcv28qu1qcv28qu1qcv28qu1qcv28qu1qcv28qu1qcv28qu1qcv28qu1qcv28qu1qcv28qu1qcv28qu1qcv28qu1qcv28qu1qcvW"</span>,
+                    <span class="string">b"j9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSj9AeJZGSD"</span>,
                 ];
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">async fn </span>_test_store_read_append_truncate_consistency&lt;TSP, F, S, H&gt;(
@@ -600,7 +684,7 @@
 
         <span class="kw">match </span>store.read(<span class="kw-2">&amp;</span>num::zero(), <span class="kw-2">&amp;</span>RecordHeader::default()).<span class="kw">await </span>{
             <span class="prelude-val">Err</span>(StoreError::ReadOnEmptyStore) =&gt; {}
-            <span class="kw">_ </span>=&gt; <span class="macro">unreachable!</span>(<span class="string">&quot;Wrong result returned for read on empty store&quot;</span>),
+            <span class="kw">_ </span>=&gt; <span class="macro">unreachable!</span>(<span class="string">"Wrong result returned for read on empty store"</span>),
         }
 
         <span class="kw">let </span><span class="kw-2">mut </span>record_append_info_vec =

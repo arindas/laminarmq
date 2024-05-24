@@ -1,0 +1,3 @@
+(function() {var implementors = {
+"laminarmq":[["impl&lt;T&gt; <a class=\"trait\" href=\"https://docs.rs/http-body/0.4.5/http_body/trait.Body.html\" title=\"trait http_body::Body\">Body</a> for <a class=\"struct\" href=\"laminarmq/common/http/struct.BufToHttpBody.html\" title=\"struct laminarmq::common::http::BufToHttpBody\">BufToHttpBody</a>&lt;T&gt;<div class=\"where\">where\n    T: Buf + <a class=\"trait\" href=\"https://doc.rust-lang.org/1.78.0/core/marker/trait.Unpin.html\" title=\"trait core::marker::Unpin\">Unpin</a>,</div>"]]
+};if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

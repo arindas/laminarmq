@@ -1,4 +1,6 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/storage/commit_log/segmented_log/index.rs`."><title>index.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/SourceSerif4-Bold-a2c9cd1067f8b328.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../../../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-fa3bb1812debf86c.css"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="laminarmq" data-themes="" data-resource-suffix="" data-rustdoc-version="1.74.0 (79e9716c9 2023-11-13)" data-channel="1.74.0" data-search-js="search-8be46b629f5f14a8.js" data-settings-js="settings-74424d7eec62a23e.js" ><script src="../../../../../static.files/storage-fec3eaa3851e447d.js"></script><script defer src="../../../../../static.files/src-script-3280b574d94e47b4.js"></script><script defer src="../../../../../src-files.js"></script><script defer src="../../../../../static.files/main-c5bd66d33317d69f.js"></script><noscript><link rel="stylesheet" href="../../../../../static.files/noscript-5d8b3c7633ad77ba.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-16x16-8b506e7a72182f1c.png"><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-422f7d1d52889060.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-2c020d218678b618.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"></nav><main><nav class="sub"><a class="sub-logo-container" href="../../../../../laminarmq/index.html"><img class="rust-logo" src="../../../../../static.files/rust-logo-151179464ae7ed46.svg" alt="logo"></a><form class="search-form"><span></span><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><a href="../../../../../help.html">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../../static.files/wheel-7b819b6101059cd0.svg"></a></div></form></nav><section id="main-content" class="content"><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers"><a href="#1" id="1">1</a>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/storage/commit_log/segmented_log/index.rs`."><title>index.rs - source</title><script> if (window.location.protocol !== "file:") document.write(`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2">`)</script><link rel="stylesheet" href="../../../../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-e935ef01ae1c1829.css"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="laminarmq" data-themes="" data-resource-suffix="" data-rustdoc-version="1.78.0 (9b00956e5 2024-04-29)" data-channel="1.78.0" data-search-js="search-42d8da7a6b9792c2.js" data-settings-js="settings-4313503d2e1961c2.js" ><script src="../../../../../static.files/storage-4c98445ec4002617.js"></script><script defer src="../../../../../static.files/src-script-e66d777a5a92e9b2.js"></script><script defer src="../../../../../src-files.js"></script><script defer src="../../../../../static.files/main-12cf3b4f4f9dc36d.js"></script><noscript><link rel="stylesheet" href="../../../../../static.files/noscript-04d5337699b92874.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-16x16-8b506e7a72182f1c.png"><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-422f7d1d52889060.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-2c020d218678b618.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title">
+            <h2>Files</h2></div></nav><div class="sidebar-resizer"></div>
+    <main><nav class="sub"><form class="search-form"><span></span><div id="sidebar-button" tabindex="-1"><a href="../../../../../laminarmq/all.html" title="show sidebar"></a></div><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" tabindex="-1"><a href="../../../../../help.html" title="help">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../../static.files/wheel-7b819b6101059cd0.svg"></a></div></form></nav><section id="main-content" class="content"><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers"><a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
 <a href="#4" id="4">4</a>
@@ -689,7 +691,119 @@
 <a href="#689" id="689">689</a>
 <a href="#690" id="690">690</a>
 <a href="#691" id="691">691</a>
-</pre></div><pre class="rust"><code><span class="kw">use super</span>::{
+<a href="#692" id="692">692</a>
+<a href="#693" id="693">693</a>
+<a href="#694" id="694">694</a>
+<a href="#695" id="695">695</a>
+<a href="#696" id="696">696</a>
+<a href="#697" id="697">697</a>
+<a href="#698" id="698">698</a>
+<a href="#699" id="699">699</a>
+<a href="#700" id="700">700</a>
+<a href="#701" id="701">701</a>
+<a href="#702" id="702">702</a>
+<a href="#703" id="703">703</a>
+<a href="#704" id="704">704</a>
+<a href="#705" id="705">705</a>
+<a href="#706" id="706">706</a>
+<a href="#707" id="707">707</a>
+<a href="#708" id="708">708</a>
+<a href="#709" id="709">709</a>
+<a href="#710" id="710">710</a>
+<a href="#711" id="711">711</a>
+<a href="#712" id="712">712</a>
+<a href="#713" id="713">713</a>
+<a href="#714" id="714">714</a>
+<a href="#715" id="715">715</a>
+<a href="#716" id="716">716</a>
+<a href="#717" id="717">717</a>
+<a href="#718" id="718">718</a>
+<a href="#719" id="719">719</a>
+<a href="#720" id="720">720</a>
+<a href="#721" id="721">721</a>
+<a href="#722" id="722">722</a>
+<a href="#723" id="723">723</a>
+<a href="#724" id="724">724</a>
+<a href="#725" id="725">725</a>
+<a href="#726" id="726">726</a>
+<a href="#727" id="727">727</a>
+<a href="#728" id="728">728</a>
+<a href="#729" id="729">729</a>
+<a href="#730" id="730">730</a>
+<a href="#731" id="731">731</a>
+<a href="#732" id="732">732</a>
+<a href="#733" id="733">733</a>
+<a href="#734" id="734">734</a>
+<a href="#735" id="735">735</a>
+<a href="#736" id="736">736</a>
+<a href="#737" id="737">737</a>
+<a href="#738" id="738">738</a>
+<a href="#739" id="739">739</a>
+<a href="#740" id="740">740</a>
+<a href="#741" id="741">741</a>
+<a href="#742" id="742">742</a>
+<a href="#743" id="743">743</a>
+<a href="#744" id="744">744</a>
+<a href="#745" id="745">745</a>
+<a href="#746" id="746">746</a>
+<a href="#747" id="747">747</a>
+<a href="#748" id="748">748</a>
+<a href="#749" id="749">749</a>
+<a href="#750" id="750">750</a>
+<a href="#751" id="751">751</a>
+<a href="#752" id="752">752</a>
+<a href="#753" id="753">753</a>
+<a href="#754" id="754">754</a>
+<a href="#755" id="755">755</a>
+<a href="#756" id="756">756</a>
+<a href="#757" id="757">757</a>
+<a href="#758" id="758">758</a>
+<a href="#759" id="759">759</a>
+<a href="#760" id="760">760</a>
+<a href="#761" id="761">761</a>
+<a href="#762" id="762">762</a>
+<a href="#763" id="763">763</a>
+<a href="#764" id="764">764</a>
+<a href="#765" id="765">765</a>
+<a href="#766" id="766">766</a>
+<a href="#767" id="767">767</a>
+<a href="#768" id="768">768</a>
+<a href="#769" id="769">769</a>
+<a href="#770" id="770">770</a>
+<a href="#771" id="771">771</a>
+<a href="#772" id="772">772</a>
+<a href="#773" id="773">773</a>
+<a href="#774" id="774">774</a>
+<a href="#775" id="775">775</a>
+<a href="#776" id="776">776</a>
+<a href="#777" id="777">777</a>
+<a href="#778" id="778">778</a>
+<a href="#779" id="779">779</a>
+<a href="#780" id="780">780</a>
+<a href="#781" id="781">781</a>
+<a href="#782" id="782">782</a>
+<a href="#783" id="783">783</a>
+<a href="#784" id="784">784</a>
+<a href="#785" id="785">785</a>
+<a href="#786" id="786">786</a>
+<a href="#787" id="787">787</a>
+<a href="#788" id="788">788</a>
+<a href="#789" id="789">789</a>
+<a href="#790" id="790">790</a>
+<a href="#791" id="791">791</a>
+<a href="#792" id="792">792</a>
+<a href="#793" id="793">793</a>
+<a href="#794" id="794">794</a>
+<a href="#795" id="795">795</a>
+<a href="#796" id="796">796</a>
+<a href="#797" id="797">797</a>
+<a href="#798" id="798">798</a>
+</pre></div><pre class="rust"><code><span class="doccomment">//! Provides components necessary for mapping record indices to store-file positions in segments.
+//!
+//! This module provides [`Index`] which maintains a mapping from logical record indices to
+//! positions on the [`Store`](super::store::Store) of a [`Segment`](super::Segment).
+
+</span><span class="kw">use super</span>::{
     <span class="kw">super</span>::<span class="kw">super</span>::{AsyncConsume, AsyncIndexedRead, AsyncTruncate, Sizable, Storage},
     store::common::RecordHeader,
 };
@@ -700,8 +814,8 @@
     ops::Deref,
 };
 
-<span class="doccomment">/// Extension used by backing files for [`Index`](Index) instances.
-</span><span class="kw">pub const </span>INDEX_FILE_EXTENSION: <span class="kw-2">&amp;</span>str = <span class="string">&quot;index&quot;</span>;
+<span class="doccomment">/// Extension used by backing files for [Index] instances.
+</span><span class="kw">pub const </span>INDEX_FILE_EXTENSION: <span class="kw-2">&amp;</span>str = <span class="string">"index"</span>;
 
 <span class="doccomment">/// Number of bytes required for storing the base marker.
 </span><span class="kw">pub const </span>INDEX_BASE_MARKER_LENGTH: usize = <span class="number">16</span>;
@@ -712,7 +826,9 @@
 <span class="doccomment">/// Lowest underlying storage position
 </span><span class="kw">pub const </span>INDEX_BASE_POSITION: u64 = <span class="number">0</span>;
 
-<span class="attr">#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+<span class="doccomment">/// Unit of storage on an Index. Stores position, length and checksum metadata for a single
+/// [`Record`](super::Record) persisted in the `segment` [`Store`](super::store::Store).
+</span><span class="attr">#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 </span><span class="kw">pub struct </span>IndexRecord {
     <span class="kw">pub </span>checksum: u64,
     <span class="kw">pub </span>length: u32,
@@ -728,13 +844,15 @@
     }
 }
 
-<span class="kw">pub struct </span>IndexBaseMarker {
+<span class="doccomment">/// Marker to persist the starting `base_index` of an [`Index`] in the index [`Storage`].
+</span><span class="kw">pub struct </span>IndexBaseMarker {
     <span class="kw">pub </span>base_index: u64,
     _padding: u64,
 }
 
 <span class="kw">impl </span>IndexBaseMarker {
-    <span class="kw">pub fn </span>new(base_index: u64) -&gt; <span class="self">Self </span>{
+    <span class="doccomment">/// Creates a new [`IndexBaseMarker`] with the given `base_index`.
+    </span><span class="kw">pub fn </span>new(base_index: u64) -&gt; <span class="self">Self </span>{
         <span class="self">Self </span>{
             base_index,
             _padding: <span class="number">0</span>,
@@ -832,26 +950,51 @@
     }
 }
 
-<span class="attr">#[derive(Debug)]
+<span class="doccomment">/// Error type associated with operations on [`Index`].
+</span><span class="attr">#[derive(Debug)]
 </span><span class="kw">pub enum </span>IndexError&lt;StorageError&gt; {
-    StorageError(StorageError),
-    IoError(std::io::Error),
-    IncompatiblePositionType,
-    IncompatibleSizeType,
-    IncompatibleIdxType,
-    IndexOutOfBounds,
-    IndexGapEncountered,
-    NoBaseIndexFound,
-    BaseIndexMismatch,
-    InconsistentIndexSize,
+    <span class="doccomment">/// Used to denote errors from the backing [`Storage`] implementation.
+    </span>StorageError(StorageError),
+
+    <span class="doccomment">/// Used to denote I/O errors caused during serializing or deserializing [`IndexRecord`]
+    /// instances.
+    </span>IoError(std::io::Error),
+
+    <span class="doccomment">/// Used when the type used for representing positions is incompatible with [`u64`].
+    </span>IncompatiblePositionType,
+
+    <span class="doccomment">/// Used when the type used for representing sizes is incompatible with [`u64`].
+    </span>IncompatibleSizeType,
+
+    <span class="doccomment">/// Used when the type used for representing indices is incompatible with [`u64`].
+    </span>IncompatibleIdxType,
+
+    <span class="doccomment">/// Used when the index used for an operation is outside the permissible bounds for the
+    /// referenced [`Index`]
+    </span>IndexOutOfBounds,
+
+    <span class="doccomment">/// Used when there is a range of indices the [`Index`] bounds which are not mapped to any
+    /// [`IndexRecord`] instances.
+    </span>IndexGapEncountered,
+
+    <span class="doccomment">/// Used when the `base_index` for the referenced [`Index`] cannot be inferred from the
+    /// provided [`Storage`], in the absence of an explicitly provided `base_index`.
+    </span>NoBaseIndexFound,
+
+    <span class="doccomment">/// Used when the inferred and provided `base_index` values mismatch.
+    </span>BaseIndexMismatch,
+
+    <span class="doccomment">/// Used when the number of [`IndexRecord`] instances read from an [`Index`] is inconsistent
+    /// the estimated number of [`IndexRecord`] instances based on the underlying storage size.
+    </span>InconsistentIndexSize,
 }
 
 <span class="kw">impl</span>&lt;StorageError&gt; std::fmt::Display <span class="kw">for </span>IndexError&lt;StorageError&gt;
 <span class="kw">where
     </span>StorageError: std::error::Error,
 {
-    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>std::fmt::Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; std::fmt::Result {
-        <span class="macro">write!</span>(f, <span class="string">&quot;{self:?}&quot;</span>)
+    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>std::fmt::Formatter&lt;<span class="lifetime">'_</span>&gt;) -&gt; std::fmt::Result {
+        <span class="macro">write!</span>(f, <span class="string">"{self:?}"</span>)
     }
 }
 
@@ -861,28 +1004,29 @@
 }
 
 <span class="attr">#[doc(hidden)]
-</span><span class="macro">macro_rules! </span>u64_as_position {
+</span><span class="macro">macro_rules!</span> u64_as_position {
     (<span class="macro-nonterminal">$value</span>:ident, <span class="macro-nonterminal">$PosType</span>:ty) =&gt; {
         &lt;<span class="macro-nonterminal">$PosType </span><span class="kw">as </span>FromPrimitive&gt;::from_u64(<span class="macro-nonterminal">$value</span>).ok_or(IndexError::IncompatiblePositionType)
     };
 }
 
 <span class="attr">#[doc(hidden)]
-</span><span class="macro">macro_rules! </span>u64_as_idx {
+</span><span class="macro">macro_rules!</span> u64_as_idx {
     (<span class="macro-nonterminal">$value</span>:ident, <span class="macro-nonterminal">$IdxType</span>:ty) =&gt; {
         &lt;<span class="macro-nonterminal">$IdxType </span><span class="kw">as </span>FromPrimitive&gt;::from_u64(<span class="macro-nonterminal">$value</span>).ok_or(IndexError::IncompatibleIdxType)
     };
 }
 
 <span class="attr">#[doc(hidden)]
-</span><span class="macro">macro_rules! </span>idx_as_u64 {
+</span><span class="macro">macro_rules!</span> idx_as_u64 {
     (<span class="macro-nonterminal">$value</span>:ident, <span class="macro-nonterminal">$IdxType</span>:ty) =&gt; {
         &lt;<span class="macro-nonterminal">$IdxType </span><span class="kw">as </span>ToPrimitive&gt;::to_u64(<span class="kw-2">&amp;</span><span class="macro-nonterminal">$value</span>).ok_or(IndexError::IncompatibleIdxType)
     };
 }
 
 <span class="kw">impl </span>IndexRecord {
-    <span class="kw">pub fn </span>with_position_and_record_header&lt;P: ToPrimitive&gt;(
+    <span class="doccomment">/// Creates a new [`IndexRecord`] with the given position and [`RecordHeader`].
+    </span><span class="kw">pub fn </span>with_position_and_record_header&lt;P: ToPrimitive&gt;(
         position: P,
         record_header: RecordHeader,
     ) -&gt; <span class="prelude-ty">Option</span>&lt;IndexRecord&gt; {
@@ -894,7 +1038,32 @@
     }
 }
 
-<span class="kw">pub struct </span>Index&lt;S, Idx&gt; {
+<span class="doccomment">/// [`Index`] for every [`Segment`](super::Segment) in a [`SegmentedLog`](super::SegmentedLog).
+///
+/// [`Index`] stores a mapping from [`Record`](super::Record) logical indices to positions on its
+/// parent [`Segment`](super::Segment) instance's underlying [`Store`](super::store::Store). It
+/// acts as an index to position translation-table when reading record contents from the underlying
+/// [`Store`](super::store::Store) using the record's logical index.
+///
+/// &lt;p align="center"&gt;
+/// &lt;img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-indexed-segmented-log-segment.drawio.png" alt="segmented_log_segment" /&gt;
+/// &lt;/p&gt;
+/// &lt;p align="center"&gt;
+/// &lt;b&gt;Fig:&lt;/b&gt; &lt;code&gt;Segment&lt;/code&gt; diagram showing &lt;code&gt;Index&lt;/code&gt;, mapping logical indices
+/// to&lt;code&gt;Store&lt;/code&gt; positions.
+/// &lt;/p&gt;
+///
+/// [`Index`] also stores checksum and length information for every record with [`RecordHeader`].
+/// This information is used to detect any data corruption on the underlying persistent media when
+/// reading from [`Store`](super::store::Store).
+///
+/// ### Type parameters
+/// - `S`
+///     Underlying [`Storage`] implementation for storing [`IndexRecord`] instances
+/// - `Idx`
+///     Type to use for representing logical indices. (Usually an unsigned integer like u32, u64
+///     usize, etc.)
+</span><span class="kw">pub struct </span>Index&lt;S, Idx&gt; {
     index_records: <span class="prelude-ty">Option</span>&lt;Vec&lt;IndexRecord&gt;&gt;,
     base_index: Idx,
     next_index: Idx,
@@ -902,11 +1071,13 @@
 }
 
 <span class="kw">impl</span>&lt;S, Idx&gt; Index&lt;S, Idx&gt; {
-    <span class="kw">pub fn </span>into_storage(<span class="self">self</span>) -&gt; S {
+    <span class="doccomment">/// Maps this [`Index`] to the underlying [`Storage`] implementation instance.
+    </span><span class="kw">pub fn </span>into_storage(<span class="self">self</span>) -&gt; S {
         <span class="self">self</span>.storage
     }
 
-    <span class="kw">pub fn </span>base_index(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>Idx {
+    <span class="doccomment">/// Obtains the logical index of the first record in this [`Index`].
+    </span><span class="kw">pub fn </span>base_index(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>Idx {
         <span class="kw-2">&amp;</span><span class="self">self</span>.base_index
     }
 }
@@ -916,7 +1087,11 @@
     </span>S: Storage,
     Idx: Unsigned + FromPrimitive + Copy + Eq,
 {
-    <span class="kw">pub fn </span>estimated_index_records_len_in_storage(
+    <span class="doccomment">/// Returns the estimated number of [`IndexRecord`] instances stored in the given [`Storage`].
+    ///
+    /// This function calculates this estimate by using the [`Storage`] size and the size of a
+    /// single [`IndexRecord`].
+    </span><span class="kw">pub fn </span>estimated_index_records_len_in_storage(
         storage: <span class="kw-2">&amp;</span>S,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;usize, IndexError&lt;S::Error&gt;&gt; {
         <span class="kw">let </span>index_storage_size = storage
@@ -930,7 +1105,9 @@
         <span class="prelude-val">Ok</span>(estimated_index_records_len)
     }
 
-    <span class="kw">pub async fn </span>base_index_from_storage(storage: <span class="kw-2">&amp;</span>S) -&gt; <span class="prelude-ty">Result</span>&lt;Idx, IndexError&lt;S::Error&gt;&gt; {
+    <span class="doccomment">/// Reads and returns the `base_index` of the [`Index`] persisted on the provided [`Storage`]
+    /// instance by reading the [`IndexBaseMarker`] at [`INDEX_BASE_POSITION`].
+    </span><span class="kw">pub async fn </span>base_index_from_storage(storage: <span class="kw-2">&amp;</span>S) -&gt; <span class="prelude-ty">Result</span>&lt;Idx, IndexError&lt;S::Error&gt;&gt; {
         <span class="kw">let </span>index_base_marker =
             PersistentSizedRecord::&lt;IndexBaseMarker, INDEX_BASE_MARKER_LENGTH&gt;::read_at(
                 storage,
@@ -944,7 +1121,17 @@
             .and_then(|x| <span class="macro">u64_as_idx!</span>(x, Idx))
     }
 
-    <span class="kw">pub async fn </span>index_records_from_storage(
+    <span class="doccomment">/// Reads all [`IndexRecord`] instances persisted in the provided [`Storage`] instance.
+    ///
+    /// Returns a [`Vec`] containing the read [`IndexRecord`] instances.
+    ///
+    /// # Errors
+    ///
+    /// - [`IndexError::InconsistentIndexSize`]:
+    ///     If the number of [`IndexRecord`] instances read is inconsistent with the estimated
+    ///     number of [`IndexRecord`] instances persisted. (Calculated with
+    ///     [`Self::estimated_index_records_len_in_storage`])
+    </span><span class="kw">pub async fn </span>index_records_from_storage(
         storage: <span class="kw-2">&amp;</span>S,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;IndexRecord&gt;, IndexError&lt;S::Error&gt;&gt; {
         <span class="kw">let </span><span class="kw-2">mut </span>position = INDEX_BASE_MARKER_LENGTH <span class="kw">as </span>u64;
@@ -973,7 +1160,20 @@
         }
     }
 
-    <span class="kw">pub async fn </span>validated_base_index(
+    <span class="doccomment">/// Returns a validated `base_index` for this [`Index`].
+    ///
+    /// Compares the given `base_index` with the read `base_index` to obtain the `base_index` for
+    /// this [`Index`]. If the `base_index` could be obtained from only one of the sources, then
+    /// that obtained value is retured. If the `base_index` could be obtained from both the soures:
+    /// - If the read values mismatch across the different sources, we return
+    /// [`IndexError::BaseIndexMismatch`]
+    /// - If the read values are same, we return the provided value
+    ///
+    /// # Errors
+    ///
+    /// - [`IndexError::BaseIndexMismatch`]: if the read `base_index` and the provided
+    /// `base_index` mismatch.
+    </span><span class="kw">pub async fn </span>validated_base_index(
         storage: <span class="kw-2">&amp;</span>S,
         base_index: <span class="prelude-ty">Option</span>&lt;Idx&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;Idx, IndexError&lt;S::Error&gt;&gt; {
@@ -988,7 +1188,10 @@
         }
     }
 
-    <span class="kw">pub async fn </span>with_storage_and_base_index_option(
+    <span class="doccomment">/// Creates an [`Index`] instance from the given `storage` and an optional `base_index`.
+    ///
+    /// The created [`Index`] uses the provided `storage` instance as it's storage backend.
+    </span><span class="kw">pub async fn </span>with_storage_and_base_index_option(
         storage: S,
         base_index: <span class="prelude-ty">Option</span>&lt;Idx&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, IndexError&lt;S::Error&gt;&gt; {
@@ -1008,18 +1211,25 @@
         })
     }
 
-    <span class="kw">pub async fn </span>with_storage_and_base_index(
+    <span class="doccomment">/// Creates an [`Index`] instance from the given `storage` and a `base_index`.
+    </span><span class="kw">pub async fn </span>with_storage_and_base_index(
         storage: S,
         base_index: Idx,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, IndexError&lt;S::Error&gt;&gt; {
         <span class="self">Self</span>::with_storage_and_base_index_option(storage, <span class="prelude-val">Some</span>(base_index)).<span class="kw">await
     </span>}
 
-    <span class="kw">pub async fn </span>with_storage(storage: S) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, IndexError&lt;S::Error&gt;&gt; {
+    <span class="doccomment">/// Creates an [`Index`] from the given storage.
+    </span><span class="kw">pub async fn </span>with_storage(storage: S) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, IndexError&lt;S::Error&gt;&gt; {
         <span class="self">Self</span>::with_storage_and_base_index_option(storage, <span class="prelude-val">None</span>).<span class="kw">await
     </span>}
 
-    <span class="kw">pub fn </span>with_storage_index_records_option_and_validated_base_index(
+    <span class="doccomment">/// Creates an [`Index`] with the given `storage` buffered `index_records` and a
+    /// validated_base_index`.
+    ///
+    /// This method doesn't use any additional checks for the `validated_base_index` and the
+    /// buffered `index_records` against the `storage` provided.
+    </span><span class="kw">pub fn </span>with_storage_index_records_option_and_validated_base_index(
         storage: S,
         index_records: <span class="prelude-ty">Option</span>&lt;Vec&lt;IndexRecord&gt;&gt;,
         validated_base_index: Idx,
@@ -1035,15 +1245,19 @@
         })
     }
 
-    <span class="kw">pub fn </span>take_cached_index_records(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Vec&lt;IndexRecord&gt;&gt; {
+    <span class="doccomment">/// Takes out the cached [`IndexRecord`] instances from this [`Index`], leaving the
+    /// cache empty.
+    </span><span class="kw">pub fn </span>take_cached_index_records(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Vec&lt;IndexRecord&gt;&gt; {
         <span class="self">self</span>.index_records.take()
     }
 
-    <span class="kw">pub fn </span>cached_index_records(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Vec&lt;IndexRecord&gt;&gt; {
+    <span class="doccomment">/// Returns a reference to the cached [`IndexRecord`] instance.
+    </span><span class="kw">pub fn </span>cached_index_records(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Vec&lt;IndexRecord&gt;&gt; {
         <span class="self">self</span>.index_records.as_ref()
     }
 
-    <span class="kw">pub async fn </span>cache(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;(), IndexError&lt;S::Error&gt;&gt; {
+    <span class="doccomment">/// Cache all the [`IndexRecord`] instances in the underlying `storage` in this [`Index`].
+    </span><span class="kw">pub async fn </span>cache(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;(), IndexError&lt;S::Error&gt;&gt; {
         <span class="kw">if </span><span class="self">self</span>.index_records.as_ref().is_some() {
             <span class="kw">return </span><span class="prelude-val">Ok</span>(());
         }
@@ -1059,7 +1273,8 @@
     </span>S: Default,
     Idx: Copy,
 {
-    <span class="kw">pub fn </span>with_base_index(base_index: Idx) -&gt; <span class="self">Self </span>{
+    <span class="doccomment">/// Creates an empty [`Index`] with the given `base_index`.
+    </span><span class="kw">pub fn </span>with_base_index(base_index: Idx) -&gt; <span class="self">Self </span>{
         <span class="self">Self </span>{
             index_records: <span class="prelude-val">Some</span>(Vec::new()),
             base_index,
@@ -1126,7 +1341,7 @@
             index_records
                 .get(normalized_index)
                 .ok_or(IndexError::IndexGapEncountered)
-                .map(|<span class="kw-2">&amp;</span>x| x)
+                .copied()
         } <span class="kw">else </span>{
             PersistentSizedRecord::&lt;IndexRecord, INDEX_RECORD_LENGTH&gt;::read_at(
                 <span class="kw-2">&amp;</span><span class="self">self</span>.storage,
@@ -1143,7 +1358,8 @@
     </span>S: Storage,
     Idx: Unsigned + ToPrimitive + Copy,
 {
-    <span class="kw">pub async fn </span>append(<span class="kw-2">&amp;mut </span><span class="self">self</span>, index_record: IndexRecord) -&gt; <span class="prelude-ty">Result</span>&lt;Idx, IndexError&lt;S::Error&gt;&gt; {
+    <span class="doccomment">/// Appends the given [`IndexRecord`] instance to the end of this [`Index`].
+    </span><span class="kw">pub async fn </span>append(<span class="kw-2">&amp;mut </span><span class="self">self</span>, index_record: IndexRecord) -&gt; <span class="prelude-ty">Result</span>&lt;Idx, IndexError&lt;S::Error&gt;&gt; {
         <span class="kw">let </span>write_index = <span class="self">self</span>.next_index;
 
         <span class="kw">if </span>write_index == <span class="self">self</span>.base_index {
@@ -1226,18 +1442,18 @@
     <span class="kw">use </span>num::{CheckedSub, FromPrimitive, ToPrimitive, Unsigned, Zero};
     <span class="kw">use </span>std::{future::Future, hash::Hasher, marker::PhantomData};
 
-    <span class="kw">fn </span>_test_records_provider&lt;<span class="lifetime">&#39;a</span>, <span class="kw">const </span>N: usize&gt;(
-        record_source: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[u8; N]],
-    ) -&gt; <span class="kw">impl </span>Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[u8]&gt; {
+    <span class="kw">fn </span>_test_records_provider&lt;<span class="lifetime">'a</span>, <span class="kw">const </span>N: usize&gt;(
+        record_source: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>[<span class="kw-2">&amp;</span><span class="lifetime">'a </span>[u8; N]],
+    ) -&gt; <span class="kw">impl </span>Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">'a </span>[u8]&gt; {
         record_source.iter().cloned().map(|x| {
             <span class="kw">let </span>x: <span class="kw-2">&amp;</span>[u8] = x;
             x
         })
     }
 
-    <span class="kw">fn </span>_test_index_records_provider&lt;<span class="lifetime">&#39;a</span>, H&gt;(
-        record_source: <span class="kw">impl </span>Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[u8]&gt; + <span class="lifetime">&#39;a</span>,
-    ) -&gt; <span class="kw">impl </span>Iterator&lt;Item = IndexRecord&gt; + <span class="lifetime">&#39;a
+    <span class="kw">fn </span>_test_index_records_provider&lt;<span class="lifetime">'a</span>, H&gt;(
+        record_source: <span class="kw">impl </span>Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">'a </span>[u8]&gt; + <span class="lifetime">'a</span>,
+    ) -&gt; <span class="kw">impl </span>Iterator&lt;Item = IndexRecord&gt; + <span class="lifetime">'a
     </span><span class="kw">where
         </span>H: Hasher + Default,
     {
@@ -1297,7 +1513,7 @@
 
         <span class="kw">match </span>Index::&lt;S, Idx&gt;::with_storage(storage).<span class="kw">await </span>{
             <span class="prelude-val">Err</span>(IndexError::NoBaseIndexFound) =&gt; {},
-            <span class="kw">_ </span>=&gt; <span class="macro">unreachable!</span>(<span class="string">&quot;Wrong result returned when creating from empty storage without providing base index&quot;</span>),
+            <span class="kw">_ </span>=&gt; <span class="macro">unreachable!</span>(<span class="string">"Wrong result returned when creating from empty storage without providing base index"</span>),
         }
 
         <span class="kw">let </span>base_index = Idx::zero();
@@ -1309,7 +1525,7 @@
 
         <span class="kw">match </span>index.read(<span class="kw-2">&amp;</span>Idx::zero()).<span class="kw">await </span>{
             <span class="prelude-val">Err</span>(IndexError::IndexOutOfBounds) =&gt; {}
-            <span class="kw">_ </span>=&gt; <span class="macro">unreachable!</span>(<span class="string">&quot;Wrong result returned for read on empty Index.&quot;</span>),
+            <span class="kw">_ </span>=&gt; <span class="macro">unreachable!</span>(<span class="string">"Wrong result returned for read on empty Index."</span>),
         }
 
         <span class="kw">for </span>index_record <span class="kw">in </span>_test_index_records_provider::&lt;H&gt;(_test_records_provider(<span class="kw-2">&amp;</span>_RECORDS)) {

@@ -1,4 +1,6 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Usage"><title>laminarmq - Rust</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../static.files/SourceSerif4-Bold-a2c9cd1067f8b328.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../static.files/rustdoc-fa3bb1812debf86c.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="laminarmq" data-themes="" data-resource-suffix="" data-rustdoc-version="1.74.0 (79e9716c9 2023-11-13)" data-channel="1.74.0" data-search-js="search-8be46b629f5f14a8.js" data-settings-js="settings-74424d7eec62a23e.js" ><script src="../static.files/storage-fec3eaa3851e447d.js"></script><script defer src="../crates.js"></script><script defer src="../static.files/main-c5bd66d33317d69f.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-5d8b3c7633ad77ba.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-16x16-8b506e7a72182f1c.png"><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-422f7d1d52889060.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-2c020d218678b618.svg"></head><body class="rustdoc mod crate"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="logo-container" href="../laminarmq/index.html"><img class="rust-logo" src="../static.files/rust-logo-151179464ae7ed46.svg" alt="logo"></a></nav><nav class="sidebar"><a class="logo-container" href="../laminarmq/index.html"><img class="rust-logo" src="../static.files/rust-logo-151179464ae7ed46.svg" alt="logo"></a><h2 class="location"><a href="#">Crate laminarmq</a></h2><div class="sidebar-elems"><ul class="block"><li class="version">Version 0.0.5-rc2</li><li><a id="all-types" href="all.html">All Items</a></li></ul><section><ul class="block"><li><a href="#modules">Modules</a></li></ul></section></div></nav><main><div class="width-limiter"><nav class="sub"><form class="search-form"><span></span><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><a href="../help.html">?</a></div><div id="settings-menu" tabindex="-1"><a href="../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../static.files/wheel-7b819b6101059cd0.svg"></a></div></form></nav><section id="main-content" class="content"><div class="main-heading"><h1>Crate <a class="mod" href="#">laminarmq</a><button id="copy-path" title="Copy item path to clipboard"><img src="../static.files/clipboard-7571035ce49a181d.svg" width="19" height="18" alt="Copy item path"></button></h1><span class="out-of-band"><a class="src" href="../src/laminarmq/lib.rs.html#1-9">source</a> · <button id="toggle-all-docs" title="collapse all docs">[<span>&#x2212;</span>]</button></span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p align="center">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Usage"><title>laminarmq - Rust</title><script> if (window.location.protocol !== "file:") document.write(`<link rel="preload" as="font" type="font/woff2" crossorigin href="../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2">`)</script><link rel="stylesheet" href="../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../static.files/rustdoc-e935ef01ae1c1829.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="laminarmq" data-themes="" data-resource-suffix="" data-rustdoc-version="1.78.0 (9b00956e5 2024-04-29)" data-channel="1.78.0" data-search-js="search-42d8da7a6b9792c2.js" data-settings-js="settings-4313503d2e1961c2.js" ><script src="../static.files/storage-4c98445ec4002617.js"></script><script defer src="../crates.js"></script><script defer src="../static.files/main-12cf3b4f4f9dc36d.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-04d5337699b92874.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-16x16-8b506e7a72182f1c.png"><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-422f7d1d52889060.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-2c020d218678b618.svg"></head><body class="rustdoc mod crate"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle" title="show sidebar"></button></nav><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../laminarmq/index.html">laminarmq</a><span class="version">0.0.5</span></h2></div><div class="sidebar-elems"><ul class="block">
+            <li><a id="all-types" href="all.html">All Items</a></li></ul><section><ul class="block"><li><a href="#modules">Modules</a></li></ul></section></div></nav><div class="sidebar-resizer"></div>
+    <main><div class="width-limiter"><nav class="sub"><form class="search-form"><span></span><div id="sidebar-button" tabindex="-1"><a href="../laminarmq/all.html" title="show sidebar"></a></div><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" tabindex="-1"><a href="../help.html" title="help">?</a></div><div id="settings-menu" tabindex="-1"><a href="../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../static.files/wheel-7b819b6101059cd0.svg"></a></div></form></nav><section id="main-content" class="content"><div class="main-heading"><h1>Crate <a class="mod" href="#">laminarmq</a><button id="copy-path" title="Copy item path to clipboard"><img src="../static.files/clipboard-7571035ce49a181d.svg" width="19" height="18" alt="Copy item path"></button></h1><span class="out-of-band"><a class="src" href="../src/laminarmq/lib.rs.html#1-17">source</a> · <button id="toggle-all-docs" title="collapse all docs">[<span>&#x2212;</span>]</button></span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p align="center">
   <img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/logo.png" alt="laminarmq" />
 </p>
 <p align="center">
@@ -19,11 +21,11 @@
 A scalable, distributed message queue powered by a segmented, partitioned, replicated and immutable
 log.<br><i>This is currently a work in progress.</i>
 </p>
-<h3 id="usage"><a href="#usage">Usage</a></h3>
+<h3 id="usage"><a class="doc-anchor" href="#usage">§</a>Usage</h3>
 <p><code>laminarmq</code> provides a library crate and two binaries for managing <code>laminarmq</code> deployments. In order
 to use <code>laminarmq</code> as a library, add the following to your <code>Cargo.toml</code>:</p>
 <div class="example-wrap"><pre class="language-toml"><code>[dependencies]
-laminarmq = &quot;0.0.5-rc2&quot;
+laminarmq = &quot;0.0.5&quot;
 </code></pre></div>
 <p>Refer to latest git <a href="https://arindas.github.io/laminarmq/docs/laminarmq/">API Documentation</a> or
 <a href="https://docs.rs/laminarmq">Crate Documentation</a> for more details. There’s also a
@@ -33,7 +35,7 @@ implementation details and recipes.</p>
 on top of which several message queue semantics such as publish subscribe or even full blown
 protocols like MQTT could be implemented. Users are free to read the messages with offsets in any
 order they need.</p>
-<h3 id="major-milestones-for-laminarmq"><a href="#major-milestones-for-laminarmq">Major milestones for <code>laminarmq</code></a></h3>
+<h3 id="major-milestones-for-laminarmq"><a class="doc-anchor" href="#major-milestones-for-laminarmq">§</a>Major milestones for <code>laminarmq</code></h3>
 <ul>
 <li><input disabled="" type="checkbox" checked=""/>
 Locally persistent queue of records</li>
@@ -45,12 +47,17 @@ Service discovery with
 <li><input disabled="" type="checkbox"/>
 Replication and consensus of replicated records with <a href="https://raft.github.io/raft.pdf">Raft</a>.</li>
 </ul>
-<h3 id="examples"><a href="#examples">Examples</a></h3>
+<h3 id="examples"><a class="doc-anchor" href="#examples">§</a>Examples</h3>
 <p>Find examples demonstrating different capabilities of <code>laminarmq</code> in the
-<a href="https://github.com/arindas/laminarmq/tree/examples">examples branch</a>.</p>
-<h3 id="design"><a href="#design">Design</a></h3>
+<a href="./examples">examples</a> directory.</p>
+<h3 id="media"><a class="doc-anchor" href="#media">§</a>Media</h3>
+<p>Media associated with the <code>laminarmq</code> project.</p>
+<ul>
+<li><code>[BLOG]</code> <a href="https://arindas.github.io/blog/segmented-log-rust/">Building Segmented Logs in Rust: From Theory to Production!</a></li>
+</ul>
+<h3 id="design"><a class="doc-anchor" href="#design">§</a>Design</h3>
 <p>This section describes the internal design of <code>laminarmq</code>.</p>
-<h4 id="cluster-hierarchy"><a href="#cluster-hierarchy">Cluster Hierarchy</a></h4><p align="center">
+<h4 id="cluster-hierarchy"><a class="doc-anchor" href="#cluster-hierarchy">§</a>Cluster Hierarchy</h4><p align="center">
 <img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-cluster-hierarchy.svg" alt="cluster-hierarchy" />
 </p>
 <div class="example-wrap"><pre class="language-text"><code>partition_id_x is of the form (topic_id, partition_idx)
@@ -108,7 +115,7 @@ commit-log based API as necessary.</p>
 leader and may be read from. Users may again use client side load balancing to balance reads across
 the leader and all the followers.</p>
 <p>Each partition replica is backed by a segmented log for storage.</p>
-<h4 id="service-discovery-and-partition-distribution-to-nodes"><a href="#service-discovery-and-partition-distribution-to-nodes">Service discovery and partition distribution to nodes</a></h4><p align="center">
+<h4 id="service-discovery-and-partition-distribution-to-nodes"><a class="doc-anchor" href="#service-discovery-and-partition-distribution-to-nodes">§</a>Service discovery and partition distribution to nodes</h4><p align="center">
 <img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-service-discovery-and-partition-distribution.svg" alt="service-discovery-and-partition-distribution-to-nodes"/>
 </p>
 <p align="center">
@@ -158,7 +165,7 @@ partition request to the appropriate nodes at both the client side and the serve
 across all the possible nodes where a replica of the request’s partition can be present. For
 non-idempotent request, if we send it to any one of the candidate nodes, they redirect it to the
 current leader of the replica set.</p>
-<h4 id="supported-execution-models"><a href="#supported-execution-models">Supported execution models</a></h4>
+<h4 id="supported-execution-models"><a class="doc-anchor" href="#supported-execution-models">§</a>Supported execution models</h4>
 <p><code>laminarmq</code> supports two execution models:</p>
 <ul>
 <li>General async execution model used by various async runtimes in the Rust ecosystem (e.g <code>tokio</code>)</li>
@@ -177,7 +184,7 @@ same thread. The following sections will go into more detail as to how this is a
 <p>We realize that although the thread per core execution model has some inherent advantages, being
 compatible with the existing Rust ecosystem will significantly increase adoption. Therefore, we have
 designed our system with reusable components which can be organized to suit both execution models.</p>
-<h4 id="request-routing-in-nodes"><a href="#request-routing-in-nodes">Request routing in nodes</a></h4><h5 id="general-design"><a href="#general-design">General design</a></h5><p align="center">
+<h4 id="request-routing-in-nodes"><a class="doc-anchor" href="#request-routing-in-nodes">§</a>Request routing in nodes</h4><h5 id="general-design"><a class="doc-anchor" href="#general-design">§</a>General design</h5><p align="center">
 <img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-node-request-routing-general.svg" alt="request-rouing-general"/>
 </p>
 <p align="center">
@@ -220,7 +227,7 @@ future, allocates the required storage units or it and sends and appropriate res
 </ul>
 <p>Finally, the individual partition server futures receive both <code>membership::*</code> and <code>(partition::*, tx)</code> requests as they come to our node and routed. They handle the requests as necessary and send a
 response back to <code>tx</code> where applicable.</p>
-<h5 id="thread-per-core-execution-model-compatible-design"><a href="#thread-per-core-execution-model-compatible-design">Thread per core execution model compatible design</a></h5><p align="center">
+<h5 id="thread-per-core-execution-model-compatible-design"><a class="doc-anchor" href="#thread-per-core-execution-model-compatible-design">§</a>Thread per core execution model compatible design</h5><p align="center">
 <img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-node-request-routing-thread-per-core.svg" alt="request-routing-thread-per-core" />
 </p>
 <p align="center">
@@ -243,7 +250,7 @@ will always be routed to the same thread on a particular node. This ensures a hi
 locality.</p>
 <p>The remaining components behave as discussed above. Notice how we are able to reuse the same
 components in a drastically different execution model, as promised before.</p>
-<h4 id="partition-control-flow-and-replication"><a href="#partition-control-flow-and-replication">Partition control flow and replication</a></h4><p align="center">
+<h4 id="partition-control-flow-and-replication"><a class="doc-anchor" href="#partition-control-flow-and-replication">§</a>Partition control flow and replication</h4><p align="center">
 <img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-partition-control-flow-and-replication.svg" alt="partition-control-flow-replication" />
 </p>
 <p align="center">
@@ -326,7 +333,7 @@ different Raft groups for different data buckets on the same node as MultiRaft.<
 <li><a href="https://www.cockroachlabs.com/blog/scaling-raft/">https://www.cockroachlabs.com/blog/scaling-raft/</a></li>
 </ul>
 <p>Every partition controller is backed by a <code>segmented_log</code> for persisting records.</p>
-<h4 id="persistence-mechanism"><a href="#persistence-mechanism">Persistence mechanism</a></h4><h5 id="segmented_log-persistent-data-structure-for-storing-records-in-a-partition"><a href="#segmented_log-persistent-data-structure-for-storing-records-in-a-partition"><code>segmented_log</code>: Persistent data structure for storing records in a partition</a></h5>
+<h4 id="persistence-mechanism"><a class="doc-anchor" href="#persistence-mechanism">§</a>Persistence mechanism</h4><h5 id="segmented_log-persistent-data-structure-for-storing-records-in-a-partition"><a class="doc-anchor" href="#segmented_log-persistent-data-structure-for-storing-records-in-a-partition">§</a><code>segmented_log</code>: Persistent data structure for storing records in a partition</h5>
 <p>The segmented-log data structure for storing was originally described in the <a href="https://www.microsoft.com/en-us/research/wp-content/uploads/2017/09/Kafka.pdf">Apache
 Kafka</a> paper.</p>
 <p align="center">
@@ -361,7 +368,7 @@ the record is read successfully and returned.</li>
 segment I/O error.</li>
 <li>If the offset is out of bounds of even the write segment, we return an “out of bounds” error.</li>
 </ul>
-<h5 id="laminarmq-specific-enhancements-to-the-segmented_log-data-structure"><a href="#laminarmq-specific-enhancements-to-the-segmented_log-data-structure"><code>laminarmq</code> specific enhancements to the <code>segmented_log</code> data structure</a></h5>
+<h5 id="laminarmq-specific-enhancements-to-the-segmented_log-data-structure"><a class="doc-anchor" href="#laminarmq-specific-enhancements-to-the-segmented_log-data-structure">§</a><code>laminarmq</code> specific enhancements to the <code>segmented_log</code> data structure</h5>
 <p>While the conventional <code>segmented_log</code> data structure is quite performant for a <code>commit_log</code>
 implementation, it still requires the following properties to hold true for the record being
 appended:</p>
@@ -411,7 +418,7 @@ streaming append writes to write more bytes than the provided <code>append_thres
 <p>At the segment level, this requires us to keep a segment overflow capacity. All segment append
 operations now use <code>segment_capacity - segment.size + segment_overflow_capacity</code> as the
 <code>append_threshold</code> value. A good <code>segment_overflow_capacity</code> value could be <code>segment_capacity / 2</code>.</p>
-<h4 id="execution-model"><a href="#execution-model">Execution Model</a></h4><h5 id="general-async-runtime-eg-tokio-async-std-etc"><a href="#general-async-runtime-eg-tokio-async-std-etc">General async runtime (e.g. <code>tokio</code>, <code>async-std</code> etc.)</a></h5><p align="center">
+<h4 id="execution-model"><a class="doc-anchor" href="#execution-model">§</a>Execution Model</h4><h5 id="general-async-runtime-eg-tokio-async-std-etc"><a class="doc-anchor" href="#general-async-runtime-eg-tokio-async-std-etc">§</a>General async runtime (e.g. <code>tokio</code>, <code>async-std</code> etc.)</h5><p align="center">
 <img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-async-execution-model-general.svg" alt="async-execution-model-general" />
 </p>
 <p align="center">
@@ -435,7 +442,7 @@ future.</li>
 </ul>
 <p>All futures are spawned using the async runtime’s designated <code>{…}::spawn(…)</code> method. We don’t have
 to specify any details as to how and where the future’s corresponding task will be executed.</p>
-<h5 id="thread-per-core-async-runtime-eg-glommio"><a href="#thread-per-core-async-runtime-eg-glommio">Thread per core async runtime (e.g. <code>glommio</code>)</a></h5><p align="center">
+<h5 id="thread-per-core-async-runtime-eg-glommio"><a class="doc-anchor" href="#thread-per-core-async-runtime-eg-glommio">§</a>Thread per core async runtime (e.g. <code>glommio</code>)</h5><p align="center">
 <img src="https://raw.githubusercontent.com/arindas/laminarmq/assets/assets/diagrams/laminarmq-async-execution-model-thread-per-core.svg" alt="async-execution-model-thread-per-core"/>
 </p>
 <p align="center">
@@ -476,7 +483,7 @@ context switch.</p>
 <p><code>glommio</code> presents additional abstractions on top of <code>io_uring</code> in the form of an async runtime,
 with support for networking, disk IO, channels, single threaded locks and more.</p>
 <p>Read more: <a href="https://www.datadoghq.com/blog/engineering/introducing-glommio/">https://www.datadoghq.com/blog/engineering/introducing-glommio/</a></p>
-<h3 id="testing"><a href="#testing">Testing</a></h3>
+<h3 id="testing"><a class="doc-anchor" href="#testing">§</a>Testing</h3>
 <p>You may run tests with <code>cargo</code> as you would for any other crate. However, since <code>laminarmq</code> is
 poised to support multiple runtimes, some of them might require some additional setup before running
 the steps.</p>
@@ -508,7 +515,7 @@ of 22.12.2022)</p>
 <div class="example-wrap"><pre class="language-sh"><code>git clone https://github.com/arindas/laminarmq.git
 cd laminarmq/
 cargo test
-</code></pre></div><h3 id="benchmarking"><a href="#benchmarking">Benchmarking</a></h3>
+</code></pre></div><h3 id="benchmarking"><a class="doc-anchor" href="#benchmarking">§</a>Benchmarking</h3>
 <p>Same pre-requisites as testing. Once the pre-requisites are satisfied you may
 run benchmarks with <code>cargo</code> as usual:</p>
 <div class="example-wrap"><pre class="language-sh"><code>git clone https://github.com/arindas/laminarmq.git
@@ -522,47 +529,49 @@ cargo bench
 <li>8GB RAM (SK Hynix HMA81GS6AFR8N-UH DDR4 2133 MT/s)</li>
 <li>128GB SSD storage (SanDisk SD8SN8U-128G-1006)</li>
 </ul>
-<h4 id="selected-benchmark-reports"><a href="#selected-benchmark-reports">Selected Benchmark Reports</a></h4>
+<h4 id="selected-benchmark-reports"><a class="doc-anchor" href="#selected-benchmark-reports">§</a>Selected Benchmark Reports</h4>
+<p>This section presents some selected benchmark reports.</p>
+<blockquote>
 <p><strong>Note</strong>: We use the following names for different record sizes:</p>
 <table>
-    <tr>
-        <td><b>size_name</b></td>
-        <td><b>size</b></td>
-        <td><b>comments</b></td>
-    </tr>
-    <tr>
-        <td><code>tiny</code></td>
-        <td><code>12 bytes</code></td>
-        <td>none</td>
-    </tr>
-    <tr>
-        <td><code>tweet</code></td>
-        <td><code>140 bytes</code></td>
-        <td>none</td>
-    </tr>
-    <tr>
-        <td><code>half_k</code></td>
-        <td><code>560 bytes</code></td>
-        <td><code>≈ 512 bytes</code></td>
-    </tr>
-    <tr>
-        <td><code>k</code></td>
-        <td><code>1120 bytes</code></td>
-        <td><code>≈ 1024 bytes (1 KiB)</code></td>
-    </tr>
-    <tr>
-        <td><code>linked_in_post</code></td>
-        <td><code>2940 bytes</code></td>
-        <td><code>≤ 3000 bytes (3 KB)</code></td>
-    </tr>
-    <tr>
-        <td><code>blog</code></td>
-        <td><code>11760 bytes (11.76 KB)</code></td>
-        <td><i>4x</i> <code>linked_in_post</code></td>
-    </tr>
+   <tr>
+       <td><b>size_name</b></td>
+       <td><b>size</b></td>
+       <td><b>comments</b></td>
+   </tr>
+   <tr>
+       <td><code>tiny</code></td>
+       <td><code>12 bytes</code></td>
+       <td>none</td>
+   </tr>
+   <tr>
+       <td><code>tweet</code></td>
+       <td><code>140 bytes</code></td>
+       <td>none</td>
+   </tr>
+   <tr>
+       <td><code>half_k</code></td>
+       <td><code>560 bytes</code></td>
+       <td><code>≈ 512 bytes</code></td>
+   </tr>
+   <tr>
+       <td><code>k</code></td>
+       <td><code>1120 bytes</code></td>
+       <td><code>≈ 1024 bytes (1 KiB)</code></td>
+   </tr>
+   <tr>
+       <td><code>linked_in_post</code></td>
+       <td><code>2940 bytes</code></td>
+       <td><code>≤ 3000 bytes (3 KB)</code></td>
+   </tr>
+   <tr>
+       <td><code>blog</code></td>
+       <td><code>11760 bytes (11.76 KB)</code></td>
+       <td><code>4X linked_in_post</code></td>
+   </tr>
 </table>
-<p>This section presents some selected benchmark reports:</p>
-<h5 id="commit_log-write-benchmark-with-1kb-messages"><a href="#commit_log-write-benchmark-with-1kb-messages"><code>commit_log</code> write benchmark with 1KB messages</a></h5><p align="center">
+</blockquote>
+<h5 id="commit_log-write-benchmark-with-1kb-messages"><a class="doc-anchor" href="#commit_log-write-benchmark-with-1kb-messages">§</a><code>commit_log</code> write benchmark with 1KB messages</h5><p align="center">
 <img src="https://svg-add-bg-fn.vercel.app/?svg=https://arindas.github.io/laminarmq/bench/latest/commit_log_append_with_k_message/report/lines.svg" alt="k-message-write-bench"/>
 </p>
 <p align="center">
@@ -583,7 +592,7 @@ backend.</p>
 <b>Fig:</b> Flamegraph for 10,000 writes of 1KB messages on DmaStorage backend
 </p>
 <p>As you can see, a lot of time is spent simply hashing the request bytes.</p>
-<h5 id="segmented_log-streaming-read-benchmark-with-1kb-messages"><a href="#segmented_log-streaming-read-benchmark-with-1kb-messages"><code>segmented_log</code> streaming read benchmark with 1KB messages</a></h5><p align="center">
+<h5 id="segmented_log-streaming-read-benchmark-with-1kb-messages"><a class="doc-anchor" href="#segmented_log-streaming-read-benchmark-with-1kb-messages">§</a><code>segmented_log</code> streaming read benchmark with 1KB messages</h5><p align="center">
 <img src="https://svg-add-bg-fn.vercel.app/?svg=https://arindas.github.io/laminarmq/bench/latest/segmented_log_read_stream_with_k_message/report/lines.svg" alt="k-message-read-bench"/>
 </p>
 <p align="center">
@@ -606,7 +615,7 @@ backend.</p>
 </p>
 <p>In this case, more time is spent on system calls and I/O.</p>
 <p>The remaining benchmark reports are available at <a href="https://arindas.github.io/laminarmq/bench/latest/report">https://arindas.github.io/laminarmq/bench/latest/report</a>.</p>
-<h3 id="license"><a href="#license">License</a></h3>
+<h3 id="license"><a class="doc-anchor" href="#license">§</a>License</h3>
 <p><code>laminarmq</code> is licensed under the MIT License. See
 <a href="https://raw.githubusercontent.com/arindas/laminarmq/main/LICENSE">License</a> for more details.</p>
-</div></details><h2 id="modules" class="small-section-header"><a href="#modules">Modules</a></h2><ul class="item-table"><li><div class="item-name"><a class="mod" href="common/index.html" title="mod laminarmq::common">common</a></div><div class="desc docblock-short">Module containing common utilities used throughout <code>laminarmq</code>.</div></li><li><div class="item-name"><a class="mod" href="prelude/index.html" title="mod laminarmq::prelude">prelude</a></div><div class="desc docblock-short">Prelude module for <a href="index.html" title="mod laminarmq"><code>laminarmq</code></a> with common exports for convenience.</div></li><li><div class="item-name"><a class="mod" href="server/index.html" title="mod laminarmq::server">server</a></div><div class="desc docblock-short">Module providing abstractions for commit-log based message queue RPC server.</div></li><li><div class="item-name"><a class="mod" href="storage/index.html" title="mod laminarmq::storage">storage</a></div><div class="desc docblock-short">Module providing abstractions to store records.</div></li></ul></section></div></main></body></html>
+</div></details><h2 id="modules" class="section-header">Modules<a href="#modules" class="anchor">§</a></h2><ul class="item-table"><li><div class="item-name"><a class="mod" href="common/index.html" title="mod laminarmq::common">common</a></div><div class="desc docblock-short">Module containing common utilities used throughout <code>laminarmq</code>.</div></li><li><div class="item-name"><a class="mod" href="prelude/index.html" title="mod laminarmq::prelude">prelude</a></div><div class="desc docblock-short">Prelude module for <a href="index.html" title="mod laminarmq"><code>laminarmq</code></a> with common exports for convenience.</div></li><li><div class="item-name"><a class="mod" href="server/index.html" title="mod laminarmq::server">server</a></div><div class="desc docblock-short">Module providing abstractions for commit-log based message queue RPC server.</div></li><li><div class="item-name"><a class="mod" href="storage/index.html" title="mod laminarmq::storage">storage</a></div><div class="desc docblock-short">Module providing abstractions to store records.</div></li></ul></section></div></main></body></html>
