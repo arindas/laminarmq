@@ -107,6 +107,7 @@ impl<S, H> Store<S, H> {
     }
 }
 
+/// Error type used for [`Store`] operations.
 #[derive(Debug)]
 pub enum StoreError<SE> {
     /// Used to denote errors from the backing [`Storage`] implementation.
