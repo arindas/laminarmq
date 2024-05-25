@@ -35,7 +35,7 @@ const DEFAULT_STORAGE_DIRECTORY: &str = "./.storage/laminarmq_tokio_commit_log_s
 You may specify it as follows:
 
 ```sh
-STORAGE_DIRECTORY="<storage directory>" cargo run --release
+STORAGE_DIRECTORY="<storage directory>" cargo run --example laminarmq-tokio-commit-log-server --release
 ```
 
 Once the server is running you may make requests as follows:

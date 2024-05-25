@@ -6,17 +6,19 @@ on:
     branches:
       - main
       - develop
-      - 'dev/**'
+      - "dev/**"
     paths:
-      - 'src/**'
+      - "src/**"
+      - "examples/**"
 
   pull_request:
     branches:
       - main
       - develop
-      - 'dev/**'
+      - "dev/**"
     paths:
-      - 'src/**'
+      - "src/**"
+      - "examples/**"
 
 jobs:
   code-coverage:
@@ -45,8 +47,8 @@ jobs:
           command: test
         env:
           CARGO_INCREMENTAL: 0
-          RUSTFLAGS: '-Cinstrument-coverage'
-          LLVM_PROFILE_FILE: './target/coverage.prof/cargo-test-%p-%m.profraw'
+          RUSTFLAGS: "-Cinstrument-coverage"
+          LLVM_PROFILE_FILE: "./target/coverage.prof/cargo-test-%p-%m.profraw"
 
       - name: Install grcov
         run: |
@@ -83,4 +85,3 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           args: --all-features
-
