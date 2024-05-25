@@ -53,7 +53,13 @@ order they need.
 ## Examples
 
 Find examples demonstrating different capabilities of `laminarmq` in the
-[examples](./examples) directory.
+[examples](https://github.com/arindas/laminarmq/tree/main/examples) directory.
+
+Invoke any example as follows:
+
+```sh
+cargo run --example <example-name> --release
+```
 
 ## Media
 
